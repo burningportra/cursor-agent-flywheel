@@ -23,6 +23,24 @@ This plugin is a **Cursor port** of [claude-orchestrator](https://github.com/bur
 
 Add or enable the plugin from this repository per [Cursor Plugins](https://cursor.com/docs/reference/plugins.md). This marketplace entry is `cursor-orchestrator` → `./plugins/cursor-orchestrator`.
 
+### Manual test in this workspace (no marketplace step)
+
+This repository includes [`.cursor/mcp.json`](../../.cursor/mcp.json) at the **repo root** so that when you **open `cursor-agent-flywheel` as the workspace folder** in Cursor, **MCP** loads:
+
+- **agent-mail** — `http://127.0.0.1:8765/mcp` (start your agent-mail server first, or this entry will error until it is up).
+- **orchestrator** — stdio via `node` → `plugins/cursor-orchestrator/scripts/start-orchestrator-mcp.cjs`.
+
+Then: **Cmd/Ctrl+Shift+P → Developer: Reload Window** (or restart Cursor), open **Output → MCP**, confirm both servers. Run the **`orchestrate-setup`** command in Agent chat when ready.
+
+CLI checks from repo root (no IDE):
+
+```bash
+node scripts/validate-template.mjs
+cd plugins/cursor-orchestrator/mcp-server && npm ci && npm run build && npm test
+```
+
+Hook smoke (optional): with a fake `.pi-orchestrator/checkpoint.json` under the workspace root, `node plugins/cursor-orchestrator/scripts/session-start-orchestrator-notice.cjs` should print a resume line (delete the folder afterward).
+
 ## Build the MCP server
 
 ```bash

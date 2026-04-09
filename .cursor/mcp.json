@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "agent-mail": {
+      "url": "http://127.0.0.1:8765/mcp"
+    },
+    "orchestrator": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "${workspaceFolder}/plugins/cursor-orchestrator/scripts/start-orchestrator-mcp.cjs"
+      ]
+    }
+  }
+}

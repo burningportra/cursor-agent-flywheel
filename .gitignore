@@ -12,3 +12,6 @@
 *.log
 tmp/
 temp/
+
+# Local orchestrator state (cursor-orchestrator MCP)
+.pi-orchestrator/
