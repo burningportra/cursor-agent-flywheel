@@ -15,17 +15,18 @@ Launch a parallel swarm of implementation agents. $ARGUMENTS
    - Bootstrap Agent Mail: `macro_start_session(human_key: cwd, program: "cursor", model: your-model, task_description: "Swarm: <goal>")`
    - Create a team: `TeamCreate(team_name: "swarm-<goal-slug>")`
 
-5. For each ready bead (up to the user's limit), create a task and spawn an agent:
+5. For each ready bead (up to the user's limit), create a dedicated **git worktree** (Cursor has no `isolation: "worktree"` on **Task**—use explicit `git worktree add` like **`orchestrate`** Step 7), then create a task and spawn an agent:
    - `TaskCreate(subject: "Impl: <bead-id> <title>", status: "in_progress")`
    - Save the task ID
    ```
    Task(
      subagent_type: "general-purpose",
-     isolation: "worktree",
      name: "impl-<bead-id>",
      team_name: "swarm-<goal-slug>",
      run_in_background: true,
      prompt: "
+       You work ONLY under the git worktree at: <worktree-path> (cd there first).
+
        ## Agent Mail Bootstrap
        Call macro_start_session(human_key: '<cwd>', program: 'cursor', model: '<your-tier-B-Cursor-model>',
          task_description: 'Implementing bead <id>: <title>')

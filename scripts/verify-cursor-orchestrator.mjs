@@ -58,12 +58,49 @@ const EXPECTED_NAMES = new Set([
 ]);
 
 async function main() {
+  await assertFile(path.join(pluginRoot, "mcp-server", "package-lock.json"), "mcp-server/package-lock.json");
   await assertFile(path.join(pluginRoot, "mcp-server", "dist", "server.js"), "MCP server dist/server.js");
   await assertFile(path.join(pluginRoot, "scripts", "start-orchestrator-mcp.cjs"), "MCP launcher");
   await assertFile(path.join(pluginRoot, "mcp.json"), "plugin mcp.json");
   const mcpMeta = await readJson(path.join(pluginRoot, "mcp.json"), "mcp.json");
   if (!mcpMeta || typeof mcpMeta !== "object") {
     console.error("plugin mcp.json must be a JSON object");
+    process.exit(1);
+  }
+  const servers = mcpMeta.mcpServers;
+  if (!servers || typeof servers !== "object") {
+    console.error("plugin mcp.json: missing mcpServers");
+    process.exit(1);
+  }
+  const agentMail = servers["agent-mail"];
+  if (
+    !agentMail ||
+    typeof agentMail.url !== "string" ||
+    (!agentMail.url.startsWith("http://") && !agentMail.url.startsWith("https://"))
+  ) {
+    console.error(
+      'plugin mcp.json: agent-mail must use Cursor-style { "url": "http://..." } (remote MCP)',
+    );
+    process.exit(1);
+  }
+  const orch = servers.orchestrator;
+  if (!orch || orch.type !== "stdio") {
+    console.error('plugin mcp.json: orchestrator must include "type": "stdio"');
+    process.exit(1);
+  }
+  if (orch.command !== "node") {
+    console.error("plugin mcp.json: orchestrator.command must be node");
+    process.exit(1);
+  }
+  if (!Array.isArray(orch.args) || orch.args.length < 1) {
+    console.error("plugin mcp.json: orchestrator.args must be a non-empty array");
+    process.exit(1);
+  }
+  const launcherArg = orch.args[0];
+  if (typeof launcherArg !== "string" || !launcherArg.includes("start-orchestrator-mcp.cjs")) {
+    console.error(
+      "plugin mcp.json: orchestrator.args[0] must reference start-orchestrator-mcp.cjs",
+    );
     process.exit(1);
   }
 
@@ -102,7 +139,7 @@ async function main() {
   }
 
   console.log(
-    "cursor-orchestrator: dist + launcher + mcp.json + hooks + 19 commands + validate-template OK",
+    "cursor-orchestrator: lockfile + dist + launcher + mcp.json (url+stdio) + hooks + 19 commands + validate-template OK",
   );
 }
 

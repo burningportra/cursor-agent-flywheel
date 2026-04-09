@@ -91,7 +91,7 @@ Ask the user:
    - `fetch_inbox` for arrivals
    - `TaskList` for task status
    - If unresponsive after nudging: `TaskStop(task_id: "<saved-task-id>")`, then `retire_agent` in Agent Mail
-   - **If `TaskStop` fails**: `retire_agent`, then if your Agent Mail install stores team metadata under `~/.claude/teams/<team>/config.json`, remove stale `"members"` entries as in Agent Mail docs, then retry `TeamDelete`.
+   - **If `TaskStop` fails**: `retire_agent`, then if Agent Mail left stale team metadata on disk (path varies by install—see Agent Mail docs), remove stale `"members"` entries and retry `TeamDelete`.
 
 5. **Collect plans** — `fetch_inbox(project_key: cwd, agent_name: "<your-name>", include_bodies: true)`.
 
@@ -195,7 +195,7 @@ Offer **Looks good**, **Self review**, or **Fresh-eyes** (5 parallel reviewers).
 
 - **Looks good** → `orch_review` with `action: "looks-good"` and `beadId`.
 - **Self review** → `SendMessage` to impl agent; then `orch_review` when done.
-- **Fresh-eyes** → `orch_review` with `action: "hit-me"` and `beadId`; spawn **5** **Task** subagents in parallel (`run_in_background: true`), each with **Tier B** Cursor model (or mix A/B for variety), Agent Mail STEP 0 in prompt, distinct review personas per `orch_review` specs. Nudge, collect, shutdown individually.
+- **Fresh-eyes** → `orch_review` with `action: "hit-me"` and `beadId`; spawn **5** **Task** subagents in parallel (`run_in_background: true`), each with a **Cursor model tier** from the README role→tier table and **`agents/parallel-reviewers.md`** (e.g. correctness & security **Tier A**, others **B** or **C** as appropriate—**only** Cursor models), Agent Mail STEP 0 in prompt, distinct personas per `orch_review` specs. Nudge, collect, shutdown individually.
 
 Edge cases (already-closed bead, team name collision) match upstream: manual review from git SHA if `orch_review` errors; reuse `team_name` if `TeamCreate` conflicts.
 

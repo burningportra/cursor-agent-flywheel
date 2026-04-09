@@ -20,11 +20,10 @@ Fast-path implementation for small, focused changes.
 4. Bootstrap Agent Mail: call `macro_start_session(human_key: cwd, program: "cursor", model: your-model, task_description: "Fix: <description>")`.
    Create a team: `TeamCreate(team_name: "fix-<slug>")`.
 
-5. Spawn a focused implementation agent with `run_in_background: true`:
+5. Spawn a focused implementation agent with `run_in_background: true` (small fixes may use repo **cwd**; for isolation use a **git worktree** as in **`orchestrate`** Step 7—do not rely on a non-existent Cursor `isolation: "worktree"` flag):
    ```
    Task(
      subagent_type: "general-purpose",
-     isolation: "worktree",
      name: "fix-impl",
      team_name: "fix-<slug>",
      run_in_background: true,

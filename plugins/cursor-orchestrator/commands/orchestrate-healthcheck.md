@@ -13,7 +13,7 @@ Check all systems and produce a health score.
 - `curl -s --max-time 3 http://127.0.0.1:8765/health/liveness` — agent-mail
 - `git status --short` — repo cleanliness
 - `ls .pi-orchestrator/checkpoint.json 2>/dev/null` — checkpoint state
-- `ls mcp-server/dist/server.js 2>/dev/null` — MCP server built
+- Orchestrator MCP reachable (IDE **MCP** panel) **or**, from a plugin source tree, `test -f plugins/cursor-orchestrator/mcp-server/dist/server.js` — built `dist/` present
 
 **Codebase health** (use **Task** with `subagent_type` **explore**):
 - TODO/FIXME count: `grep -r "TODO\|FIXME\|HACK" --include="*.ts" | wc -l`

@@ -21,7 +21,7 @@ Check and configure all prerequisites:
 
 5. **Register agent**: Call `register_agent` via `agent-mail` MCP tool with `project_key` and `agent_name: "Orchestrator"`.
 
-6. **MCP server**: Check that `mcp-server/dist/server.js` exists. If not, instruct: "Build the MCP server first: `cd mcp-server && npm install && npm run build`"
+6. **Orchestrator MCP**: Confirm **Output → MCP** lists the **orchestrator** server without startup errors. If you develop this plugin from a monorepo checkout, verify `plugins/cursor-orchestrator/mcp-server/dist/server.js` exists; if missing: `cd plugins/cursor-orchestrator/mcp-server && npm ci && npm run build` (see plugin README).
 
 7. Display a health checklist:
    ```

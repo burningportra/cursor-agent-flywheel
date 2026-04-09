@@ -6,9 +6,7 @@
     "orchestrator": {
       "type": "stdio",
       "command": "node",
-      "args": [
-        "${workspaceFolder}/plugins/cursor-orchestrator/scripts/start-orchestrator-mcp.cjs"
-      ]
+      "args": ["plugins/cursor-orchestrator/scripts/start-orchestrator-mcp.cjs"]
     }
   }
 }

@@ -9,7 +9,7 @@
     "postToolUse": [
       {
         "command": "./scripts/post-tool-orch-approve-hint.sh",
-        "matcher": ".*orch_approve_beads.*"
+        "matcher": ".*(orch_approve_beads|mcp.*orch_approve).*"
       }
     ]
   }
