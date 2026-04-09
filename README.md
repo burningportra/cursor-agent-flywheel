@@ -20,6 +20,8 @@ To add more plugins, see `docs/add-a-plugin.md`.
 
 **Publishing & releases:** See [docs/publishing/marketplace.md](docs/publishing/marketplace.md) for versioning, validation order, and submission notes.
 
+**Interactive Orchestrator menu (optional):** A VS Code extension in [extensions/cursor-orchestrator-menu/](extensions/cursor-orchestrator-menu/) adds QuickPick wizards (verify, publish-gate, orchestrate prompt handoff). See that folder’s README to compile and run via F5.
+
 ## Single plugin vs multi-plugin
 
 This template defaults to **multi-plugin** (multiple plugins in one repo).

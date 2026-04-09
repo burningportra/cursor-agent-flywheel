@@ -1,0 +1,14 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Extension: cursor-orchestrator-menu",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--extensionDevelopmentPath=${workspaceFolder}/extensions/cursor-orchestrator-menu"
+      ],
+      "outFiles": ["${workspaceFolder}/extensions/cursor-orchestrator-menu/out/**/*.js"]
+    }
+  ]
+}

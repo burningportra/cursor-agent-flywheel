@@ -1,0 +1,83 @@
+{
+  "name": "cursor-orchestrator-menu",
+  "displayName": "Cursor Orchestrator Menu",
+  "description": "Interactive menus (QuickPick) for the Agentic Coding Flywheel: orchestrate, setup, beads, verify, and Agent prompt handoff.",
+  "version": "0.1.0",
+  "publisher": "local",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": ["Other"],
+  "activationEvents": [
+    "onCommand:cursorOrchestratorMenu.openMenu",
+    "onCommand:cursorOrchestratorMenu.orchestrateWizard",
+    "onCommand:cursorOrchestratorMenu.runVerify",
+    "onCommand:cursorOrchestratorMenu.runPublishGate",
+    "onCommand:cursorOrchestratorMenu.showBeads",
+    "onCommand:cursorOrchestratorMenu.openPublishingDoc"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "cursorOrchestratorMenu.openMenu",
+        "title": "Open Orchestrator Menu",
+        "category": "Orchestrator"
+      },
+      {
+        "command": "cursorOrchestratorMenu.orchestrateWizard",
+        "title": "Orchestrate Wizard (step-by-step)",
+        "category": "Orchestrator"
+      },
+      {
+        "command": "cursorOrchestratorMenu.runVerify",
+        "title": "Run verify-cursor-orchestrator.mjs",
+        "category": "Orchestrator"
+      },
+      {
+        "command": "cursorOrchestratorMenu.runPublishGate",
+        "title": "Run publish-gate.mjs",
+        "category": "Orchestrator"
+      },
+      {
+        "command": "cursorOrchestratorMenu.showBeads",
+        "title": "List beads (br list)",
+        "category": "Orchestrator"
+      },
+      {
+        "command": "cursorOrchestratorMenu.openPublishingDoc",
+        "title": "Open publishing runbook",
+        "category": "Orchestrator"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "cursorOrchestratorMenu.openMenu",
+        "key": "ctrl+shift+alt+o",
+        "mac": "cmd+shift+alt+o",
+        "when": "workspaceFolderCount > 0"
+      }
+    ],
+    "configuration": {
+      "title": "Cursor Orchestrator Menu",
+      "properties": {
+        "cursorOrchestratorMenu.agentChatCommand": {
+          "type": "string",
+          "default": "",
+          "description": "Optional: VS Code command ID to open Cursor Agent chat after copying a prompt (e.g. from Command Palette → Copy Command ID). Leave empty to only use clipboard + notification."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.4.0"
+  }
+}
