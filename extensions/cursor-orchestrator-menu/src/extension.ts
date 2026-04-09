@@ -2,6 +2,7 @@ import * as path from "node:path";
 import * as vscode from "vscode";
 import { deleteCheckpoint, readCheckpoint } from "./checkpoint";
 import { buildOrchestratePrompt, buildSetupPrompt, buildStatusPrompt } from "./prompts";
+import { OrchestratorSidebar } from "./tree/sidebarTree";
 
 const OUT = "Cursor Orchestrator";
 
@@ -24,16 +25,56 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const root = () => vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 
+  const sidebar = new OrchestratorSidebar(root);
+  context.subscriptions.push(vscode.window.registerTreeDataProvider("cursorOrchestratorMenu.sidebar", sidebar));
+
+  const refreshSidebar = () => sidebar.refresh();
   context.subscriptions.push(
-    vscode.commands.registerCommand("cursorOrchestratorMenu.openMenu", () => openMainMenu(ch, root)),
-    vscode.commands.registerCommand("cursorOrchestratorMenu.orchestrateWizard", () => orchestrateWizard(ch, root)),
-    vscode.commands.registerCommand("cursorOrchestratorMenu.runVerify", () => runInTerminal(root, "Verify orchestrator", "node scripts/verify-cursor-orchestrator.mjs")),
+    vscode.commands.registerCommand("cursorOrchestratorMenu.refreshSidebar", refreshSidebar),
+    vscode.workspace.onDidChangeWorkspaceFolders(() => refreshSidebar()),
+  );
+
+  let refreshTimer: ReturnType<typeof setInterval> | undefined;
+  const applyAutoRefresh = () => {
+    if (refreshTimer) {
+      clearInterval(refreshTimer);
+      refreshTimer = undefined;
+    }
+    const sec = vscode.workspace.getConfiguration("cursorOrchestratorMenu").get<number>("sidebarAutoRefreshSeconds") ?? 0;
+    if (sec > 0) {
+      refreshTimer = setInterval(() => refreshSidebar(), sec * 1000);
+    }
+  };
+  applyAutoRefresh();
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeConfiguration((e) => {
+      if (e.affectsConfiguration("cursorOrchestratorMenu.sidebarAutoRefreshSeconds")) {
+        applyAutoRefresh();
+      }
+    }),
+  );
+
+  const afterTreeChange = () => refreshSidebar();
+  refreshSidebar();
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand("cursorOrchestratorMenu.openMenu", () => openMainMenu(ch, root, afterTreeChange)),
+    vscode.commands.registerCommand("cursorOrchestratorMenu.orchestrateWizard", () => orchestrateWizard(ch, root, afterTreeChange)),
+    vscode.commands.registerCommand("cursorOrchestratorMenu.runVerify", () =>
+      runInTerminal(root, "Verify orchestrator", "node scripts/verify-cursor-orchestrator.mjs"),
+    ),
     vscode.commands.registerCommand("cursorOrchestratorMenu.runPublishGate", () =>
       runInTerminal(root, "Publish gate", "node scripts/publish-gate.mjs"),
     ),
     vscode.commands.registerCommand("cursorOrchestratorMenu.showBeads", () => runInTerminal(root, "br list", "br list")),
     vscode.commands.registerCommand("cursorOrchestratorMenu.openPublishingDoc", () => openPublishingDoc(root)),
+    vscode.commands.registerCommand("cursorOrchestratorMenu.openDoc", (fsPath?: string) => openDocPath(fsPath)),
     ch,
+    new vscode.Disposable(() => {
+      if (refreshTimer) {
+        clearInterval(refreshTimer);
+      }
+    }),
   );
 }
 
@@ -47,7 +88,11 @@ function requireRoot(root: () => string | undefined): string | undefined {
   return r;
 }
 
-async function openMainMenu(ch: vscode.OutputChannel, root: () => string | undefined): Promise<void> {
+async function openMainMenu(
+  ch: vscode.OutputChannel,
+  root: () => string | undefined,
+  onChange?: () => void,
+): Promise<void> {
   const r = requireRoot(root);
   if (!r) {
     return;
@@ -111,7 +156,7 @@ async function openMainMenu(ch: vscode.OutputChannel, root: () => string | undef
 
   switch (picked.orchId) {
     case "wizard":
-      await orchestrateWizard(ch, root);
+      await orchestrateWizard(ch, root, onChange);
       break;
     case "verify":
       vscode.commands.executeCommand("cursorOrchestratorMenu.runVerify");
@@ -150,7 +195,11 @@ async function openMainMenu(ch: vscode.OutputChannel, root: () => string | undef
   }
 }
 
-async function orchestrateWizard(ch: vscode.OutputChannel, root: () => string | undefined): Promise<void> {
+async function orchestrateWizard(
+  ch: vscode.OutputChannel,
+  root: () => string | undefined,
+  onChange?: () => void,
+): Promise<void> {
   const r = requireRoot(root);
   if (!r) {
     return;
@@ -173,7 +222,10 @@ async function orchestrateWizard(ch: vscode.OutputChannel, root: () => string | 
         fresh: true,
       },
     ],
-    { title: "Orchestrator — session", placeHolder: "Resume or start fresh?" },
+    {
+      title: "Orchestrate (1/3) — Session",
+      placeHolder: "Resume or start fresh?",
+    },
   );
   if (!sessionPick) {
     return;
@@ -193,10 +245,11 @@ async function orchestrateWizard(ch: vscode.OutputChannel, root: () => string | 
     const removed = deleteCheckpoint(r);
     freshSession = true;
     void vscode.window.showInformationMessage(removed ? "Checkpoint deleted." : "No checkpoint file to delete (starting fresh).");
+    onChange?.();
   }
 
   const goal = await vscode.window.showInputBox({
-    title: "Goal (optional)",
+    title: "Orchestrate (2/3) — Goal",
     prompt: "Leave empty to let the agent discover goals after orch_profile.",
     placeHolder: "e.g. Harden CI for slash commands",
   });
@@ -220,7 +273,10 @@ async function orchestrateWizard(ch: vscode.OutputChannel, root: () => string | 
         mode: "unspecified",
       },
     ],
-    { title: "Planning mode", placeHolder: "How should we plan?" },
+    {
+      title: "Orchestrate (3/3) — Planning mode",
+      placeHolder: "How should we plan?",
+    },
   );
   if (!planPick) {
     return;
@@ -239,6 +295,8 @@ async function orchestrateWizard(ch: vscode.OutputChannel, root: () => string | 
   ch.show(true);
 
   await copyPrompt(prompt, "Orchestrate");
+
+  onChange?.();
 
   void vscode.window.showInformationMessage(
     "Tip: Press Shift+Tab in Agent input for Cursor Plan mode before pasting, if you want a structured plan first.",
@@ -286,12 +344,17 @@ async function openPublishingDoc(root: () => string | undefined): Promise<void> 
   if (!r) {
     return;
   }
-  const p = path.join(r, "docs", "publishing", "marketplace.md");
-  const u = vscode.Uri.file(p);
+  await openDocPath(path.join(r, "docs", "publishing", "marketplace.md"));
+}
+
+async function openDocPath(fsPath?: string): Promise<void> {
+  if (!fsPath) {
+    return;
+  }
   try {
-    const doc = await vscode.workspace.openTextDocument(u);
+    const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(fsPath));
     await vscode.window.showTextDocument(doc);
   } catch {
-    void vscode.window.showErrorMessage(`Could not open ${p}`);
+    void vscode.window.showErrorMessage(`Could not open ${fsPath}`);
   }
 }

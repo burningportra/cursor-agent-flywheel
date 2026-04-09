@@ -1,13 +1,23 @@
 # Cursor Orchestrator Menu
 
-VS Code / **Cursor** extension: **QuickPick menus** for the Agentic Coding Flywheel so you rarely type long orchestration prompts.
+VS Code / **Cursor** extension: **QuickPick wizards** + an **Activity Bar** sidebar for the Agentic Coding Flywheel.
 
 ## Features
 
-- **Orchestrator: Open Menu** — pick verify, publish-gate, beads, publishing doc, checkpoint summary, or copy setup/status prompts.
-- **Orchestrate Wizard** — multi-step: resume vs fresh (optional checkpoint delete), optional goal, **standard / deep / agent-decides** planning, then **copies a ready-to-paste Agent prompt** and mirrors it in **Output → Cursor Orchestrator**.
-- One-click **terminal** runners for `verify-cursor-orchestrator.mjs`, `publish-gate.mjs`, and `br list`.
-- Optional **Settings → Cursor Orchestrator Menu → agent chat command**: paste a Command ID to try to open Agent after copy (best-effort; Cursor updates IDs sometimes).
+### Sidebar (**Activity Bar → Orchestrator**)
+
+- **Session** — reads `.pi-orchestrator/checkpoint.json` (phase, goal, plan file, updated time).
+- **Beads** — `br list --json` (status icons; needs `br` on `PATH`).
+- **Wizards & scripts** — Orchestrate wizard, full command menu, verify, publish-gate, `br list` in terminal.
+- **Docs** — publishing runbook, add-a-plugin guide.
+- **Refresh** icon in the view title (or command **Orchestrator: Refresh**).
+- Optional **auto-refresh**: setting `cursorOrchestratorMenu.sidebarAutoRefreshSeconds` (default `0` = off).
+
+### Commands
+
+- **Orchestrator: Open Menu** — verify, publish-gate, beads, docs, checkpoint summary, setup/status prompts.
+- **Orchestrate Wizard** — **(1/3) Session** → **(2/3) Goal** → **(3/3) Planning**, then copies an Agent prompt to the clipboard and **Output → Cursor Orchestrator**.
+- Optional **agent chat command** setting to try to open Agent after copy.
 
 Default keybinding: **⌘⇧⌥O** (Mac) / **Ctrl+Shift+Alt+O** (Win/Linux) when a folder is open.
 
