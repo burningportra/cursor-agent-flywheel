@@ -23,9 +23,29 @@ This plugin is a **Cursor port** of [claude-orchestrator](https://github.com/bur
 
 ## Install (this monorepo)
 
-Add or enable the plugin from this repository per [Cursor Plugins](https://cursor.com/docs/reference/plugins.md). This marketplace entry is `cursor-orchestrator` → `./plugins/cursor-orchestrator`.
+The repo’s [`.cursor-plugin/marketplace.json`](../../.cursor-plugin/marketplace.json) lists `cursor-orchestrator` for packaging and [publishing](https://cursor.com/marketplace/publish). It does **not** make the plugin appear in the **public Marketplace panel** until you submit and Cursor approves it ([how the marketplace works](https://cursor.com/docs/plugins.md#the-marketplace)).
 
-### Manual test in this workspace (no marketplace step)
+### Load the plugin locally (rules, commands, hooks, plugin `mcp.json`)
+
+To test the full plugin (what you’d get after publish), use Cursor’s **local plugins** directory ([official docs](https://cursor.com/docs/plugins.md#test-plugins-locally)):
+
+```bash
+ln -sf /absolute/path/to/cursor-agent-flywheel/plugins/cursor-orchestrator ~/.cursor/plugins/local/cursor-orchestrator
+```
+
+Then **Cmd/Ctrl+Shift+P → Developer: Reload Window**. Adjust the first path to your clone.
+
+**Teams / Enterprise:** Import this GitHub repo as a **team marketplace** under **Dashboard → Settings → Plugins → Team Marketplaces → Import** so members see it in the Marketplace panel ([docs](https://cursor.com/docs/plugins.md#add-a-team-marketplace)).
+
+### Workspace only — MCP without installing the plugin bundle
+
+If you only open this repo (no symlink), you still get **workspace MCP** from the root [`.cursor/mcp.json`](../../.cursor/mcp.json) (orchestrator + agent-mail). That does **not** automatically load the plugin’s **commands, rules, skills, and hooks** from `plugins/cursor-orchestrator/`; use the **local** symlink above (or a published Marketplace install) for the full bundle.
+
+### Slash commands (`/orchestrate-setup`, etc.)
+
+Cursor’s **`/`** menu in **Agent** loads **project** commands from **[`.cursor/commands/`](../../.cursor/commands/)** at the repo root. This repository adds **symlinks** there pointing at `plugins/cursor-orchestrator/commands/*.md` so names like **`/orchestrate-setup`** and **`/orchestrate`** appear without relying on Marketplace UI. Reload the window after a fresh clone. If a command is missing, confirm the symlinks exist under `.cursor/commands/`.
+
+### Manual test in this workspace (MCP-focused)
 
 This repository includes `[.cursor/mcp.json](../../.cursor/mcp.json)` at the **repo root** so that when you **open the repository as the workspace folder** in Cursor, **MCP** loads:
 

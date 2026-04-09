@@ -1,0 +1,1 @@
+../../plugins/cursor-orchestrator/commands/orchestrate-swarm-stop.md
