@@ -18,6 +18,8 @@ Plugins included:
 
 To add more plugins, see `docs/add-a-plugin.md`.
 
+**Publishing & releases:** See [docs/publishing/marketplace.md](docs/publishing/marketplace.md) for versioning, validation order, and submission notes.
+
 ## Single plugin vs multi-plugin
 
 This template defaults to **multi-plugin** (multiple plugins in one repo).
@@ -26,10 +28,9 @@ For a **single plugin**, move your plugin folder contents to the repository root
 
 ## Submission checklist
 
-- Each plugin has a valid `.cursor-plugin/plugin.json`.
-- Plugin names are unique, lowercase, and kebab-case.
-- `.cursor-plugin/marketplace.json` entries map to real plugin folders.
-- All frontmatter metadata is present in rule, skill, agent, and command files.
-- Logos are committed and referenced with relative paths.
-- `node scripts/validate-template.mjs` passes.
-- Repository link is ready for submission to the Cursor team (Slack or `kniparko@anysphere.com`).
+Use [docs/publishing/marketplace.md](docs/publishing/marketplace.md) for the full **pre-publish** flow. In short:
+
+- Valid `plugin.json` per plugin; unique kebab-case names; `marketplace.json` entries match real folders.
+- Frontmatter complete on rules, skills, agents, commands; logos committed.
+- `node scripts/validate-template.mjs` passes (and orchestrator checks if you ship `cursor-orchestrator`).
+- Repository link ready for Cursor submission (see marketplace doc for contact options).
