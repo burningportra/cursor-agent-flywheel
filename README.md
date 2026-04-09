@@ -2,10 +2,11 @@
 
 Build and publish Cursor Marketplace plugins from a single repo.
 
-Two starter plugins are included:
+Plugins included:
 
 - **starter-simple**: rules and skills only
 - **starter-advanced**: rules, skills, agents, commands, hooks, MCP, and scripts
+- **cursor-orchestrator**: multi-agent orchestrator (beads, dual MCP, hooks, full command set) — see [plugins/cursor-orchestrator/README.md](plugins/cursor-orchestrator/README.md)
 
 ## Getting started
 

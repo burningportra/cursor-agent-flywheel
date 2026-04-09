@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionStart": [
+      {
+        "command": "./scripts/session-start-orchestrator-notice.cjs"
+      }
+    ],
+    "postToolUse": [
+      {
+        "command": "./scripts/post-tool-orch-approve-hint.sh",
+        "matcher": ".*orch_approve_beads.*"
+      }
+    ]
+  }
+}

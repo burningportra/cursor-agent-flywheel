@@ -12,13 +12,18 @@
   "plugins": [
     {
       "name": "starter-simple",
-      "source": "./plugins/starter-simple",
+      "source": "./starter-simple",
       "description": "Minimal plugin with rules and skills only"
     },
     {
       "name": "starter-advanced",
-      "source": "./plugins/starter-advanced",
+      "source": "./starter-advanced",
       "description": "Full-featured plugin with rules, skills, agents, commands, hooks, and MCP"
+    },
+    {
+      "name": "cursor-orchestrator",
+      "source": "./cursor-orchestrator",
+      "description": "Multi-agent orchestrator: scan, plan, beads, parallel review (Agentic Coding Flywheel)"
     }
   ]
 }

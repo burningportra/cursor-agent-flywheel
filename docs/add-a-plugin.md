@@ -50,12 +50,12 @@ Edit `.cursor-plugin/marketplace.json` and append a new entry:
 ```json
 {
   "name": "my-new-plugin",
-  "source": "./plugins/my-new-plugin",
+  "source": "./my-new-plugin",
   "description": "Describe your plugin"
 }
 ```
 
-`source` is the relative path from the repository root to the plugin folder.
+When `metadata.pluginRoot` is `"plugins"`, `source` is relative to that directory (e.g. `./my-new-plugin` → `plugins/my-new-plugin/`). If you omit `pluginRoot`, use a path from the repository root instead.
 
 ## 4. Validate
 

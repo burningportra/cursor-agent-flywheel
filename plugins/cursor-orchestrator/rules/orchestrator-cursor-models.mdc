@@ -1,0 +1,6 @@
+---
+description: Cursor-only models for orchestrator workflows; no external LLM CLIs.
+alwaysApply: true
+---
+
+When following **cursor-orchestrator** commands: use **only** models selectable in Cursor (Chat / Agent). Map roles to tiers **A (strongest)**, **B (balanced)**, **C (fast)** per the plugin README. Never invoke `codex` CLI, raw provider scripts, or non-Cursor binaries for generation. Infrastructure CLIs (`br`, `bv`, `git`, agent-mail) are allowed.
