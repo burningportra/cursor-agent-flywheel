@@ -2,7 +2,7 @@
   "name": "cursor-orchestrator-menu",
   "displayName": "Cursor Orchestrator Menu",
   "description": "Interactive menus (QuickPick) and sidebar tree for the Agentic Coding Flywheel.",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "publisher": "local",
   "engines": {
     "vscode": "^1.85.0"

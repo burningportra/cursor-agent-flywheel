@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Parity check for cursor-orchestrator: 19 commands, plugin artifacts, validate-template.
+ * Parity check for cursor-orchestrator: plugin commands ↔ .cursor/commands, artifacts, validate-template.
  * Run from repository root: node scripts/verify-cursor-orchestrator.mjs
  */
 import { promises as fs } from "node:fs";

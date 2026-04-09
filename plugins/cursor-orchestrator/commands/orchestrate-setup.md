@@ -3,6 +3,8 @@ name: orchestrate-setup
 description: Set up orchestration prerequisites for this project.
 ---
 
+> **Guided:** Run this **before** `/orchestrate` the first time in a repo. For a full menu of phases, use **`/flywheel`**.
+
 Set up the orchestrator for this project. $ARGUMENTS
 
 Check and configure all prerequisites:

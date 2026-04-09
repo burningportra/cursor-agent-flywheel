@@ -47,9 +47,11 @@ Then **Cmd/Ctrl+Shift+P → Developer: Reload Window**. Adjust the first path to
 
 If you only open this repo (no symlink), you still get **workspace MCP** from the root [`.cursor/mcp.json`](../../.cursor/mcp.json) (orchestrator + agent-mail). That does **not** automatically load the plugin’s **commands, rules, skills, and hooks** from `plugins/cursor-orchestrator/`; use the **local** symlink above (or a published Marketplace install) for the full bundle.
 
-### Slash commands (`/orchestrate-setup`, etc.)
+### Slash commands (`/flywheel`, `/orchestrate-setup`, etc.)
 
-Cursor’s **`/`** menu in **Agent** loads **project** commands from **[`.cursor/commands/`](../../.cursor/commands/)** at the repo root. This repository adds **symlinks** there pointing at `plugins/cursor-orchestrator/commands/*.md` so names like **`/orchestrate-setup`** and **`/orchestrate`** appear without relying on Marketplace UI. Reload the window after a fresh clone. If a command is missing, confirm the symlinks exist under `.cursor/commands/`.
+Cursor’s **`/`** menu in **Agent** loads **project** commands from **[`.cursor/commands/`](../../.cursor/commands/)** at the repo root. This repository adds **symlinks** there pointing at `plugins/cursor-orchestrator/commands/*.md` so names like **`/flywheel`** (numbered guided menu), **`/orchestrate-setup`**, and **`/orchestrate`** appear without relying on Marketplace UI. **Reload the window** after a fresh clone. If a command is missing, confirm the symlinks exist under `.cursor/commands/`.
+
+**Always-on guidance** for Agent is in **[`.cursor/rules/flywheel-guided.mdc`](../../.cursor/rules/flywheel-guided.mdc)** (repo root).
 
 ### Manual test in this workspace (MCP-focused)
 
@@ -58,7 +60,7 @@ This repository includes `[.cursor/mcp.json](../../.cursor/mcp.json)` at the **r
 - **agent-mail** — remote MCP via top-level `**url`** (see [Cursor MCP docs](https://cursor.com/docs/context/mcp)); default `http://127.0.0.1:8765/mcp` (start agent-mail first, or this entry errors until it is up).
 - **orchestrator** — `**type`: `"stdio"`**, `node` → `plugins/cursor-orchestrator/scripts/start-orchestrator-mcp.cjs` (path **relative to the workspace folder**, not `${workspaceFolder}`—see **MCP path resolution**).
 
-Then: **Cmd/Ctrl+Shift+P → Developer: Reload Window** (or restart Cursor), open **Output → MCP**, confirm both servers. Run the `**orchestrate-setup`** command in Agent chat when ready.
+Then: **Cmd/Ctrl+Shift+P → Developer: Reload Window** (or restart Cursor), open **Output → MCP**, confirm both servers. In Agent, run **`/flywheel`** (menu) or **`/orchestrate-setup`** when ready.
 
 CLI checks from repo root (no IDE):
 
@@ -68,7 +70,7 @@ node scripts/validate-template.mjs
 cd plugins/cursor-orchestrator/mcp-server && npm ci && npm run build && npm test
 ```
 
-`verify-cursor-orchestrator.mjs` asserts `**mcp-server/dist/server.js**`, the **MCP launcher**, valid `**mcp.json`** and `**hooks/hooks.json`**, all **19** `commands/*.md` files, and runs `**validate-template.mjs`**.
+`verify-cursor-orchestrator.mjs` asserts `**mcp-server/dist/server.js**`, the **MCP launcher**, valid `**mcp.json`** and `**hooks/hooks.json`**, every `commands/*.md` with a matching **`.cursor/commands/`** symlink, and runs `**validate-template.mjs`**.
 
 Hook smoke (optional): with a fake `.pi-orchestrator/checkpoint.json` under the workspace root, `node plugins/cursor-orchestrator/scripts/session-start-orchestrator-notice.cjs` should print a resume line (delete the folder afterward).
 
@@ -186,7 +188,7 @@ From the pinned ref, this plugin includes at least: `**mcp-server/`** (TypeScrip
 
 ## Verification (automated vs IDE)
 
-**Automated** (no Cursor UI): run from repo root — `node scripts/verify-cursor-orchestrator.mjs` — covers committed MCP `**dist`**, launcher, `**mcp.json`**, `**hooks/hooks.json**`, 19 commands, and marketplace/template validation.
+**Automated** (no Cursor UI): run from repo root — `node scripts/verify-cursor-orchestrator.mjs` — covers committed MCP `**dist`**, launcher, `**mcp.json`**, `**hooks/hooks.json**`, all `commands/*.md` plus **`.cursor/commands/`** parity, and marketplace/template validation.
 
 **IDE-only smoke** (after `**orchestrate-setup`**, optional throwaway branch): confirm in Cursor — Output → MCP lists agent-mail and orchestrator; invoke an `**orch_*`** tool from the Agent; watch `**.pi-orchestrator/**` when orchestration runs; exercise **sessionStart** / **postToolUse** if you use checkpoints and bead approval; open the command palette for `**/cursor-orchestrator:`***. These steps cannot be asserted from CI because they need a live Cursor session and **agent-mail** on `8765`.
 

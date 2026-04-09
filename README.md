@@ -20,6 +20,8 @@ To add more plugins, see `docs/add-a-plugin.md`.
 
 **Publishing & releases:** See [docs/publishing/marketplace.md](docs/publishing/marketplace.md) for versioning, validation order, and submission notes.
 
+**Guided flywheel in Agent:** Open this repo in Cursor, then in **Agent** type **`/`** → **`flywheel`** for a numbered menu, or **`orchestrate-setup`** then **`orchestrate`**. Commands live under [`.cursor/commands/`](.cursor/commands/) (symlinks to the plugin). **Rules:** [`.cursor/rules/flywheel-guided.mdc`](.cursor/rules/flywheel-guided.mdc) keeps the agent on that path.
+
 **Interactive Orchestrator menu (optional):** A VS Code extension in [extensions/cursor-orchestrator-menu/](extensions/cursor-orchestrator-menu/) adds an **Activity Bar** sidebar (session, beads, wizards) plus QuickPick wizards. See that folder’s README to compile and run via F5.
 
 ## Single plugin vs multi-plugin

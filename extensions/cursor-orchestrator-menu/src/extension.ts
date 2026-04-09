@@ -102,8 +102,8 @@ async function openMainMenu(
     [
       {
         label: "$(rocket) Orchestrate wizard…",
-        description: "Step-by-step: goal, plan type, copy prompt to Agent",
-        detail: "Best match for Plan-mode-style guidance without typing long prompts",
+        description: "QuickPick steps; copies prompt (prefer /flywheel or /orchestrate in Agent)",
+        detail: "Clipboard handoff — slash commands avoid paste",
         orchId: "wizard",
       },
       {
@@ -299,7 +299,7 @@ async function orchestrateWizard(
   onChange?.();
 
   void vscode.window.showInformationMessage(
-    "Tip: Press Shift+Tab in Agent input for Cursor Plan mode before pasting, if you want a structured plan first.",
+    "Tip: Prefer /flywheel or /orchestrate in Agent (guided, no paste). Use Plan mode (Shift+Tab) before big changes if offered.",
     "OK",
   );
 }
@@ -315,8 +315,8 @@ async function copyPrompt(body: string, label: string): Promise<void> {
   }
 
   const choice = await vscode.window.showInformationMessage(
-    `${label}: prompt copied. Paste into Cursor Agent (⌘L / Ctrl+L on Mac / Win).`,
-    { modal: false, detail: cmd ? `Optional command: ${cmd}` : "Set cursorOrchestratorMenu.agentChatCommand to auto-open chat." },
+    `${label}: copied. In Agent, type /flywheel or /orchestrate (no paste) — or paste from clipboard (⌘V / Ctrl+V).`,
+    { modal: false, detail: cmd ? `Optional command: ${cmd}` : "Set cursorOrchestratorMenu.agentChatCommand to open chat after copy." },
     ...actions,
   );
 

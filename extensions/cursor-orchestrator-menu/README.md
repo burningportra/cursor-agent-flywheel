@@ -2,6 +2,8 @@
 
 VS Code / **Cursor** extension: **QuickPick wizards** + an **Activity Bar** sidebar for the Agentic Coding Flywheel.
 
+**Most guided path (no paste):** In **Cursor Agent**, type **`/`** → **`flywheel`** (numbered menu) or **`orchestrate`**. This extension is optional visibility + clipboard helpers.
+
 ## Features
 
 ### Sidebar (**Activity Bar → Orchestrator**)
@@ -45,7 +47,7 @@ Default keybinding: **⌘⇧⌥O** (Mac) / **Ctrl+Shift+Alt+O** (Win/Linux) when
 
 ## Why not 100% like Plan mode?
 
-Plan mode’s **clarifying-question UI** is built into Cursor Agent. This extension uses **standard VS Code QuickPick** (same UI family, different host feature). You still get structured steps + clipboard handoff—the same pattern many internal tools use before Agent runs MCP/`orch_*` tools.
+Plan mode’s **clarifying-question UI** is built into Cursor Agent. **Slash commands** (`/flywheel`, `/orchestrate`, …) load instructions directly into chat. This extension adds **standard VS Code QuickPick** for the same prompts when you want UI outside Agent, plus **clipboard** when you still need a handoff.
 
 ## Packaging
 

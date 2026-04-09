@@ -3,6 +3,8 @@ name: orchestrate
 description: "Start or resume the full agentic coding flywheel. Drives the complete workflow: scan → discover → plan → implement → review."
 ---
 
+> **Guided:** In Agent, type **`/flywheel`** for a numbered menu, or **`/orchestrate-setup`** if prerequisites are not verified yet.
+
 # Orchestrate: Full Flywheel
 
 Run the orchestrator for this project. $ARGUMENTS (optional: initial goal or `--mode single-branch`)

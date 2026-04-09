@@ -1,0 +1,12 @@
+---
+description: Guided Agentic Coding Flywheel — use slash commands and orchestrator MCP in order
+alwaysApply: true
+---
+
+# Agentic Coding Flywheel
+
+- **Guided entry:** In **Agent**, type **`/`** → start with **`flywheel`** (numbered menu), or **`orchestrate-setup`** once, then **`orchestrate`** for the main loop.
+- **Steps:** Project orchestration lives in **`.cursor/commands/*.md`**. When the user runs a slash command, follow that file **step by step**; do not skip confirmation gates the file requires.
+- **Tools:** Use **`orch_*`** from the **orchestrator** MCP with **`cwd`** at the workspace root unless the command file says otherwise. Prefer tools over editing `.pi-orchestrator/checkpoint.json` by hand.
+- **Models:** LLM work uses **only Cursor** Agent/Chat models (see **`/orchestrate`** policy table). Do not call external model CLIs for orchestration.
+- **Optional:** Activity Bar **Orchestrator** sidebar mirrors session/beads; use it for visibility, not as a substitute for MCP when the command file expects tools.
