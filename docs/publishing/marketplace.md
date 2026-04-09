@@ -11,7 +11,16 @@ This runbook is for **maintainers** shipping updates from this monorepo. For **a
 
 You may bump **only** `plugin.json` for an orchestrator fix, **only** `metadata.version` for a template-wide packaging change, or **both** when a release is coordinated—document the choice in the PR.
 
-**Changelog:** Add and maintain `plugins/cursor-orchestrator/CHANGELOG.md` with an `[Unreleased]` section for user-visible orchestrator changes (see that file once it exists in the repo).
+### When to bump what (quick reference)
+
+| Change | Bump `plugin.json` `version` | Bump `metadata.version` | Update CHANGELOG |
+| --- | --- | --- | --- |
+| User-visible orchestrator behavior (commands, MCP, hooks) | Yes (semver) | If you also re-cut the bundle story | Under `[Unreleased]` → release section |
+| Docs-only under `plugins/cursor-orchestrator/` with no user-facing behavior | Patch or skip per team policy | Usually no | Optional note |
+| Template / monorepo packaging only (e.g. marketplace.json structure) | No | Often yes | Root or bundle notes in PR |
+| chore: CI, scripts outside plugin UX | Usually no | Rarely | Optional |
+
+**Changelog:** Maintain [plugins/cursor-orchestrator/CHANGELOG.md](../../plugins/cursor-orchestrator/CHANGELOG.md). Add bullets under **`[Unreleased]`** as you merge work; when you cut a release, rename `[Unreleased]` to **`[x.y.z] — YYYY-MM-DD`**, then add a fresh empty `[Unreleased]` section at the top.
 
 ## Pre-publish validation (ordered)
 
@@ -23,7 +32,7 @@ Run from the **repository root**:
    `cd plugins/cursor-orchestrator/mcp-server && npm ci && npm run build && npm test`  
    and ensure `git diff --exit-code` is clean on `mcp-server/dist/` (matches CI).
 
-Optional: use `scripts/publish-gate.mjs` when it exists—it wraps the same steps in one command.
+Optional: run `node scripts/publish-gate.mjs` for steps 1–2 in one shot; add `--with-mcp` to mirror the full CI job (MCP `npm ci` / build / test / `dist` drift check).
 
 ## IDE smoke (manual)
 

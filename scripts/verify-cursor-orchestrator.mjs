@@ -35,27 +35,74 @@ async function readJson(absPath, label) {
   }
 }
 
-const EXPECTED_NAMES = new Set([
-  "memory",
-  "orchestrate",
-  "orchestrate-audit",
-  "orchestrate-cleanup",
-  "orchestrate-drift-check",
-  "orchestrate-fix",
-  "orchestrate-healthcheck",
-  "orchestrate-refine-skill",
-  "orchestrate-refine-skills",
-  "orchestrate-research",
-  "orchestrate-rollback",
-  "orchestrate-scan",
-  "orchestrate-setup",
-  "orchestrate-status",
-  "orchestrate-stop",
-  "orchestrate-swarm",
-  "orchestrate-swarm-status",
-  "orchestrate-swarm-stop",
-  "orchestrate-tool-feedback",
-]);
+/** @param {string} dir */
+async function listCommandStems(dir) {
+  const entries = await fs.readdir(dir, { withFileTypes: true });
+  return entries
+    .filter(
+      (e) =>
+        e.name.endsWith(".md") &&
+        !e.isDirectory() &&
+        (e.isFile() || e.isSymbolicLink()),
+    )
+    .map((e) => e.name.replace(/\.md$/, ""))
+    .sort();
+}
+
+/**
+ * Repo-root `.cursor/commands` must mirror `plugins/cursor-orchestrator/commands`
+ * (same basenames; each pair should resolve to the same real path — symlinks OK).
+ */
+async function assertWorkspaceSlashCommandsParity(pluginStems) {
+  const workspaceCommandsDir = path.join(repoRoot, ".cursor", "commands");
+  let wsStems;
+  try {
+    wsStems = await listCommandStems(workspaceCommandsDir);
+  } catch {
+    console.error(`Missing or unreadable workspace commands directory: ${workspaceCommandsDir}`);
+    console.error("Add symlinks from .cursor/commands/<name>.md → plugins/cursor-orchestrator/commands/<name>.md");
+    process.exit(1);
+  }
+
+  const pSet = new Set(pluginStems);
+  const wSet = new Set(wsStems);
+  const onlyPlugin = pluginStems.filter((n) => !wSet.has(n));
+  const onlyWorkspace = wsStems.filter((n) => !pSet.has(n));
+
+  if (onlyPlugin.length > 0 || onlyWorkspace.length > 0) {
+    if (onlyPlugin.length > 0) {
+      console.error("Slash command parity: present under plugins/cursor-orchestrator/commands but missing in .cursor/commands:");
+      console.error(`  ${onlyPlugin.join(", ")}`);
+    }
+    if (onlyWorkspace.length > 0) {
+      console.error("Slash command parity: present under .cursor/commands but missing in plugins/cursor-orchestrator/commands:");
+      console.error(`  ${onlyWorkspace.join(", ")}`);
+    }
+    process.exit(1);
+  }
+
+  for (const name of pluginStems) {
+    const pluginFile = path.join(pluginRoot, "commands", `${name}.md`);
+    const workspaceFile = path.join(workspaceCommandsDir, `${name}.md`);
+    let rpPlugin;
+    let rpWorkspace;
+    try {
+      rpPlugin = await fs.realpath(pluginFile);
+      rpWorkspace = await fs.realpath(workspaceFile);
+    } catch (e) {
+      console.error(`Slash command parity: could not resolve paths for ${name}.md — ${e}`);
+      process.exit(1);
+    }
+    if (rpPlugin !== rpWorkspace) {
+      console.error(
+        `Slash command parity: ${name}.md — workspace file resolves to:\n  ${rpWorkspace}\n` +
+          `but plugin file resolves to:\n  ${rpPlugin}\n` +
+          "Expected the same real path (use symlinks from .cursor/commands to the plugin commands).",
+      );
+      process.exit(1);
+    }
+  }
+}
 
 async function main() {
   await assertFile(path.join(pluginRoot, "mcp-server", "package-lock.json"), "mcp-server/package-lock.json");
@@ -115,20 +162,14 @@ async function main() {
     process.exit(1);
   }
 
-  const entries = await fs.readdir(commandsDir, { withFileTypes: true });
-  const md = entries.filter((e) => e.isFile() && e.name.endsWith(".md")).map((e) => e.name.replace(/\.md$/, ""));
+  const md = await listCommandStems(commandsDir);
 
-  if (md.length !== EXPECTED_NAMES.size) {
-    console.error(`Expected ${EXPECTED_NAMES.size} command files, found ${md.length}`);
+  if (md.length === 0) {
+    console.error(`No .md command files under ${commandsDir}`);
     process.exit(1);
   }
 
-  for (const name of EXPECTED_NAMES) {
-    if (!md.includes(name)) {
-      console.error(`Missing command file: ${name}.md`);
-      process.exit(1);
-    }
-  }
+  await assertWorkspaceSlashCommandsParity(md);
 
   const validate = spawnSync(process.execPath, ["scripts/validate-template.mjs"], {
     cwd: repoRoot,
@@ -139,7 +180,7 @@ async function main() {
   }
 
   console.log(
-    "cursor-orchestrator: lockfile + dist + launcher + mcp.json (url+stdio) + hooks + 19 commands + validate-template OK",
+    `cursor-orchestrator: lockfile + dist + launcher + mcp.json (url+stdio) + hooks + ${md.length} commands + .cursor/commands parity + validate-template OK`,
   );
 }
 

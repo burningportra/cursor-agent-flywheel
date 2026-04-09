@@ -25,6 +25,8 @@ This plugin is a **Cursor port** of [claude-orchestrator](https://github.com/bur
 
 Before tagging or submitting Marketplace updates from this monorepo, follow **[docs/publishing/marketplace.md](../../docs/publishing/marketplace.md)** — versioning (`metadata.version` vs per-plugin `plugin.json`), ordered validation commands, and submission notes.
 
+Release notes for this plugin: **[CHANGELOG.md](CHANGELOG.md)** (`[Unreleased]` during development).
+
 ## Install (this monorepo)
 
 The repo’s [`.cursor-plugin/marketplace.json`](../../.cursor-plugin/marketplace.json) lists `cursor-orchestrator` for packaging and [publishing](https://cursor.com/marketplace/publish). It does **not** make the plugin appear in the **public Marketplace panel** until you submit and Cursor approves it ([how the marketplace works](https://cursor.com/docs/plugins.md#the-marketplace)).

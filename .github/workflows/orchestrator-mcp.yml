@@ -4,19 +4,30 @@ on:
   push:
     paths:
       - "plugins/cursor-orchestrator/**"
+      - ".cursor/commands/**"
+      - "docs/publishing/**"
       - "scripts/verify-cursor-orchestrator.mjs"
       - "scripts/validate-template.mjs"
+      - "scripts/publish-gate.mjs"
       - ".github/workflows/orchestrator-mcp.yml"
   pull_request:
     paths:
       - "plugins/cursor-orchestrator/**"
+      - ".cursor/commands/**"
+      - "docs/publishing/**"
       - "scripts/verify-cursor-orchestrator.mjs"
       - "scripts/validate-template.mjs"
+      - "scripts/publish-gate.mjs"
       - ".github/workflows/orchestrator-mcp.yml"
+
+concurrency:
+  group: orchestrator-mcp-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   verify-plugin:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -28,6 +39,7 @@ jobs:
   build-test:
     needs: verify-plugin
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: plugins/cursor-orchestrator/mcp-server
