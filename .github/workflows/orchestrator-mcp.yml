@@ -3,13 +3,30 @@ name: Orchestrator MCP
 on:
   push:
     paths:
-      - "plugins/cursor-orchestrator/mcp-server/**"
+      - "plugins/cursor-orchestrator/**"
+      - "scripts/verify-cursor-orchestrator.mjs"
+      - "scripts/validate-template.mjs"
+      - ".github/workflows/orchestrator-mcp.yml"
   pull_request:
     paths:
-      - "plugins/cursor-orchestrator/mcp-server/**"
+      - "plugins/cursor-orchestrator/**"
+      - "scripts/verify-cursor-orchestrator.mjs"
+      - "scripts/validate-template.mjs"
+      - ".github/workflows/orchestrator-mcp.yml"
 
 jobs:
+  verify-plugin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Command inventory + validate-template
+        run: node scripts/verify-cursor-orchestrator.mjs
+
   build-test:
+    needs: verify-plugin
     runs-on: ubuntu-latest
     defaults:
       run:
