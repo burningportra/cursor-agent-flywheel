@@ -22,7 +22,7 @@ Sections are grouped by **capability waves**. The **version timeline** keeps chr
 | Label | Date (landed) | Summary |
 |-------|---------------|---------|
 | **[Unreleased]** | — | Open beads only (see below) |
-| **3.18.1+visual** | 2026-05-20 | Planning browser companion + changelog rebuild ([a14bbec](https://github.com/burningportra/cursor-agent-flywheel/commit/a14bbec)) |
+| **3.18.1+visual** | 2026-05-20 | Planning browser companion + changelog rebuild ([89397cc](https://github.com/burningportra/cursor-agent-flywheel/commit/89397cc)) |
 | **3.18.1+gates** | 2026-05-20 | Upstream skills sync, native bead/impl gates, install + command parity |
 | **3.18.1** | 2026-04-09 – 2026-04-14 | Cursor port of agent-flywheel-plugin, CI, publishing, VS Code UI, guided `/flywheel` |
 
@@ -62,7 +62,7 @@ Port of obra/superpowers **Visual Companion** for flywheel planning only: local 
 
 | Date | Commit | Summary |
 |------|--------|---------|
-| 2026-05-20 | [a14bbec](https://github.com/burningportra/cursor-agent-flywheel/commit/a14bbec) | Visual prototype + changelog rebuild |
+| 2026-05-20 | [89397cc](https://github.com/burningportra/cursor-agent-flywheel/commit/89397cc) | Visual prototype + changelog rebuild |
 
 ### Notes for agents
 
