@@ -1,19 +1,20 @@
 /**
  * Checkpoint persistence for crash recovery.
  *
- * Writes orchestrator state to `<cwd>/.pi-orchestrator/checkpoint.json`
+ * Writes flywheel state to `<cwd>/.pi-flywheel/checkpoint.json`
  * using atomic write-rename semantics. All I/O is non-throwing —
  * failures degrade gracefully to current session-log-only behavior.
  */
-import type { CheckpointEnvelope, OrchestratorState } from "./types.js";
-export declare const CHECKPOINT_DIR = ".pi-orchestrator";
+import type { CheckpointEnvelope, FlywheelState } from "./types.js";
+export declare const CHECKPOINT_DIR = ".pi-flywheel";
 export declare const CHECKPOINT_FILE = "checkpoint.json";
 export declare const CHECKPOINT_TMP = "checkpoint.json.tmp";
 export declare const CHECKPOINT_CORRUPT = "checkpoint.json.corrupt";
 /** Compute SHA-256 hash of JSON.stringify(state). */
-export declare function computeStateHash(state: OrchestratorState): string;
+export declare function computeStateHash(state: FlywheelState): string;
 export type ValidationResult = {
     valid: true;
+    warnings?: string[];
 } | {
     valid: false;
     reason: string;
@@ -24,12 +25,11 @@ export type ValidationResult = {
  */
 export declare function validateCheckpoint(envelope: unknown): ValidationResult;
 /**
- * Atomically write a checkpoint to disk.
- * Uses write-to-tmp + rename for crash safety.
- * Returns true if write succeeded, false otherwise.
- * Never throws.
+ * Serialize checkpoint writes per cwd via Promise chaining.
+ * Concurrent callers for the same cwd are queued; a failed write
+ * resolves to false without blocking subsequent writes.
  */
-export declare function writeCheckpoint(cwd: string, state: OrchestratorState, orchestratorVersion: string): boolean;
+export declare function writeCheckpoint(cwd: string, state: FlywheelState): Promise<boolean>;
 export interface ReadCheckpointResult {
     envelope: CheckpointEnvelope;
     warnings: string[];

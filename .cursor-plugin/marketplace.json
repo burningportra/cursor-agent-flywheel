@@ -1,29 +1,31 @@
 {
-  "name": "cursor-plugin-starters",
+  "name": "agent-flywheel",
+  "displayName": "Agent Flywheel",
   "owner": {
-    "name": "Your Org",
-    "email": "plugins@example.com"
+    "name": "burningportra",
+    "email": "plugins@burningportra.com"
   },
   "metadata": {
-    "description": "Starter marketplace template for Cursor plugins",
-    "version": "0.1.0",
+    "description": "Team marketplace for the Agentic Coding Flywheel: cursor-orchestrator (beads, MCP, hooks, /start) plus optional starter plugins.",
+    "version": "3.18.1",
     "pluginRoot": "plugins"
   },
   "plugins": [
     {
-      "name": "starter-simple",
-      "source": "./starter-simple",
-      "description": "Minimal plugin with rules and skills only"
+      "name": "cursor-orchestrator",
+      "source": "./cursor-orchestrator",
+      "description": "Agentic Coding Flywheel — scan, plan, beads, review, swarm (Cursor port of agent-flywheel-plugin 3.18.x)",
+      "version": "3.18.1"
     },
     {
       "name": "starter-advanced",
       "source": "./starter-advanced",
-      "description": "Full-featured plugin with rules, skills, agents, commands, hooks, and MCP"
+      "description": "Reference plugin: rules, skills, agents, commands, hooks, MCP (template sample)"
     },
     {
-      "name": "cursor-orchestrator",
-      "source": "./cursor-orchestrator",
-      "description": "Multi-agent orchestrator: scan, plan, beads, parallel review (Agentic Coding Flywheel)"
+      "name": "starter-simple",
+      "source": "./starter-simple",
+      "description": "Reference plugin: rules and skills only (template sample)"
     }
   ]
 }

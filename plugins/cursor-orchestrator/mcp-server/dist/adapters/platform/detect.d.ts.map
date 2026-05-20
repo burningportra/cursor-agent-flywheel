@@ -1,0 +1,1 @@
+{"version":3,"file":"detect.d.ts","sourceRoot":"","sources":["../../../src/adapters/platform/detect.ts"],"names":[],"mappings":"AAcA,OAAO,KAAK,EAAE,WAAW,EAAE,MAAM,kBAAkB,CAAC;AAEpD,MAAM,MAAM,UAAU,GAAG,aAAa,CAAC;AAEvC,wBAAgB,cAAc,IAAI,UAAU,CAK3C;AAED,wBAAgB,UAAU,CAAC,QAAQ,GAAE,UAA6B,GAAG,WAAW,CAU/E"}

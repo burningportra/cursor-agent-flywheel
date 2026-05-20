@@ -156,8 +156,8 @@ export function formatLaunchInstructions(configs) {
     lines.push("- Wait the specified delay between each spawn to prevent thundering herd");
     lines.push("- Each agent will independently use `bv --robot-next` to pick work");
     lines.push("- Agents coordinate via Agent Mail file reservations");
-    lines.push("- Monitor with `/orchestrate-swarm-status`");
-    lines.push("- Stop with `/orchestrate-swarm-stop`");
+    lines.push("- Monitor with `/flywheel-swarm-status`");
+    lines.push("- Stop with `/flywheel-swarm-stop`");
     return lines.join("\n");
 }
 //# sourceMappingURL=swarm.js.map

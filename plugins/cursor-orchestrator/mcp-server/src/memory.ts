@@ -1,4 +1,8 @@
 import { execFileSync } from "child_process";
+import { parseCmResult } from "./parsers.js";
+import { createLogger } from "./logger.js";
+
+const log = createLogger("memory");
 
 // ─── Types ──────────────────────────────────────────────────
 
@@ -88,12 +92,12 @@ function runCm(args: string[], cwd?: string): string | null {
 
 function parseCmJson<T>(output: string | null): T | null {
   if (!output) return null;
-  try {
-    const parsed = JSON.parse(output);
-    return parsed?.success ? (parsed.data as T) : null;
-  } catch {
+  const result = parseCmResult<T>(output);
+  if (!result.ok) {
+    log.warn("cm JSON parse failed", { error: result.error });
     return null;
   }
+  return result.data;
 }
 
 // ─── Core API ───────────────────────────────────────────────
@@ -114,7 +118,7 @@ export function getContext(task: string, cwd?: string): CassContext | null {
  */
 export function readMemory(cwd: string, task?: string): string {
   if (!detectCass()) return "";
-  const ctx = getContext(task || "orchestration session", cwd);
+  const ctx = getContext(task || "flywheel session", cwd);
   if (!ctx) return "";
 
   const parts: string[] = [];
@@ -170,19 +174,22 @@ export function listMemoryEntries(cwd?: string): MemoryEntry[] {
 }
 
 /**
- * Search memory entries by query using CASS similar command.
+ * Search memory entries by query using CASS context command.
+ * Uses `cm context` (task-aware semantic matching) instead of `cm similar`
+ * (keyword mode) which returns empty for most queries.
  */
 export function searchMemory(cwd: string, query: string): MemoryEntry[] {
   if (!detectCass()) return [];
-  const output = runCm(["similar", query, "--json"], cwd);
-  interface CmResult { id?: string; text: string; score?: number; category?: string }
-  const data = parseCmJson<{ results: CmResult[] }>(output);
-  if (!data?.results) return [];
-  return data.results.map((r, i) => ({
+  const output = runCm(["context", query, "--json"], cwd);
+  interface CmBullet { id: string; content?: string; text?: string; category?: string; finalScore?: number }
+  interface CmContextData { relevantBullets?: CmBullet[] }
+  const data = parseCmJson<CmContextData>(output);
+  if (!data?.relevantBullets) return [];
+  return data.relevantBullets.map((b, i) => ({
     index: i + 1,
-    id: r.id ?? `r-${i}`,
-    category: r.category ?? "general",
-    content: r.text,
+    id: b.id,
+    category: b.category ?? "general",
+    content: b.content ?? b.text ?? "",
   }));
 }
 
@@ -199,7 +206,7 @@ export function markRule(bulletId: string, helpful: boolean, reason?: string, cw
 
 /**
  * Run `cm onboard` to bootstrap memory for a new project.
- * Should be called once when starting orchestration on a project that has no
+ * Should be called once when starting flywheel on a project that has no
  * existing CASS memory. Best-effort — returns true if successful.
  */
 export function onboardMemory(cwd?: string): boolean {
@@ -207,10 +214,12 @@ export function onboardMemory(cwd?: string): boolean {
   const status = runCm(["onboard", "status", "--json"], cwd);
   let data: { needsOnboarding?: boolean } | null = null;
   if (status) {
-    try {
-      const raw = JSON.parse(status);
-      data = raw?.success ? (raw.data ?? null) : raw;
-    } catch { /* fall through */ }
+    const parsed = parseCmResult<{ needsOnboarding?: boolean }>(status);
+    if (parsed.ok) {
+      data = parsed.data;
+    } else {
+      log.warn("cm onboard status parse failed", { error: parsed.error });
+    }
   }
   if (data?.needsOnboarding === false) return true; // already onboarded
   // Run non-interactive onboard
@@ -238,23 +247,33 @@ export function reflectMemory(cwd?: string): boolean {
  */
 export function mineSkillGaps(
   cwd: string,
-  topic: string = "planning beads orchestration"
+  topic: string = "planning beads flywheel"
 ): string | null {
   if (!detectCass()) return null;
-  const output = runCm(["search", topic, "--json", "--limit", "20"], cwd);
+  const output = runCm(["context", topic, "--json"], cwd);
   if (!output) return null;
-  try {
-    const data = JSON.parse(output);
-    const sessions = (data?.results ?? data?.sessions ?? []) as Array<{ text?: string; content?: string; score?: number }>;
-    if (sessions.length === 0) return null;
-    const snippets = sessions
-      .slice(0, 10)
-      .map((s, i) => `Session ${i + 1}:\n${(s.text ?? s.content ?? "").slice(0, 500)}`)
-      .join("\n\n---\n\n");
-    return snippets;
-  } catch {
+  // cm context returns { relevantBullets: [...], historySnippets: [...] }
+  const cmParsed = parseCmResult<{
+    relevantBullets?: Array<{ id?: string; content?: string; text?: string }>;
+    historySnippets?: Array<{ snippet?: string; text?: string }>;
+  }>(output);
+  if (!cmParsed.ok) {
+    log.warn("cm context parse failed", { error: cmParsed.error });
     return null;
   }
+  const bullets = cmParsed.data?.relevantBullets ?? [];
+  const history = cmParsed.data?.historySnippets ?? [];
+  if (bullets.length === 0 && history.length === 0) return null;
+  const parts: string[] = [];
+  for (const b of bullets.slice(0, 10)) {
+    const text = (b.content ?? b.text ?? "").slice(0, 500);
+    parts.push(`Rule [${b.id ?? "?"}]:\n${text}`);
+  }
+  for (const h of history.slice(0, 5)) {
+    const text = (h.snippet ?? h.text ?? "").slice(0, 500);
+    parts.push(`History:\n${text}`);
+  }
+  return parts.join("\n\n---\n\n");
 }
 
 /**

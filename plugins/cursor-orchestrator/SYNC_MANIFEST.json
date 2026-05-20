@@ -1,0 +1,38 @@
+{
+  "syncedAt": "2026-05-20T14:11:01.858Z",
+  "upstreamRepo": "burningportra/agent-flywheel-plugin",
+  "upstreamRef": "main",
+  "upstreamSha": "7bc23bfc4b4493a0a8f27a8c3575778e66cf166a",
+  "preserveFiles": [
+    ".cursor-plugin/plugin.json",
+    "mcp.json",
+    "scripts/start-orchestrator-mcp.cjs",
+    "scripts/session-start-orchestrator-notice.cjs",
+    "scripts/post-tool-orch-approve-hint.sh",
+    "hooks/hooks.json",
+    "CHANGELOG.md",
+    "README.md",
+    "assets/logo.svg"
+  ],
+  "touched": [
+    "mcp-server/src",
+    "mcp-server/scripts",
+    "commands",
+    "skills",
+    "hooks",
+    "flywheel.config.yaml",
+    "mcp-server/package.json",
+    "mcp-server/package-lock.json",
+    "mcp-server/tsconfig.json",
+    "mcp-server/tsconfig.scripts.json",
+    "mcp-server/vitest.config.ts",
+    "AGENTS.md"
+  ],
+  "cursorOverlays": [
+    "hooks/hooks.json (Cursor v1 format)",
+    ".cursor-plugin/plugin.json",
+    "mcp.json (Cursor url + stdio)",
+    "mcp-server/src/cursor-adapters.ts",
+    "mcp-server/src/checkpoint-legacy.ts"
+  ]
+}

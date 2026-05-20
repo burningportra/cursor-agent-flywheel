@@ -1,4 +1,5 @@
 import type { ExecFn } from "./exec.js";
+import { errMsg } from "./errors.js";
 import { profileRepo, createEmptyRepoProfile } from "./profiler.js";
 import type {
   RepoProfile,
@@ -15,7 +16,7 @@ const CCC_SCAN_QUERIES = [
   {
     id: "workflow-entrypoints",
     title: "Workflow and entrypoints",
-    query: "orchestrator workflow command entrypoint state machine",
+    query: "flywheel workflow command entrypoint state machine",
   },
   {
     id: "planning-review",
@@ -95,14 +96,16 @@ export async function scanRepo(
     } catch (fallbackError) {
       // Double fault: both providers failed. Return emergency minimal result.
       process.stderr.write(
-        `[scan] builtin profiler also failed: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}\n`
+        `[scan] builtin profiler also failed: ${errMsg(fallbackError)}\n`
       );
       const emptyProfile = createEmptyRepoProfile(cwd);
       const result = createFallbackScanResult(emptyProfile, "ccc", errorInfo);
+      result.codebaseAnalysis.summary =
+        "Scan failed: both ccc and builtin providers failed. Results may be incomplete.";
       if (result.sourceMetadata) {
         result.sourceMetadata.warnings = [
           ...(result.sourceMetadata.warnings ?? []),
-          `Profiler also failed: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`,
+          `Profiler also failed: ${errMsg(fallbackError)}`,
         ];
       }
       return result;
@@ -127,11 +130,13 @@ export function createFallbackScanResult(
   source: Exclude<ScanSource, "builtin">,
   error?: ScanErrorInfo
 ): ScanResult {
+  const analysis = createEmptyCodebaseAnalysis();
+  analysis.summary = `Partial scan: fell back from ${source} to builtin provider.`;
   return {
     source: "builtin",
     provider: builtinScanProvider.id,
     profile,
-    codebaseAnalysis: createEmptyCodebaseAnalysis(),
+    codebaseAnalysis: analysis,
     sourceMetadata: {
       label: builtinScanProvider.label,
       warnings: [`Fell back from ${source} to builtin scan provider.`],
@@ -148,7 +153,7 @@ export function createFallbackScanResult(
 
 export function createEmptyCodebaseAnalysis(): ScanCodebaseAnalysis {
   return {
-    summary: undefined,
+    summary: "",
     recommendations: [],
     structuralInsights: [],
     qualitySignals: [],
@@ -163,6 +168,7 @@ async function ensureCccReady(
   const versionCheck = await exec("ccc", ["--help"], {
     cwd,
     timeout: 5000,
+    signal,
   });
   if (versionCheck.code !== 0) {
     throw new Error(versionCheck.stderr.trim() || "ccc is not available");
@@ -171,6 +177,7 @@ async function ensureCccReady(
   const status = await exec("ccc", ["status"], {
     cwd,
     timeout: 10000,
+    signal,
   });
 
   const statusOutput = `${status.stdout}\n${status.stderr}`;
@@ -178,6 +185,7 @@ async function ensureCccReady(
     const init = await exec("ccc", ["init", "-f"], {
       cwd,
       timeout: 10000,
+      signal,
     });
     if (init.code !== 0) {
       throw new Error(init.stderr.trim() || init.stdout.trim() || "ccc init failed");
@@ -189,6 +197,7 @@ async function ensureCccReady(
   const index = await exec("ccc", ["index"], {
     cwd,
     timeout: 120000,
+    signal,
   });
   if (index.code !== 0) {
     throw new Error(index.stderr.trim() || index.stdout.trim() || "ccc index failed");
@@ -198,12 +207,13 @@ async function ensureCccReady(
 async function runCccQuery(
   exec: ExecFn,
   cwd: string,
-  entry: (typeof CCC_SCAN_QUERIES)[number]
+  entry: (typeof CCC_SCAN_QUERIES)[number],
+  signal?: AbortSignal
 ): Promise<Array<{ location: string; snippet: string }>> {
   const result = await exec(
     "ccc",
     ["search", "--limit", "3", ...entry.query.split(" ")],
-    { cwd, timeout: 30000 }
+    { cwd, timeout: 30000, signal }
   );
   if (result.code !== 0) {
     throw new Error(
@@ -226,7 +236,7 @@ async function collectCccCodebaseAnalysis(
   signal?: AbortSignal
 ): Promise<ScanCodebaseAnalysis> {
   const settled = await Promise.allSettled(
-    CCC_SCAN_QUERIES.map((entry) => runCccQuery(exec, cwd, entry))
+    CCC_SCAN_QUERIES.map((entry) => runCccQuery(exec, cwd, entry, signal))
   );
 
   const searches: CccSearchEntry[] = [];

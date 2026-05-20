@@ -1,14 +1,14 @@
 /**
  * Self-Improvement Loop — Feedback & Prompt Tracking
  *
- * A. Post-orchestration feedback — structured survey saved after completion
+ * A. Post-flywheel feedback — structured survey saved after completion
  * B. Automatic CASS context injection — prepend relevant rules to prompts
  * C. Prompt effectiveness tracking — track which prompts produce real changes
  */
-export interface OrchestrationFeedback {
+export interface FlywheelFeedback {
     /** ISO timestamp. */
     timestamp: string;
-    /** The orchestration goal. */
+    /** The flywheel goal. */
     goal: string;
     /** Total beads created. */
     beadCount: number;
@@ -30,22 +30,22 @@ export interface OrchestrationFeedback {
     spaceViolationCount: number;
 }
 /**
- * Collect feedback from the current orchestration state.
+ * Collect feedback from the current flywheel state.
  */
-export declare function collectFeedback(state: import('./types.js').OrchestratorState): OrchestrationFeedback;
+export declare function collectFeedback(state: import('./types.js').FlywheelState): FlywheelFeedback;
 /**
  * Save feedback to the project-local feedback directory.
  */
-export declare function saveFeedback(cwd: string, feedback: OrchestrationFeedback): string;
+export declare function saveFeedback(cwd: string, feedback: FlywheelFeedback): string;
 /**
  * Load all feedback files from the project.
  */
-export declare function loadAllFeedback(cwd: string): OrchestrationFeedback[];
+export declare function loadAllFeedback(cwd: string): FlywheelFeedback[];
 /**
  * Compute aggregate stats from all feedback.
  */
 export interface FeedbackStats {
-    totalOrchestrations: number;
+    totalFlywheelRuns: number;
     avgBeadCount: number;
     avgCompletionRate: number;
     avgPolishRounds: number;
@@ -53,7 +53,7 @@ export interface FeedbackStats {
     avgPlanQuality: number | null;
     avgForegoneScore: number | null;
 }
-export declare function computeFeedbackStats(feedbacks: OrchestrationFeedback[]): FeedbackStats;
+export declare function computeFeedbackStats(feedbacks: FlywheelFeedback[]): FeedbackStats;
 export declare function formatFeedbackStats(stats: FeedbackStats): string;
 /** Prepend CASS context to a prompt if available. */
 export declare function withCassContext(prompt: string, cwd: string, taskDescription?: string): string;
@@ -108,6 +108,6 @@ export interface ToolFeedback {
  */
 export declare function toolFeedbackPrompt(toolName: string): string;
 export declare function parseToolFeedback(output: string, toolName: string): ToolFeedback | null;
-/** Save tool feedback to .pi-orchestrator-feedback/tools/<toolName>.jsonl */
+/** Save tool feedback to .pi-flywheel-feedback/tools/<toolName>.jsonl */
 export declare function saveToolFeedback(cwd: string, feedback: ToolFeedback): void;
 //# sourceMappingURL=feedback.d.ts.map

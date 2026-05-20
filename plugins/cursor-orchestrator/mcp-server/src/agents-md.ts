@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync, appendFileSync } from "fs";
 import { join } from "path";
 import { onboardMemory } from "./memory.js";
+import { normalizeText } from "./utils/text-normalize.js";
 
 // ─── Core Rules ─────────────────────────────────────────────
 // Mandatory behavioral constraints for multi-agent coordination.
@@ -205,11 +206,24 @@ export interface AgentsMdHealth {
   missing: string[];
 }
 
+// Session-level memoization for scoreAgentsMd
+let _scoreCacheKey: string | null = null;
+let _scoreCacheValue: AgentsMdHealth | null = null;
+
+/** Clear the scoreAgentsMd cache (call after modifying AGENTS.md). */
+export function resetAgentsMdScoreCache(): void {
+  _scoreCacheKey = null;
+  _scoreCacheValue = null;
+}
+
 /**
  * Score an AGENTS.md file on completeness.
  * Returns a health assessment with 0-100 score and list of missing sections.
+ * Results are memoized per cwd for the session.
  */
 export function scoreAgentsMd(cwd: string): AgentsMdHealth {
+  if (_scoreCacheKey === cwd && _scoreCacheValue) return _scoreCacheValue;
+
   const agentsMdPath = join(cwd, "AGENTS.md");
 
   if (!existsSync(agentsMdPath)) {
@@ -225,7 +239,7 @@ export function scoreAgentsMd(cwd: string): AgentsMdHealth {
     };
   }
 
-  const content = readFileSync(agentsMdPath, "utf-8").toLowerCase();
+  const content = normalizeText(readFileSync(agentsMdPath, "utf-8")).toLowerCase();
   const missing: string[] = [];
 
   // Check core rules (50% of score)
@@ -260,7 +274,10 @@ export function scoreAgentsMd(cwd: string): AgentsMdHealth {
     (hasBv ? 10 : 0)
   );
 
-  return { score, hasCoreRules, coreRuleCount, hasCoordination, hasMemory, hasBr, hasBv, missing };
+  const result = { score, hasCoreRules, coreRuleCount, hasCoordination, hasMemory, hasBr, hasBv, missing };
+  _scoreCacheKey = cwd;
+  _scoreCacheValue = result;
+  return result;
 }
 
 /**
@@ -277,7 +294,7 @@ export async function ensureCoreRules(cwd: string): Promise<void> {
     return;
   }
 
-  const content = readFileSync(agentsMdPath, "utf-8");
+  const content = normalizeText(readFileSync(agentsMdPath, "utf-8"));
   if (!content.includes(CORE_RULES_MARKER)) {
     // Insert core rules after the header (before other sections) for visibility
     appendFileSync(agentsMdPath, "\n" + CORE_RULES_SECTION.trimStart(), "utf-8");
@@ -303,7 +320,7 @@ export async function ensureAgentMailSection(cwd: string): Promise<void> {
     return;
   }
 
-  let content = readFileSync(agentsMdPath, "utf-8");
+  let content = normalizeText(readFileSync(agentsMdPath, "utf-8"));
 
   // Ensure core rules are present
   if (!content.includes(CORE_RULES_MARKER)) {

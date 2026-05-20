@@ -1,0 +1,29 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://agent-flywheel.dev/schemas/inputs/orch_wrap_up_gate.json",
+  "title": "flywheel: orch_wrap_up_gate input",
+  "description": "[DEPRECATED — use flywheel_wrap_up_gate instead; removed in v4.0] MANDATORY when all beads are reviewed and the queue is empty: wrap-up userGate + askQuestion. Call AskQuestion with askQuestion before any commit. confirmWrapUp after user clicks.",
+  "type": "object",
+  "properties": {
+    "cwd": {
+      "type": "string",
+      "description": "Project working directory (absolute path)"
+    },
+    "confirmWrapUp": {
+      "type": "string",
+      "enum": [
+        "full",
+        "commit_only",
+        "skip"
+      ],
+      "description": "User choice from the wrap-up gate options"
+    },
+    "force": {
+      "type": "boolean",
+      "description": "Re-prompt even if wrap-up was already confirmed"
+    }
+  },
+  "required": [
+    "cwd"
+  ]
+}

@@ -5,6 +5,13 @@
  * by analyzing descriptions for independently implementable sub-tasks
  * with disjoint file ownership.
  */
+// ─── Helpers ───────────────────────────────────────────────
+/** Escape characters that are dangerous inside double-quoted shell strings. */
+function shellEscape(s) {
+    return s
+        .replace(/[\n\r]/g, " ") // newlines/carriage returns become spaces
+        .replace(/[\\"$`!]/g, "\\$&"); // escape shell metacharacters
+}
 // ─── Bottleneck Detection ───────────────────────────────────
 /**
  * Identify beads that should be split based on bv insights.
@@ -12,7 +19,7 @@
  */
 export function identifyBottlenecks(insights, beads, threshold = 0.3) {
     return (insights.Bottlenecks ?? [])
-        .filter((b) => b.Value >= threshold)
+        .filter((b) => typeof b.Value === "number" && !Number.isNaN(b.Value) && b.Value >= threshold)
         .map((b) => {
         const bead = beads.find((bead) => bead.id === b.ID);
         return bead ? { bead, betweenness: b.Value } : null;
@@ -97,14 +104,37 @@ export function parseSplitProposal(output, beadId, beadTitle, betweenness) {
                 }
             }
         }
+        // Detect overlapping files across children
+        const fileCounts = new Map();
+        for (const child of children) {
+            for (const f of child.files) {
+                fileCounts.set(f, (fileCounts.get(f) ?? 0) + 1);
+            }
+        }
+        const overlapping = [...fileCounts.entries()]
+            .filter(([, count]) => count > 1)
+            .map(([f]) => f);
+        let finalSplittable = splittable && children.length >= 2;
+        let finalReason = reason;
+        // Single-child override
+        if (splittable && children.length < 2) {
+            finalSplittable = false;
+            const overrideMsg = `LLM proposed split but returned ${children.length} child(ren) — need at least 2 for meaningful parallelism`;
+            finalReason = finalReason ? `${finalReason}; ${overrideMsg}` : overrideMsg;
+        }
+        // Overlapping files warning
+        if (overlapping.length > 0) {
+            const warnMsg = `Warning: overlapping files across children: ${overlapping.join(", ")}`;
+            finalReason = finalReason ? `${finalReason}; ${warnMsg}` : warnMsg;
+        }
         return {
             originalBeadId: beadId,
             originalTitle: beadTitle,
             betweennessScore: betweenness,
             dependentCount: 0,
             children,
-            splittable: splittable && children.length >= 2,
-            reason,
+            splittable: finalSplittable,
+            reason: finalReason,
         };
     }
     catch {
@@ -157,9 +187,10 @@ export function formatSplitCommands(proposal) {
         "",
     ];
     for (const child of proposal.children) {
-        const desc = child.description.replace(/"/g, '\\"');
-        const filesLine = child.files.length > 0 ? `\\n### Files: ${child.files.join(", ")}` : "";
-        commands.push(`br create "${child.title}" -t task -p 2 --description "${desc}${filesLine}"`);
+        const desc = shellEscape(child.description);
+        const title = shellEscape(child.title);
+        const filesLine = child.files.length > 0 ? `\\n### Files: ${child.files.map(shellEscape).join(", ")}` : "";
+        commands.push(`br create "${title}" -t task -p 2 --description "${desc}${filesLine}"`);
     }
     commands.push("");
     commands.push(`# After creating children, transfer dependencies:`);

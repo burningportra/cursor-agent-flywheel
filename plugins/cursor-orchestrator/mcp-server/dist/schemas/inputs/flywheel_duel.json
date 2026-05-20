@@ -1,0 +1,48 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://agent-flywheel.dev/schemas/inputs/flywheel_duel.json",
+  "title": "flywheel: flywheel_duel input",
+  "description": "Cursor-native dueling idea wizards: independent Task agents with different models, cross-score, synthesize. Default for discovery (mode=ideas) and adversarial plan (mode=architecture). Call without confirmDuelModels for duelModelsGate; call again after the user picks. Set FW_DUEL_BACKEND=ntm only for legacy NTM+Codex/Gemini CLIs.",
+  "type": "object",
+  "properties": {
+    "cwd": {
+      "type": "string",
+      "description": "Project working directory (absolute path)"
+    },
+    "mode": {
+      "type": "string",
+      "enum": [
+        "ideas",
+        "architecture",
+        "security",
+        "reliability",
+        "ux",
+        "performance"
+      ],
+      "default": "ideas",
+      "description": "Duel type — ideas for discovery, architecture for planning"
+    },
+    "focus": {
+      "type": "string",
+      "description": "Topic anchor (defaults to state.selectedGoal)"
+    },
+    "top": {
+      "type": "number",
+      "description": "Top items per wizard after winnowing (default 5 for ideas, 3 otherwise)"
+    },
+    "output": {
+      "type": "string",
+      "description": "Report path relative to cwd (default under docs/discovery or docs/plans)"
+    },
+    "confirmDuelModels": {
+      "description": "User choice: \"recommended\", \"defaults\", or { wizard_a, wizard_b, wizard_c? }"
+    },
+    "skipDuelModelsGate": {
+      "type": "boolean",
+      "description": "Skip model confirmation (tests/automation only)"
+    }
+  },
+  "required": [
+    "cwd"
+  ]
+}

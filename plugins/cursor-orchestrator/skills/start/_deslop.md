@@ -1,0 +1,224 @@
+# Simplify Pass — `/agent-flywheel:start` → "Simplify pass" (a.k.a. Deslop pass)
+
+**What this is:** the canonical engine here is `/simplify-and-refactor-code-isomorphically`. Every one of the four modes below (Single-pass / Single + fresh-eyes / 5-Pi swarm / Iterative 10x) ultimately invokes that skill — what changes between modes is the orchestration around it (number of agents, fresh-eyes review gates, iteration count). The "deslop" framing this file ships with adds the discipline layer (baseline capture, ledger, isomorphism cards) that makes the skill safe to apply at scale; the menu label "Simplify pass" surfaces the skill's actual name so users searching for it find this path.
+
+**When to use:** the user invoked `/agent-flywheel:start` and picked **"Simplify pass"** (or the legacy label "Deslop pass") from the Step 0d/0e menu — they want to apply `/simplify-and-refactor-code-isomorphically` to the project as a proof-obligated, isomorphism-preserving refactor pass. This is meaningful on any repo (with or without open beads) and is the canonical "reduce AI-junk without changing behavior" workflow.
+
+**How to use:** read this file, then surface a follow-up `AskUserQuestion` so the user picks the invocation mode (single-pass / fresh-eyes / 5-Cod swarm — codex-heavy mode is the deslop signature and an explicit override of the v3.17.0 canonical cc:cod:gem 1:1:1; the substitution ladder gmi→cod→pi→cc applies when Codex is unavailable on the host, per AGENTS.md NTM pane priority / iterative). Do NOT pick a mode unilaterally — per UNIVERSAL RULE 1, this is a labeled-option decision. The slash-named skills referenced below (`/simplify-and-refactor-code-isomorphically`, `/repeatedly-apply-skill`, `/ntm`, `/vibing-with-ntm`) are load-bearing — invoke via the `Skill` tool, do NOT paraphrase.
+
+---
+
+## Step 1: Mode selection (mandatory)
+
+```
+AskUserQuestion(questions: [{
+  question: "How do you want to apply the deslop pass?",
+  header: "Deslop mode",
+  options: [
+    { label: "Single-pass (Recommended)", description: "One in-process invocation of /simplify-and-refactor-code-isomorphically. Fast; good for small/medium repos or initial exploration." },
+    { label: "Single + fresh-eyes", description: "Single-pass, then a verbatim fresh-eyes review prompt to catch any isomorphism violations the first pass introduced." },
+    { label: "5-Cod swarm via NTM", description: "Spawn 5 Codex panes — codex-heavy mode is the deslop signature (per-pane prompts are codex-tuned) and an explicit override of the v3.17.0 cc:cod:gem 1:1:1 canonical. Each pane tackles a different code area; Claude (you) is controller running fresh-eyes review. Substitution ladder gmi→cod→pi→cc when Codex unavailable on this host (see AGENTS.md NTM pane priority). 5-min looper. Best for large repos." },
+    { label: "Iterative (10x via /repeatedly-apply-skill)", description: "Solo agent re-applies the skill 10 times with fresh-eyes review between passes. No NTM required. Good for slow-burn cleanup." }
+  ],
+  multiSelect: false
+}])
+```
+
+Route on the answer:
+
+| Mode | Action |
+|------|--------|
+| Single-pass | Run §2 only |
+| Single + fresh-eyes | Run §2, then §3 |
+| 5-Cod swarm (codex-heavy override) | Run §4 |
+| Iterative | Run §5 |
+
+---
+
+## Step 2: Single-pass invocation (verbatim prompt)
+
+> ❯ First read ALL of the [AGENTS.md](http://AGENTS.md) file and [README.md](http://README.md) file super carefully and understand ALL of both! Then use your code investigation agent mode to fully understand the code and technical architecture and purpose of the project. Then, I want you to meticulously and exhaustively apply the /simplify-and-refactor-code-isomorphically skill to the project.
+
+Concretely:
+1. `Read` AGENTS.md (root) end-to-end.
+2. `Read` README.md (root) end-to-end.
+3. Spawn an Explore subagent (or use the Explore tool) to map architecture + technical purpose. Capture findings.
+4. Invoke the skill via the `Skill` tool: `Skill(skill: "simplify-and-refactor-code-isomorphically")`.
+5. Follow the skill's internal protocol (baseline capture → duplication mapping → candidate scoring → isomorphism cards → narrow edits → ledger).
+
+The skill itself owns the proof-of-isomorphism discipline; the flywheel's only job is to invoke it after the agent has loaded project context.
+
+---
+
+## Step 3: Fresh-eyes follow-up (verbatim prompt)
+
+After §2 returns, dispatch this exact prompt (also via `Skill` if it's a registered skill, or as the next user-style message in the same turn):
+
+> ❯ Great, now I want you to carefully read over all of the new code you just wrote and other existing code you just modified with "fresh eyes" looking super carefully for any obvious bugs, errors, problems, issues, confusion, etc. Carefully fix anything you uncover. Did you actually verify that everything was preserved according to the skill?
+
+The fresh-eyes review is the second-half of the proof obligation — the skill scores its own changes, but a clean re-read catches semantic regressions the candidate-scorer may have missed.
+
+---
+
+## Step 4: 5-Pi swarm via NTM (Codex fallback)
+
+This mode mirrors the v3.6.0 wave-orchestration pattern but specialised for refactor-not-feature work.
+
+### 4a. Pre-flight (mandatory — same as `_implement.md`)
+
+1. **NTM readiness gate** — re-detect inline (per `_implement.md` Pre-flight at top of Step 7). If misconfigured, surface fix-or-fallback `AskUserQuestion`.
+2. **CLI capability check** — `which codex` MUST succeed. If not, fall back to §5 iterative mode (don't silently degrade — surface a `AskUserQuestion` first).
+2a. **Model-config pre-spawn gate (MANDATORY when spawn requests `--cod=N>0` or `--gmi=M>0`).** Call `flywheel_doctor` and read `DOCTOR_REPORT.checks`. Apply per check BEFORE `ntm spawn`:
+
+   | Check | Trigger | Action |
+   |-------|---------|--------|
+   | `codex_config_compat` severity ∈ {yellow, red} | `--cod=N>0` | Auto-downgrade `--cod=N → 0`. Per the substitution ladder (gmi→cod→pi→cc; codex unavailable → reassign to gmi if green, else cc), redistribute the dropped share. Log: `⚠ codex_config_compat=<sev>; downgrading --cod=N→0 (fix: flywheel_remediate({checkName: 'codex_config_compat', mode: 'execute', autoConfirm: true}))`. Then route to §5 iterative mode if the surviving cod count is 0. |
+   | `gemini_model_compat` severity ∈ {yellow, red} | `--gmi=M>0` | Auto-downgrade `--gmi=M → 0`. Redistribute via ladder. Log: `⚠ gemini_model_compat=<sev>; downgrading --gmi=M→0 (configured model outside allowlist)`. If the check is absent from `DOCTOR_REPORT.checks` (bead `claude-orchestrator-37n6` not yet shipped), treat as `green`. |
+
+   Deslop's primary lane is `cod` (per §4b). If the downgrade leaves zero usable cod panes, surface an `AskUserQuestion` offering routes: (1) proceed all-cc swarm, (2) fall back to §5 iterative mode, (3) abort. Do NOT silently spawn a degraded swarm with fewer-than-intended panes — operator should make the call.
+3. **Agent Mail bootstrap** — `macro_start_session` for the coordinator (you). Capture registration token.
+4. **Baseline capture (THE proof obligation)** — BEFORE any deslop edits, record:
+   - Full test suite green: `rch test` (or stack-appropriate command). Capture pass-count + duration.
+   - LOC: `tokei .` or `cloc . --vcs=git`. Snapshot to `.pi-flywheel/deslop-baseline-<sha>.json`.
+   - Warnings: `rch build 2>&1 | grep -ic warning` (or stack equivalent).
+   - Optional golden artifacts: capture stdout/stderr of any deterministic CLI commands the project ships.
+   The skill's ledger compares post-edit numbers to this baseline. **No baseline = no proof = abort.**
+5. **Disk-space guard** — `df -h $PWD`. <5GB → run stale-artifact cleanup (`git clean -fdX -- '<build-output-dirs>'` only — never `-fdx`) before spawning.
+6. **Tender-daemon spawn** (v3.6.0+) — `node $CLAUDE_PLUGIN_ROOT/mcp-server/dist/scripts/tender-daemon.js --session=… --interval=30000 --logfile=.pi-flywheel/tender-events.log --agent=<your-name> &`. Capture PID for shutdown.
+
+### 4b. Spawn the swarm
+
+<!-- pane001-override: deslop is codex-heavy by design (see §4c per-pane prompts) -->
+
+```bash
+SESSION="${NTM_PROJECT}--deslop"
+# Pane-type priority (see AGENTS.md "NTM pane priority"):
+#   the v3.17.0 canonical default is mixed cc:cod:gem 1:1:1. Deslop's
+#   --cod=5 shape is an explicit override — the per-pane prompts in §4c
+#   are codex-tuned (terse preambles, COMPLETION_REPORT block, input-buffer
+#   flush), and the deslop discipline depends on Codex's refactor style.
+#   When Codex is unavailable, fall through the substitution ladder:
+#   --gmi=5 first, then --pi=5, then --cc=5. None of the fallbacks share
+#   Codex's COMPLETION_REPORT contract — surface that to the user before
+#   the swarm spawns.
+ntm spawn "$NTM_PROJECT" --label deslop --no-user --cod=5 --stagger-mode=smart
+```
+
+Pane indices 1–5 are all Codex. Allocate 5 names from `mcp-server/src/adapters/agent-names.ts` via `allocateAgentNames(5, 'deslop-<sha>')`. Each pane gets a distinct **code area assignment** (e.g. "tools/", "adapters/", "tests/", "scripts/", "docs/" — adapt to the repo's structure).
+
+### 4c. Per-pane prompt (Codex-tuned)
+
+For each pane `<N>` ∈ 1..5:
+
+```bash
+ntm --robot-send="$SESSION" --panes=<N> --type=cod --msg='## STEP 0 — AGENT MAIL BOOTSTRAP (MANDATORY)
+0a. macro_start_session(human_key=<cwd>, program=codex, model=<your model name>, task_description="Deslop pane <N>: <area-assignment>"). Your name is <pane-N-name>.
+0b. file_reservation_paths on the files inside <area-assignment>/. Refresh every 30 min via renew_file_reservations.
+0c. send_message to "<coordinator-name>" subject "[deslop] pane <N> started" with your area assignment.
+0d. Re-read AGENTS.md and README.md.
+
+## STEP 1 — APPLY SKILL
+Invoke /simplify-and-refactor-code-isomorphically scoped to <area-assignment>/. Follow the skill verbatim — baseline, duplication map, candidates, isomorphism cards, narrow edits, ledger. Do NOT touch files outside your reserved area; coordinate via Agent Mail if you need to.
+
+## STEP 2 — VALIDATE (project-level build mutex — see Step 4d)
+scripts/build-mutex.sh rch build  # waits for sibling agents
+scripts/build-mutex.sh rch test
+Both must pass. If a test that passed at baseline now fails, your edit broke isomorphism — REVERT, do not commit.
+
+## STEP 3 — COMMIT (one lever per commit — skill rule)
+Each surviving candidate becomes its own commit: refactor(deslop): <one-line summary> [pane <N>]
+Reference the skill ledger entry id in the commit body.
+
+## STEP 4 — RELEASE + REPORT
+release_file_reservations.
+send_message to "<coordinator-name>" subject "[deslop] pane <N> done" with: candidates considered, accepted, rejected (and why), commits made, baseline-vs-final delta from the ledger. Target ≤15 bullets.
+
+COMPLETION_REPORT format. STOP after report.
+
+' && tmux send-keys -t "$SESSION":0.<N> Enter Enter   # codex input-buffer flush
+sleep 30   # stagger
+```
+
+### 4d. Project-level build mutex (anti-thundering-herd)
+
+Five Codex agents finishing edits simultaneously and all running `rch build` at once will saturate disk + CPU and cause spurious failures. Enforce serialization via the portable wrapper:
+
+```bash
+scripts/build-mutex.sh rch build
+```
+
+Bake `scripts/build-mutex.sh` into every per-pane prompt's STEP 2 (above). The wrapper uses an atomic `mkdir` lock under `.pi-flywheel/` and does not require the Linux-only `flock` binary. If a pane waits >5 min on the lock, escalate via `/slb` two-person approval before killing.
+
+### 4e. Supervision (looper default; ntm controller alternative)
+
+**Default — `Skill: loop` (5-min cadence per user spec).** Invoke the `Skill` tool with `loop`:
+```
+Skill(skill: "loop", args: "5m tend the deslop swarm; tail .pi-flywheel/tender-events.log; ensure each Pi pane picks a different code area (no overlap); verify isomorphism claims by spot-checking ledger entries; nudge idle panes via ntm --robot-send (or ntm assign --auto --strategy=dependency for next-bead picks); reopen any stalled in_progress beads (in_progress + no commit in 30min + agent absent from list_window_identities)")
+```
+
+**Alternative — `ntm controller` (opt-in; offload supervision to a dedicated pane).** If the user wants to walk away from the main Claude session, spawn a dedicated coordinator agent in pane 0:
+```bash
+ntm controller "$SESSION" --agent-type=cc
+```
+The controller follows ntm's built-in default prompt (`--robot-snapshot` → block on `--robot-attention` → `--robot-tail` → mail check → `--robot-interrupt`). Trade-off: separate context budget, no main-session burn — but the controller is a different agent with its own context, so any Simplify-pass-specific knowledge (which subsystems each pane is reserved for, ledger conventions) must be injected via the custom-prompt template (`{{.Session}}`, `{{.AgentList}}`, `{{.ProjectDir}}`) on launch. If the controller pane dies mid-run, climb the stuck-pane ladder (`--robot-is-working` → `--robot-smart-restart` → escalate to looper fallback). The tender-daemon stays running in either mode.
+
+### 4f. Controller fresh-eyes review (you, the Claude coordinator)
+
+While the swarm grinds, periodically (every other looper tick) read each pane's most recent commit via `git show <sha>` and apply fresh-eyes review per §3. If you spot an isomorphism violation a Codex pane missed, send a `[deslop] pane <N> revert request` message via Agent Mail with the specific finding.
+
+### 4g. Termination
+
+Wave done when: all 5 panes sent `[deslop] pane <N> done` AND no new commits in 10 min AND ledger shows no pending candidates.
+- `kill -TERM $tender_daemon_pid`
+- `Skill(skill: "loop", args: "stop")` to cancel the looper
+- Leave NTM session alive (user may want to inspect)
+- Transition to Step 9.5 wrap-up (`_wrapup.md`) for the version bump + commit-summary
+
+---
+
+## Step 5: Iterative mode (`/repeatedly-apply-skill`)
+
+For solo-agent use without NTM. Invoke once via the `Skill` tool:
+
+```
+Skill(skill: "repeatedly-apply-skill", args: "10 times: simplify-and-refactor-code-isomorphically; apply fresh-eyes review between each pass")
+```
+
+The wrapper handles the loop, fresh-eyes review interleaving, and termination. Pre-conditions §4a items 1, 3, 4 still apply (skip NTM-specific items 2, 5, 6).
+
+---
+
+## Operator decoder (apply while executing the chosen mode)
+
+| Phrase in user's documentation | Concrete action |
+|--------------------------------|-----------------|
+| "isomorphism cards" | The skill's per-candidate proof-table covering ordering, errors, logs, metrics, side effects, async cancellation, hook identity, serialization, lifecycle. Required before any edit lands. |
+| "baseline" | Recorded in §4a item 4 BEFORE any edits. Without it the skill cannot prove preservation. |
+| "ledger" | The skill's per-pass record of accepted/rejected candidates + isomorphism-card outcomes. Lives in the project's `.simplify-ledger/` (the skill creates it). Read this AFTER each pass to drive the controller fresh-eyes review. |
+| "one lever per commit" | Each accepted candidate = one commit. Do NOT batch. The skill enforces this; the swarm-mode prompt repeats it. |
+| "no rewrites, no sed, no drive-by fixes" | Mechanical edits only — `Edit` tool one location at a time. If a candidate requires a rewrite, the skill's risk-scorer should reject it. |
+| "deletion without explicit permission" | The skill never deletes files autonomously; it surfaces deletion candidates for the operator to confirm. Surface via `AskUserQuestion`. |
+| "pathology catalog" | The skill ships a list of AI-junk patterns (defensive branches for impossible inputs, duplicated wrappers, _v2 files, orphaned helpers, stale types, comments-as-task-plans). It scans for these automatically. |
+| "5+ Codex instances on a 5-min /loop" | Implemented in §4 as 5 Codex panes on a 5-min `/loop`. Codex-heavy is the deslop signature (per-pane prompts are codex-tuned) and is an explicit override of the v3.17.0 canonical cc:cod:gem 1:1:1; the substitution ladder (gmi→cod→pi→cc, per AGENTS.md NTM pane priority) kicks in only when Codex is unavailable on the host. Pane count + looper interval are verbatim either way. |
+| "Claude Code as final fresh eyes" | Implemented in §4f (controller fresh-eyes between looper ticks). |
+
+---
+
+## Pre-conditions checklist (TL;DR — applies to ALL modes)
+
+1. AGENTS.md + README.md read end-to-end ✓
+2. Code investigation done (Explore agent OR direct read) ✓
+3. Baseline captured to `.pi-flywheel/deslop-baseline-<sha>.json` (tests green, LOC, warnings) ✓
+4. Skill installed at `~/.claude/skills/simplify-and-refactor-code-isomorphically` (verified by `Skill` tool — failure surfaces a clear "not installed" error) ✓
+5. **Swarm mode only:** NTM ready, codex CLI present, tender-daemon spawned, build mutex configured ✓
+6. **Iterative mode only:** `/repeatedly-apply-skill` installed at `~/.claude/skills/repeatedly-apply-skill` ✓
+
+---
+
+## Termination / hand-off
+
+- Skill reports "no more candidates worth pursuing" → final fresh-eyes review (per §3) → transition to Step 9.5 wrap-up.
+- User interrupts → pause politely; do NOT force-stop swarm panes until user confirms via `AskUserQuestion`.
+- Baseline test broken AND no pane responsible (e.g. environmental) → halt all panes via `ntm --robot-send` shutdown_request → diagnose before resuming.
+- Build mutex wait/deadlock (>5min wait) → escalate via `/slb` two-person approval before any kill.
+- New beads created from deslop findings → enqueue via `flywheel_advance_wave` (v3.6.0); they enter the standard `bv triage` queue.

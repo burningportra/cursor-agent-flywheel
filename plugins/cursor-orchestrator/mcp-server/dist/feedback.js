@@ -1,15 +1,21 @@
 /**
  * Self-Improvement Loop — Feedback & Prompt Tracking
  *
- * A. Post-orchestration feedback — structured survey saved after completion
+ * A. Post-flywheel feedback — structured survey saved after completion
  * B. Automatic CASS context injection — prepend relevant rules to prompts
  * C. Prompt effectiveness tracking — track which prompts produce real changes
  */
 import { existsSync, readFileSync, writeFileSync, mkdirSync, readdirSync, appendFileSync } from "fs";
 import { join } from "path";
-const FEEDBACK_DIR = ".pi/orchestrator-feedback";
+import { parseFeedbackFile } from "./parsers.js";
+import { createLogger } from "./logger.js";
+import { errMsg } from "./errors.js";
+import { assertSafeSegment } from "./utils/path-safety.js";
+import { normalizeText } from "./utils/text-normalize.js";
+const log = createLogger("feedback");
+const FEEDBACK_DIR = ".pi/flywheel-feedback";
 /**
- * Collect feedback from the current orchestration state.
+ * Collect feedback from the current flywheel state.
  */
 export function collectFeedback(state) {
     const beadResults = Object.values(state.beadResults ?? {});
@@ -52,22 +58,26 @@ export function loadAllFeedback(cwd) {
             .sort() // chronological order
             .map((f) => {
             try {
-                return JSON.parse(readFileSync(join(dir, f), "utf8"));
+                const raw = normalizeText(readFileSync(join(dir, f), "utf8"));
+                const parsed = parseFeedbackFile(raw);
+                return parsed.ok ? parsed.data : null;
             }
-            catch {
+            catch (err) {
+                log.warn("failed to read feedback file", { code: "parse_failure", file: f, cause: errMsg(err) });
                 return null;
             }
         })
             .filter((f) => f != null);
     }
-    catch {
+    catch (err) {
+        log.warn("failed to read feedback directory", { code: "parse_failure", cause: errMsg(err) });
         return [];
     }
 }
 export function computeFeedbackStats(feedbacks) {
     if (feedbacks.length === 0) {
         return {
-            totalOrchestrations: 0,
+            totalFlywheelRuns: 0,
             avgBeadCount: 0,
             avgCompletionRate: 0,
             avgPolishRounds: 0,
@@ -86,7 +96,7 @@ export function computeFeedbackStats(feedbacks) {
     const planScores = feedbacks.filter((f) => f.planQualityScore != null).map((f) => f.planQualityScore);
     const foregoneScores = feedbacks.filter((f) => f.foregoneScore != null).map((f) => f.foregoneScore);
     return {
-        totalOrchestrations: n,
+        totalFlywheelRuns: n,
         avgBeadCount: Math.round(avgBeadCount * 10) / 10,
         avgCompletionRate: Math.round(avgCompletionRate * 100),
         avgPolishRounds: Math.round(avgPolishRounds * 10) / 10,
@@ -96,10 +106,10 @@ export function computeFeedbackStats(feedbacks) {
     };
 }
 export function formatFeedbackStats(stats) {
-    if (stats.totalOrchestrations === 0)
-        return "No orchestration history yet.";
+    if (stats.totalFlywheelRuns === 0)
+        return "No flywheel history yet.";
     const lines = [
-        `📊 **Orchestration History** (${stats.totalOrchestrations} runs)`,
+        `📊 **Flywheel History** (${stats.totalFlywheelRuns} runs)`,
         `  Avg beads/run:      ${stats.avgBeadCount}`,
         `  Completion rate:     ${stats.avgCompletionRate}%`,
         `  Avg polish rounds:   ${stats.avgPolishRounds}`,
@@ -122,9 +132,10 @@ export function withCassContext(prompt, cwd, taskDescription) {
         const memory = readMemory(cwd, taskDescription);
         if (!memory)
             return prompt;
-        return `## Context from Prior Orchestrations\n${memory}\n\n---\n\n${prompt}`;
+        return `## Context from Prior Flywheel Runs\n${memory}\n\n---\n\n${prompt}`;
     }
-    catch {
+    catch (err) {
+        log.warn("CASS context injection failed", { code: "cli_not_available", cause: errMsg(err) });
         return prompt;
     }
 }
@@ -205,18 +216,33 @@ export function parseToolFeedback(output, toolName) {
             suggestions: Array.isArray(p.suggestions) ? p.suggestions : [],
         };
     }
-    catch {
+    catch (err) {
+        log.warn("failed to parse tool feedback", { code: "parse_failure", cause: errMsg(err) });
         return null;
     }
 }
-/** Save tool feedback to .pi-orchestrator-feedback/tools/<toolName>.jsonl */
+/** Save tool feedback to .pi-flywheel-feedback/tools/<toolName>.jsonl */
 export function saveToolFeedback(cwd, feedback) {
+    // Path-traversal guard (bead mq3): toolName is derived from parsed model
+    // output, so a malicious or hallucinated "../../../etc/passwd" would escape
+    // the feedback dir. Reject any segment that contains separators, control
+    // chars, or the CE-blunder colon canary.
+    const safe = assertSafeSegment(feedback.toolName);
+    if (!safe.ok) {
+        log.warn("refusing to save tool feedback for unsafe toolName", {
+            code: "invalid_input",
+            cause: `${safe.reason}: ${safe.message}`,
+        });
+        return;
+    }
     try {
-        const dir = join(cwd, ".pi-orchestrator-feedback", "tools");
+        const dir = join(cwd, ".pi-flywheel-feedback", "tools");
         mkdirSync(dir, { recursive: true });
-        const file = join(dir, `${feedback.toolName}.jsonl`);
+        const file = join(dir, `${safe.value}.jsonl`);
         appendFileSync(file, JSON.stringify(feedback) + "\n", "utf8");
     }
-    catch { /* best-effort */ }
+    catch (err) {
+        log.warn("failed to save tool feedback", { code: "cli_failure", cause: errMsg(err) });
+    }
 }
 //# sourceMappingURL=feedback.js.map

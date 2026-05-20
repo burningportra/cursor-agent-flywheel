@@ -1,22 +1,22 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runPlan } from '../../tools/plan.js';
 import { createMockExec, makeState } from '../helpers/mocks.js';
-import type { OrchestratorState } from '../../types.js';
+import type { FlywheelState } from '../../types.js';
 
 // ─── Helpers ──────────────────────────────────────────────────
 
-function makeCtx(stateOverrides: Partial<OrchestratorState> = {}, cwd = '/fake/cwd') {
+function makeCtx(stateOverrides: Partial<FlywheelState> = {}, cwd = '/fake/cwd') {
   const exec = createMockExec();
   const state = makeState({ selectedGoal: 'Add caching layer', ...stateOverrides });
-  const saved: OrchestratorState[] = [];
+  const saved: FlywheelState[] = [];
   const ctx = {
     exec,
     cwd,
     state,
-    saveState: (s: OrchestratorState) => { saved.push(structuredClone(s)); },
+    saveState: (s: FlywheelState) => { saved.push(structuredClone(s)); },
     clearState: () => {},
   };
   return { ctx, state, saved };
@@ -44,9 +44,20 @@ describe('runPlan', () => {
     const result = await runPlan(ctx, { cwd: '/fake/cwd', mode: 'standard' });
 
     const text = result.content[0].text;
+    expect(result.structuredContent).toMatchObject({
+      tool: 'flywheel_plan',
+      version: 1,
+      status: 'ok',
+      phase: 'planning',
+      data: {
+        kind: 'plan_prompt',
+        mode: 'standard',
+        goal: 'Add caching layer',
+      },
+    });
     expect(text).toContain('Add caching layer');
     expect(text).toContain('Plan Document Requirements');
-    expect(text).toContain('orch_approve_beads');
+    expect(text).toContain('flywheel_approve_beads');
   });
 
   it('sets phase to planning in standard mode', async () => {
@@ -131,13 +142,69 @@ describe('runPlan', () => {
 
       const { ctx, state } = makeCtx({}, tmpDir);
 
+    const result = await runPlan(ctx, { cwd: tmpDir, planFile: 'plan.md' });
+
+    expect(result.isError).toBeUndefined();
+    expect(result.structuredContent).toMatchObject({
+      tool: 'flywheel_plan',
+      version: 1,
+      status: 'ok',
+      phase: 'awaiting_plan_approval',
+      data: {
+        kind: 'plan_registered',
+        source: 'plan_file',
+        goal: 'Add caching layer',
+        planDocument: 'plan.md',
+      },
+    });
+    expect(state.phase).toBe('awaiting_plan_approval');
+    expect(state.planDocument).toBe('plan.md');
+    expect(state.planRefinementRound).toBe(0);
+    expect(result.content[0].text).toContain('Plan loaded from');
+    });
+
+    // ── claude-orchestrator-ttk: source="picked-up-existing-plan" gates Step 5.45 ──
+
+    it('records planSource="picked-up-existing-plan" when source arg is supplied', async () => {
+      const planPath = join(tmpDir, 'plan.md');
+      writeFileSync(planPath, '# Picked-up Plan\n');
+
+      const { ctx, state } = makeCtx({}, tmpDir);
+      const result = await runPlan(ctx, {
+        cwd: tmpDir,
+        planFile: 'plan.md',
+        source: 'picked-up-existing-plan',
+      });
+
+      expect(result.isError).toBeUndefined();
+      expect(state.planSource).toBe('picked-up-existing-plan');
+      expect(result.structuredContent).toMatchObject({
+        data: {
+          kind: 'plan_registered',
+          planSource: 'picked-up-existing-plan',
+          pickedUp: true,
+        },
+      });
+      // Step 5.45 hint must appear in the user-facing text so the orchestrator
+      // doesn't blindly jump to flywheel_approve_beads.
+      expect(result.content[0].text).toContain('5.45');
+    });
+
+    it('does NOT set planSource when source arg is omitted (fresh plan path)', async () => {
+      const planPath = join(tmpDir, 'plan.md');
+      writeFileSync(planPath, '# Fresh Plan\n');
+
+      const { ctx, state } = makeCtx({}, tmpDir);
       const result = await runPlan(ctx, { cwd: tmpDir, planFile: 'plan.md' });
 
       expect(result.isError).toBeUndefined();
-      expect(state.phase).toBe('awaiting_plan_approval');
-      expect(state.planDocument).toBe('plan.md');
-      expect(state.planRefinementRound).toBe(0);
-      expect(result.content[0].text).toContain('Plan loaded from');
+      expect(state.planSource).toBeUndefined();
+      expect(result.structuredContent).toMatchObject({
+        data: { pickedUp: false },
+      });
+      // Default text path → flywheel_approve_beads, not 5.45.
+      expect(result.content[0].text).toContain('flywheel_approve_beads');
+      expect(result.content[0].text).not.toContain('5.45');
     });
 
     it('returns error when planFile does not exist', async () => {
@@ -147,6 +214,47 @@ describe('runPlan', () => {
 
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain('planFile not found');
+    });
+
+    it('rejects planFile symlinks that resolve outside cwd', async () => {
+      const outsideDir = mkdtempSync(join(tmpdir(), 'plan-outside-'));
+      const outsidePlan = join(outsideDir, 'external.md');
+      writeFileSync(outsidePlan, '# External Plan\n');
+      symlinkSync(outsidePlan, join(tmpDir, 'plan.md'));
+
+      try {
+        const { ctx } = makeCtx({}, tmpDir);
+
+        const result = await runPlan(ctx, { cwd: tmpDir, planFile: 'plan.md' });
+
+        expect(result.isError).toBe(true);
+        expect(result.content[0].text).toContain('planFile rejected by realpath guard');
+        expect((result.structuredContent as any)?.data?.error?.code).toBe('invalid_input');
+      } finally {
+        rmSync(outsideDir, { recursive: true, force: true });
+      }
+    });
+
+    it('rejects planFile when a directory component is a symlink escaping cwd', async () => {
+      const outsideDir = mkdtempSync(join(tmpdir(), 'plan-outside-dir-'));
+      const outsidePlan = join(outsideDir, 'plan.md');
+      writeFileSync(outsidePlan, '# External Plan\n');
+      symlinkSync(outsideDir, join(tmpDir, 'subdir'));
+
+      try {
+        const { ctx } = makeCtx({}, tmpDir);
+
+        const result = await runPlan(ctx, {
+          cwd: tmpDir,
+          planFile: 'subdir/plan.md',
+        });
+
+        expect(result.isError).toBe(true);
+        expect(result.content[0].text).toContain('planFile rejected by realpath guard');
+        expect((result.structuredContent as any)?.data?.error?.code).toBe('invalid_input');
+      } finally {
+        rmSync(outsideDir, { recursive: true, force: true });
+      }
     });
 
     it('reports plan stats (chars, lines) in output', async () => {
@@ -179,22 +287,86 @@ describe('runPlan', () => {
     it('writes plan to disk and transitions to awaiting_plan_approval', async () => {
       const { ctx, state } = makeCtx({}, tmpDir);
 
-      const result = await runPlan(ctx, { cwd: tmpDir, planContent: '# Plan\n\nContent here' });
+    const result = await runPlan(ctx, { cwd: tmpDir, planContent: '# Plan\n\nContent here' });
 
-      expect(result.isError).toBeUndefined();
-      expect(state.phase).toBe('awaiting_plan_approval');
-      expect(state.planDocument).toMatch(/docs\/plans\/.*synthesized\.md$/);
-      expect(state.planRefinementRound).toBe(0);
-      expect(result.content[0].text).toContain('Plan received and saved');
+    expect(result.isError).toBeUndefined();
+    expect(result.structuredContent).toMatchObject({
+      tool: 'flywheel_plan',
+      version: 1,
+      status: 'ok',
+      phase: 'awaiting_plan_approval',
+      data: {
+        kind: 'plan_registered',
+        source: 'inline_plan_content',
+        goal: 'Add caching layer',
+      },
+    });
+    expect(state.phase).toBe('awaiting_plan_approval');
+    expect(state.planDocument).toMatch(/docs\/plans\/.*synthesized\.md$/);
+    expect(state.planRefinementRound).toBe(0);
+    expect(result.content[0].text).toContain('Plan received and saved');
     });
 
-    it('ignores empty/whitespace planContent', async () => {
+    it('returns empty_plan error for whitespace-only planContent', async () => {
       const { ctx } = makeCtx({}, tmpDir);
 
       const result = await runPlan(ctx, { cwd: tmpDir, planContent: '   ' });
 
-      // Should fall through to standard mode prompt
-      expect(result.content[0].text).toContain('Plan Document Requirements');
+      expect(result.isError).toBe(true);
+      expect(result.structuredContent).toMatchObject({
+        tool: 'flywheel_plan',
+        status: 'error',
+        data: { kind: 'error', error: { code: 'empty_plan' } },
+      });
+    });
+
+    it('returns deep_plan_all_failed when planContent contains the failure sentinel', async () => {
+      const { ctx } = makeCtx({}, tmpDir);
+
+      const result = await runPlan(ctx, { cwd: tmpDir, planContent: '(No planner outputs provided.)' });
+
+      expect(result.isError).toBe(true);
+      expect(result.structuredContent).toMatchObject({
+        tool: 'flywheel_plan',
+        status: 'error',
+        data: {
+          kind: 'error',
+          error: {
+            code: 'deep_plan_all_failed',
+            hint: 'Retry with mode=standard as fallback.',
+          },
+        },
+      });
+    });
+
+    it('returns empty_plan when planContent is an agent failure sentinel', async () => {
+      const { ctx } = makeCtx({}, tmpDir);
+
+      const result = await runPlan(ctx, { cwd: tmpDir, planContent: '(AGENT RETURNED EMPTY — correctness planner)' });
+
+      expect(result.isError).toBe(true);
+      expect(result.structuredContent).toMatchObject({
+        tool: 'flywheel_plan',
+        status: 'error',
+        data: { kind: 'error', error: { code: 'empty_plan' } },
+      });
+    });
+
+    it('restores planDocument when saveState returns false', async () => {
+      const exec = createMockExec();
+      const state = makeState({ selectedGoal: 'Add caching layer', planDocument: 'old-plan.md', phase: 'planning' });
+      const ctx = {
+        exec,
+        cwd: tmpDir,
+        state,
+        saveState: (_s: FlywheelState) => Promise.resolve(false),
+        clearState: () => {},
+      };
+
+      await runPlan(ctx, { cwd: tmpDir, planContent: '# Plan\n\nContent here' });
+
+      expect(state.planDocument).toBe('old-plan.md');
+      expect(state.phase).toBe('planning');
     });
 
     afterEach(() => {
@@ -209,10 +381,18 @@ describe('runPlan', () => {
 
     const result = await runPlan(ctx, { cwd: '/fake/cwd', mode: 'deep' });
 
-    const parsed = JSON.parse(result.content[0].text);
-    expect(parsed.action).toBe('spawn-plan-agents');
-    expect(parsed.goal).toBe('Add caching layer');
-    expect(parsed.planAgents.length).toBeGreaterThanOrEqual(3);
+    expect(result.structuredContent).toMatchObject({
+      tool: 'flywheel_plan',
+      version: 1,
+      status: 'ok',
+      phase: 'planning',
+      data: {
+        kind: 'deep_plan_spawn',
+        goal: 'Add caching layer',
+      },
+    });
+    const structured = result.structuredContent as { data: { planAgents: unknown[] } };
+    expect(structured.data.planAgents.length).toBeGreaterThanOrEqual(3);
   });
 
   it('includes correctness, robustness, and ergonomics perspectives in deep mode', async () => {
@@ -220,11 +400,43 @@ describe('runPlan', () => {
 
     const result = await runPlan(ctx, { cwd: '/fake/cwd', mode: 'deep' });
 
-    const parsed = JSON.parse(result.content[0].text);
-    const perspectives = parsed.planAgents.map((a: { perspective: string }) => a.perspective);
+    const structured = result.structuredContent as { data: { kind: string; planAgents: Array<{ perspective: string }> } };
+    expect(structured.data.kind).toBe('deep_plan_spawn');
+    const perspectives = structured.data.planAgents.map(a => a.perspective);
     expect(perspectives).toContain('correctness');
     expect(perspectives).toContain('robustness');
     expect(perspectives).toContain('ergonomics');
+  });
+
+  it('wires distinct Cursor models per planner by default', async () => {
+    const { ctx } = makeCtx();
+    delete process.env.FW_DEEP_PLAN_BACKEND;
+
+    const result = await runPlan(ctx, { cwd: '/fake/cwd', mode: 'deep' });
+    const structured = result.structuredContent as {
+      data: {
+        spawnBackend: string;
+        deepPlanModels: Record<string, string>;
+        planAgents: Array<{ perspective: string; model: string; spawnWith: string }>;
+        synthesisAgent: { model: string };
+      };
+    };
+
+    expect(structured.data.spawnBackend).toBe('cursor-task');
+    expect(structured.data.deepPlanModels.correctness).toBe('opus-4.6');
+    expect(structured.data.deepPlanModels.ergonomics).toBe('composer-2.5');
+    expect(structured.data.deepPlanModels.robustness).toBe('gpt-5.5-xhigh');
+
+    const byPerspective = Object.fromEntries(
+      structured.data.planAgents.map((a) => [a.perspective, a.model]),
+    );
+    expect(byPerspective.correctness).toBe('opus-4.6');
+    expect(byPerspective.ergonomics).toBe('composer-2.5');
+    expect(byPerspective.robustness).toBe('gpt-5.5-xhigh');
+    expect(new Set(Object.values(byPerspective)).size).toBe(3);
+    expect(structured.data.planAgents.every((a) => a.spawnWith === 'cursor-task')).toBe(true);
+    expect(structured.data.synthesisAgent.model).toBe('opus-4.6');
+    expect(result.content[0].text).toContain('Cursor deep plan spawn');
   });
 
   it('sets phase to planning in deep mode', async () => {
@@ -233,5 +445,146 @@ describe('runPlan', () => {
     await runPlan(ctx, { cwd: '/fake/cwd', mode: 'deep' });
 
     expect(state.phase).toBe('planning');
+  });
+
+  it('each planAgent task contains "Use ultrathink." in deep mode', async () => {
+    const { ctx } = makeCtx();
+
+    const result = await runPlan(ctx, { cwd: '/fake/cwd', mode: 'deep' });
+
+    const structured = result.structuredContent as { data: { planAgents: Array<{ task: string }> } };
+    for (const agent of structured.data.planAgents) {
+      expect(agent.task).toContain('Use ultrathink.');
+    }
+  });
+
+  it('synthesisPrompt contains "Use ultrathink." in deep mode', async () => {
+    const { ctx } = makeCtx();
+
+    const result = await runPlan(ctx, { cwd: '/fake/cwd', mode: 'deep' });
+
+    const structured = result.structuredContent as { data: { synthesisPrompt: string } };
+    expect(structured.data.synthesisPrompt).toContain('Use ultrathink.');
+  });
+
+  // ── Phase 0.5 brainstorm artifact handoff ────────────────────
+  // _planning.md §4.5 writes docs/brainstorms/<goal-slug>-<date>.md.
+  // flywheel_plan must auto-detect the latest match and inject it into the
+  // planner prompt for both standard and deep modes — see plan.ts
+  // readLatestBrainstorm + formatBrainstormSection.
+
+  describe('Phase 0.5 brainstorm handoff', () => {
+    let tmpDir: string;
+
+    beforeEach(() => {
+      tmpDir = mkdtempSync(join(tmpdir(), 'plan-brainstorm-'));
+    });
+
+    afterEach(() => {
+      rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    function writeBrainstorm(slug: string, date: string, body: string) {
+      const dir = join(tmpDir, 'docs', 'brainstorms');
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, `${slug}-${date}.md`), body, 'utf8');
+    }
+
+    it('standard mode includes brainstorm section when artifact exists', async () => {
+      writeBrainstorm('add-caching-layer', '2026-04-23', '# Brainstorm\n\nFraming: cache the hot path only.');
+
+      const { ctx } = makeCtx({}, tmpDir);
+
+      const result = await runPlan(ctx, { cwd: tmpDir, mode: 'standard' });
+
+      const text = result.content[0].text;
+      expect(text).toContain('## Phase 0.5 Brainstorm');
+      expect(text).toContain('docs/brainstorms/add-caching-layer-2026-04-23.md');
+      expect(text).toContain('cache the hot path only');
+
+      const structured = result.structuredContent as { data: { brainstormDocument?: string } };
+      expect(structured.data.brainstormDocument).toBe('docs/brainstorms/add-caching-layer-2026-04-23.md');
+    });
+
+    it('standard mode omits brainstorm section when no artifact exists', async () => {
+      const { ctx } = makeCtx({}, tmpDir);
+
+      const result = await runPlan(ctx, { cwd: tmpDir, mode: 'standard' });
+
+      const text = result.content[0].text;
+      expect(text).not.toContain('Phase 0.5 Brainstorm');
+
+      const structured = result.structuredContent as { data: { brainstormDocument?: string } };
+      expect(structured.data.brainstormDocument).toBeUndefined();
+    });
+
+    it('picks the lexically-greatest brainstorm when multiple dates exist', async () => {
+      writeBrainstorm('add-caching-layer', '2026-04-20', '# OLD');
+      writeBrainstorm('add-caching-layer', '2026-04-23', '# NEWEST');
+      writeBrainstorm('add-caching-layer', '2026-04-21', '# MIDDLE');
+
+      const { ctx } = makeCtx({}, tmpDir);
+
+      const result = await runPlan(ctx, { cwd: tmpDir, mode: 'standard' });
+
+      expect(result.content[0].text).toContain('NEWEST');
+      expect(result.content[0].text).not.toContain('OLD');
+      expect(result.content[0].text).not.toContain('MIDDLE');
+    });
+
+    it('ignores brainstorms whose slug does not match the current goal', async () => {
+      writeBrainstorm('some-other-goal', '2026-04-23', '# IRRELEVANT');
+
+      const { ctx } = makeCtx({}, tmpDir);
+
+      const result = await runPlan(ctx, { cwd: tmpDir, mode: 'standard' });
+
+      expect(result.content[0].text).not.toContain('IRRELEVANT');
+      expect(result.content[0].text).not.toContain('Phase 0.5 Brainstorm');
+    });
+
+    it('deep mode threads brainstorm into every planner agent prompt', async () => {
+      writeBrainstorm('add-caching-layer', '2026-04-23', '# Brainstorm\n\nSmallest: just LRU.');
+
+      const { ctx } = makeCtx({}, tmpDir);
+
+      const result = await runPlan(ctx, { cwd: tmpDir, mode: 'deep' });
+
+      const structured = result.structuredContent as {
+        data: { brainstormDocument?: string; planAgents: Array<{ task: string }> };
+      };
+      expect(structured.data.brainstormDocument).toBe('docs/brainstorms/add-caching-layer-2026-04-23.md');
+      for (const agent of structured.data.planAgents) {
+        expect(agent.task).toContain('Phase 0.5 Brainstorm');
+        expect(agent.task).toContain('Smallest: just LRU.');
+      }
+    });
+
+    it('refuses brainstorm symlink that points outside cwd (security)', async () => {
+      // Plant a symlink whose name matches the slug pattern, pointing at
+      // an external file. statSync would follow it; lstatSync must reject.
+      const dir = join(tmpDir, 'docs', 'brainstorms');
+      mkdirSync(dir, { recursive: true });
+
+      const externalDir = mkdtempSync(join(tmpdir(), 'plan-brainstorm-attacker-'));
+      const externalFile = join(externalDir, 'leak.md');
+      writeFileSync(externalFile, '# LEAKED-CONTENT\n\nshould not appear in prompt', 'utf8');
+
+      try {
+        symlinkSync(externalFile, join(dir, 'add-caching-layer-2099-12-31.md'));
+
+        const { ctx } = makeCtx({}, tmpDir);
+        const result = await runPlan(ctx, { cwd: tmpDir, mode: 'standard' });
+
+        const text = result.content[0].text;
+        expect(text).not.toContain('LEAKED-CONTENT');
+        expect(text).not.toContain('Phase 0.5 Brainstorm');
+
+        const structured = result.structuredContent as { data: { brainstormDocument?: string } };
+        expect(structured.data.brainstormDocument).toBeUndefined();
+      } finally {
+        rmSync(externalDir, { recursive: true, force: true });
+      }
+    });
   });
 });

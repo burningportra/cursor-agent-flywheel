@@ -1,0 +1,1 @@
+{"version":3,"file":"unrelated-tool.js","sourceRoot":"","sources":["../../../../../src/__tests__/lint/fixtures/reserve001/unrelated-tool.ts"],"names":[],"mappings":"AAEA,MAAM,CAAC,KAAK,UAAU,EAAE,CAAC,IAAa;IACpC,OAAO,YAAY,CAAC,IAAI,EAAE,aAAa,EAAE;QACvC,WAAW,EAAE,MAAM;QACnB,UAAU,EAAE,GAAG;KAChB,CAAC,CAAC;AACL,CAAC"}

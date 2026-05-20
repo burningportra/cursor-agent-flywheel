@@ -1,3 +1,7 @@
+import { createLogger } from './logger.js';
+import { errMsg } from './errors.js';
+import { parseSophiaResult } from './parsers.js';
+const log = createLogger("sophia");
 // ─── Detection ─────────────────────────────────────────────────
 let _sophiaAvailable = null;
 export async function isSophiaAvailable(exec, cwd) {
@@ -21,8 +25,8 @@ export async function isSophiaInitialized(exec, cwd) {
             timeout: 3000,
             cwd,
         });
-        const parsed = JSON.parse(result.stdout);
-        return parsed.ok === true;
+        const parsed = parseSophiaResult(result.stdout);
+        return parsed.ok;
     }
     catch {
         return false;
@@ -35,19 +39,16 @@ async function runSophia(exec, cwd, args) {
             timeout: 10000,
             cwd,
         });
-        const parsed = JSON.parse(result.stdout);
+        const parsed = parseSophiaResult(result.stdout);
         if (parsed.ok) {
             return { ok: true, data: parsed.data };
         }
-        return {
-            ok: false,
-            error: parsed.error?.message ?? "Unknown sophia error",
-        };
+        return { ok: false, error: parsed.error };
     }
     catch (err) {
         return {
             ok: false,
-            error: `Sophia exec failed: ${err instanceof Error ? err.message : String(err)}`,
+            error: `Sophia exec failed: ${errMsg(err)}`,
         };
     }
 }
@@ -202,7 +203,7 @@ export async function createCRFromPlan(exec, cwd, goal, steps, constraints) {
         why: goal,
         scope: (() => {
             if (allArtifacts.length > 20) {
-                console.warn(`[sophia] CR scope truncated: ${allArtifacts.length} artifacts → 20 (sophia arg limit)`);
+                log.warn("CR scope truncated", { total: allArtifacts.length, limit: 20 });
                 return allArtifacts.slice(0, 20);
             }
             return allArtifacts;
@@ -235,7 +236,7 @@ export async function createCRFromPlan(exec, cwd, goal, steps, constraints) {
         return { ok: false, error: `CR created but all ${steps.length} tasks failed: ${warnings.join("; ")}` };
     }
     if (warnings.length > 0) {
-        console.warn(`[sophia] CR #${cr.id} partial: ${warnings.join("; ")}`);
+        log.warn("CR partial", { crId: cr.id, warnings: warnings.join("; ") });
     }
     return { ok: true, data: { cr, taskIds } };
 }
@@ -279,7 +280,7 @@ export async function mergeWorktreeChanges(exec, cwd, sourceBranch, targetBranch
         return {
             ok: false,
             conflict: false,
-            error: `merge failed: ${err instanceof Error ? err.message : String(err)}`,
+            error: `merge failed: ${errMsg(err)}`,
         };
     }
 }

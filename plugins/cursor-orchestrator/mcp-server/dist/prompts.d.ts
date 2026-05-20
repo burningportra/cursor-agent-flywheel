@@ -1,8 +1,8 @@
-import type { RepoProfile, Bead, BeadResult, ScanResult, OrchestratorPhase } from "./types.js";
+import type { RepoProfile, Bead, BeadResult, ScanResult, FlywheelPhase } from "./types.js";
 import type { PlanToBeadAudit } from "./beads.js";
-export declare function workflowRoadmap(currentPhase: OrchestratorPhase): string;
+export declare function workflowRoadmap(currentPhase: FlywheelPhase): string;
 export declare function formatRepoProfile(profile: RepoProfile, scanResult?: ScanResult): string;
-export declare function orchestratorSystemPrompt(hasSophia: boolean, coordBackend?: import("./coordination.js").CoordinationBackend): string;
+export declare function flywheelSystemPrompt(hasSophia: boolean, coordBackend?: import("./coordination.js").CoordinationBackend): string;
 export declare function discoveryInstructions(profile: RepoProfile, scanResult?: ScanResult): string;
 export declare function beadCreationPrompt(goal: string, repoContext: string, constraints: string[]): string;
 export declare function formatPlanToBeadAuditWarnings(audit: PlanToBeadAudit): string;
@@ -62,14 +62,14 @@ export declare const CODEX_SUBAGENT_TYPE: "codex:codex-rescue";
  * Note: the robustness perspective is handled via CODEX_SUBAGENT_TYPE in plan.ts.
  * This constant is the fallback for callers that only support model strings. */
 export declare const DEEP_PLAN_MODELS: {
-    readonly correctness: "anthropic/claude-opus-4-6";
-    readonly robustness: "anthropic/claude-opus-4-6";
+    readonly correctness: "anthropic/claude-opus-4-7";
+    readonly robustness: "anthropic/claude-opus-4-7";
     readonly ergonomics: "anthropic/claude-sonnet-4-6";
-    readonly synthesis: "anthropic/claude-opus-4-6";
+    readonly synthesis: "anthropic/claude-opus-4-7";
 };
 /** Models used by the swarm launcher. */
 export declare const SWARM_MODELS: {
-    readonly opus: "anthropic/claude-opus-4-6";
+    readonly opus: "anthropic/claude-opus-4-7";
     readonly codex: "codex";
     readonly haiku: "anthropic/claude-haiku-4-5";
 };
@@ -80,19 +80,19 @@ export declare const MODEL_ROUTING_TIERS: {
         readonly review: "anthropic/claude-sonnet-4-6";
     };
     readonly medium: {
-        readonly implementation: "anthropic/claude-opus-4-6";
+        readonly implementation: "anthropic/claude-opus-4-7";
         readonly review: "anthropic/claude-sonnet-4-6";
     };
     readonly complex: {
-        readonly implementation: "anthropic/claude-opus-4-6";
-        readonly review: "anthropic/claude-opus-4-6";
+        readonly implementation: "anthropic/claude-opus-4-7";
+        readonly review: "anthropic/claude-opus-4-7";
     };
 };
 /**
  * Model rotation for refinement rounds.
  * Different models have different blind spots; rotating prevents anchoring.
  */
-export declare const REFINEMENT_MODELS: readonly ["anthropic/claude-opus-4-6", "anthropic/claude-sonnet-4-6", "anthropic/claude-opus-4-6"];
+export declare const REFINEMENT_MODELS: readonly ["anthropic/claude-opus-4-7", "anthropic/claude-sonnet-4-6", "anthropic/claude-opus-4-7"];
 /** Pick a refinement model based on round number (rotates through available models). */
 export declare function pickRefinementModel(round: number): string;
 /**
@@ -122,7 +122,7 @@ export declare function planSynthesisPrompt(plans: {
 export declare function planDocumentPrompt(goal: string, profile: RepoProfile, scanResult?: ScanResult): string;
 /**
  * Git-diff style plan review — asks a fresh model to propose specific changes with rationale.
- * Used by the "📝 Git-diff review" plan refinement option in orch_approve_beads.
+ * Used by the "📝 Git-diff review" plan refinement option in flywheel_approve_beads.
  */
 export declare function planGitDiffReviewPrompt(planText: string): string;
 /**
@@ -162,12 +162,12 @@ export declare function parseBeadQualityScore(output: string): BeadQualityScore 
  */
 export declare function formatBeadQualityAudit(results: BeadQualityAuditResult[]): string;
 /**
- * Full codebase audit prompt - used by /orchestrate-audit.
+ * Full codebase audit prompt - used by /flywheel-audit.
  * Spawned as parallel agents: bugs, security, tests, dead-code.
  */
 export declare function auditAgentPrompt(focus: "bugs" | "security" | "tests" | "dead-code", profile: RepoProfile, files: string[], cwd: string, domainExtras?: string): string;
 /**
- * Targeted scan prompt - used by /orchestrate-scan.
+ * Targeted scan prompt - used by /flywheel-scan.
  * Scoped to specific files/paths and one focus area.
  */
 export declare function scanAgentPrompt(focus: string, files: string[], cwd: string, domainExtras?: string): string;

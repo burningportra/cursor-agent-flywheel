@@ -5,8 +5,13 @@
 const fs = require("fs");
 const path = require("path");
 
-const f = path.join(process.cwd(), ".pi-orchestrator", "checkpoint.json");
-if (!fs.existsSync(f)) {
+const cwd = process.cwd();
+const candidates = [
+  path.join(cwd, ".pi-flywheel", "checkpoint.json"),
+  path.join(cwd, ".pi-orchestrator", "checkpoint.json"),
+];
+const f = candidates.find((p) => fs.existsSync(p));
+if (!f) {
   process.exit(0);
 }
 try {
@@ -16,7 +21,7 @@ try {
   if (s && s.phase && s.phase !== "idle" && s.phase !== "complete") {
     const goal = s.selectedGoal ? ` goal="${s.selectedGoal}"` : "";
     console.log(
-      `⚠️ Previous orchestration session detected: phase=${s.phase}${goal}. Resume with the Orchestrate command or reset with Orchestrate Stop.`
+      `⚠️ Previous flywheel session detected: phase=${s.phase}${goal}. Resume with /start or /flywheel, or reset with /flywheel-stop.`
     );
   }
 } catch {

@@ -1,23 +1,42 @@
 {
-  "name": "claude-orchestrator-mcp",
-  "version": "2.2.0",
-  "description": "MCP server for claude-orchestrator — state + CLI glue for the agentic coding flywheel",
+  "name": "agent-flywheel-mcp",
+  "version": "3.18.1",
+  "description": "MCP server for agent-flywheel — state + CLI glue for the agentic coding flywheel",
   "type": "module",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && tsc -p tsconfig.scripts.json && npm run build:bundle && npm run build:schemas",
+    "build:bundle": "FW_BUNDLE_GENERATED_AT=1970-01-01T00:00:00.000Z node dist/scripts/build-skills-bundle.js --profile cursor-native",
+    "build:schemas": "node dist/scripts/emit-schemas.js",
+    "check:skills-bundle": "node dist/scripts/check-skills-bundle.js",
+    "verify:error-meta": "node scripts/verify-error-meta.mjs",
+    "bead-viewer": "node dist/scripts/bead-viewer.js",
     "dev": "tsc --watch",
     "test": "vitest run --passWithNoTests",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "lint:skill": "tsx scripts/lint-skill.ts --file ../skills/start/SKILL.md --baseline .lintskill-baseline.json",
+    "lint:skill:json": "tsx scripts/lint-skill.ts --file ../skills/start/SKILL.md --ci --format json",
+    "lint:skill:update-baseline": "tsx scripts/lint-skill.ts --file ../skills/start/SKILL.md --update-baseline --baseline .lintskill-baseline.json",
+    "lint:skill:update-manifest": "tsx scripts/lint-skill.ts --update-manifest",
+    "version-sync": "node scripts/version-sync.mjs",
+    "version-sync:check": "node scripts/version-sync.mjs --check"
   },
   "dependencies": {
+    "@clack/prompts": "^0.7.0",
     "@modelcontextprotocol/sdk": "^1.0.0",
     "@sinclair/typebox": "^0.34.0",
-    "execa": "^9.0.0"
+    "execa": "^9.0.0",
+    "picocolors": "^1.1.1",
+    "zod": "^4.3.6"
   },
   "devDependencies": {
-    "typescript": "^5.0.0",
+    "@types/jsdom": "^28.0.1",
     "@types/node": "^22.0.0",
-    "vitest": "^2.0.0",
-    "@vitest/coverage-v8": "^2.0.0"
+    "@vitest/coverage-v8": "^2.0.0",
+    "jsdom": "^29.1.0",
+    "remark-parse": "^11.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0",
+    "unified": "^11.0.0",
+    "vitest": "^2.0.0"
   }
 }

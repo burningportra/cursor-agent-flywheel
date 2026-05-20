@@ -1,16 +1,47 @@
 ---
 name: planning-trinity
-description: Three parallel deep-plan perspectives (correctness, ergonomics, robustness) using Cursor model tiers A/B/C only.
+description: Three parallel deep-plan perspectives with distinct Cursor models (auto-wired via flywheel_plan mode=deep).
 ---
 
-# Deep plan: three planners
+# Deep plan: three planners (Cursor)
 
-Use with **`orchestrate`** deep-plan mode. Spawn **three** **Task** subagents in parallel; assign **Cursor** models before each spawn:
+`flywheel_plan({ mode: "deep" })` returns `planAgents[]` with a **distinct `model` per planner**. The orchestrator MUST pass that `model` on every Cursor **Task** spawn.
 
-| Planner | Persona | Tier |
-|---------|---------|------|
-| `correctness-planner` | Invariants, edge cases, failure modes | **A** — strongest |
-| `ergonomics-planner` | API shape, DX, consistency | **B** — balanced |
-| `robustness-planner` | Ops, security, long-term maintainability | **C** — fast or second **B** |
+| Planner | Perspective | Default model | Tier |
+|---------|-------------|---------------|------|
+| `correctness-planner` | Invariants, edge cases, failure modes | `opus-4.6` | A |
+| `ergonomics-planner` | API shape, DX, consistency | `composer-2.5` | B |
+| `robustness-planner` | Ops, load, observability | `gpt-5.5-xhigh` | C |
+| `plan-synthesizer` | Merge plans | `opus-4.6` | A |
 
-Each planner calls `macro_start_session` with `program: "cursor"`, writes `docs/plans/<date>-<perspective>.md`, and notifies via agent-mail. No external model CLIs.
+## Configure models
+
+Edit **`flywheel.config.yaml`** at the repo root:
+
+```yaml
+deep_plan:
+  correctness: opus-4.6
+  ergonomics: composer-2.5
+  robustness: gpt-5.5-xhigh
+  synthesis: opus-4.6
+```
+
+Or set env vars (override file): `FW_DEEP_PLAN_MODEL_CORRECTNESS`, `_ERGONOMICS`, `_ROBUSTNESS`, `_SYNTHESIS`.
+
+Model slugs must match **Cursor → Settings → Models** exactly. If a spawn fails, pick the slug Cursor shows for that model.
+
+## Spawn contract
+
+```text
+Task({
+  model: "<from planAgents[i].model>",
+  subagent_type: "generalPurpose",
+  run_in_background: true,
+  description: "Deep plan: <perspective>",
+  prompt: "<planAgents[i].task>",
+})
+```
+
+Each planner: `macro_start_session` with `program: "cursor"`, write `docs/plans/<date>-<perspective>.md`, notify coordinator via agent-mail with the path only.
+
+**Do not** spawn all three planners without `model` — that duplicates the parent session model and defeats triangulation.

@@ -1,0 +1,906 @@
+/**
+ * flywheel_observe — single-call session-state snapshot (T6, claude-orchestrator-29i).
+ *
+ * Source: 3-way duel consensus winner (avg 852, full report at
+ * `docs/duels/2026-04-30.md`, plan at `docs/plans/2026-04-30-duel-winners.md`).
+ *
+ * Quoting the duel synthesis: "Doctor probes; status renders; observe snapshots."
+ * This tool MUST NOT become a second `flywheel_doctor` or third `flywheel_status`.
+ * It snapshots existing primitives in one round-trip.
+ *
+ * Hard rules (all 3 duel agents agreed; do NOT relax):
+ *   1. Idempotent.
+ *   2. Non-mutating — never writes checkpoint, never `saveState`, never any fs write.
+ *   3. Doctor data either cached or short-budgeted (< 1.5s total tool runtime).
+ *   4. Every external probe degrades gracefully — mark sub-section
+ *      `unavailable: true` rather than failing the whole call.
+ */
+
+import { z } from 'zod';
+import { existsSync, readdirSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+
+import { readCheckpoint } from '../checkpoint.js';
+import { runDoctorChecks } from './doctor.js';
+import { parseBrList } from '../br-parser.js';
+import { createLogger } from '../logger.js';
+import { makeToolResult } from './shared.js';
+import { classifyExecError, errMsg, makeFlywheelErrorResult } from '../errors.js';
+import { readCompletionReport } from '../completion-report.js';
+import { ConvergenceStateSchema } from '../convergence.js';
+import {
+  readConvergenceFromDisk,
+  planSlugFromIdentifier,
+} from './convergence-tool.js';
+import { loadFlywheelConfig } from '../flywheel-config.js';
+import type {
+  DoctorReport,
+  McpToolResult,
+  ToolContext,
+} from '../types.js';
+
+const log = createLogger('observe');
+
+// ─── Constants ────────────────────────────────────────────────────────────
+
+/** Per-probe timeout budget. Keeps the tool inside the 1.5s wall-clock target. */
+const PROBE_TIMEOUT_MS = 1000;
+/** Doctor cache TTL — fresh fetch only if older. */
+const DOCTOR_CACHE_TTL_MS = 60_000;
+/** Cap on filesystem-glob results so a runaway working tree can't blow up the envelope. */
+const ARTIFACT_HARD_CAP = 50;
+/** Attestation staleness threshold — older than this and we surface an info hint. */
+const ATTESTATION_STALE_MS = 24 * 60 * 60 * 1000;
+/** Hard cap on attestation probes so a runaway activeBeadIds list can't blow the budget. */
+const ATTESTATION_PROBE_CAP = 50;
+
+// ─── Schema ───────────────────────────────────────────────────────────────
+
+const SeveritySchema = z.enum(['info', 'warn', 'red']);
+
+const HintSchema = z.object({
+  severity: SeveritySchema,
+  message: z.string(),
+  nextAction: z.string().optional(),
+});
+
+const GitSectionSchema = z.object({
+  unavailable: z.literal(true).optional(),
+  branch: z.string().optional(),
+  head: z.string().optional(),
+  dirty: z.boolean().optional(),
+  untracked: z.array(z.string()).optional(),
+  warning: z.string().optional(),
+});
+
+const CheckpointSectionSchema = z.object({
+  exists: z.boolean(),
+  phase: z.string().optional(),
+  selectedGoal: z.string().optional(),
+  planDocument: z.string().optional(),
+  activeBeadIds: z.array(z.string()).optional(),
+  warnings: z.array(z.string()),
+});
+
+const BeadCountsSchema = z.object({
+  open: z.number().int().nonnegative(),
+  in_progress: z.number().int().nonnegative(),
+  closed: z.number().int().nonnegative(),
+  deferred: z.number().int().nonnegative(),
+  total: z.number().int().nonnegative(),
+});
+
+const BeadReadyRowSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  priority: z.number().int(),
+});
+
+const BeadsSectionSchema = z.object({
+  initialized: z.boolean(),
+  unavailable: z.literal(true).optional(),
+  warning: z.string().optional(),
+  counts: BeadCountsSchema,
+  ready: z.array(BeadReadyRowSchema),
+});
+
+const AgentMailSectionSchema = z.object({
+  reachable: z.boolean(),
+  unreadCount: z.number().int().nonnegative().optional(),
+  warning: z.string().optional(),
+});
+
+const NtmPaneSchema = z.object({
+  name: z.string(),
+  type: z.string().optional(),
+  status: z.string().optional(),
+});
+
+const NtmSectionSchema = z.object({
+  available: z.boolean(),
+  panes: z.array(NtmPaneSchema).optional(),
+  warning: z.string().optional(),
+});
+
+const ArtifactsSectionSchema = z.object({
+  wizard: z.array(z.string()),
+  flywheelScratch: z.array(z.string()),
+  truncated: z.boolean().optional(),
+});
+
+const AttestationsSectionSchema = z.object({
+  /** activeBeadIds we attempted to probe (capped at ATTESTATION_PROBE_CAP). */
+  inFlightBeadIds: z.array(z.string()),
+  /** Bead ids whose `.pi-flywheel/completion/<beadId>.json` does not exist. */
+  missing: z.array(z.string()),
+  /** Bead ids whose attestation parsed cleanly but is older than 24h. */
+  stale: z.array(z.string()),
+  /** Bead ids whose file exists but failed JSON-parse or schema validation. */
+  invalid: z.array(z.string()),
+  /** Set when probing was skipped (no checkpoint, or no activeBeadIds). */
+  unavailable: z.literal(true).optional(),
+  /** Set when we capped the probe count to protect the budget. */
+  truncated: z.boolean().optional(),
+});
+
+export const FlywheelObserveReportSchema = z.object({
+  version: z.literal(1),
+  cwd: z.string(),
+  timestamp: z.string(),
+  elapsedMs: z.number().int().nonnegative(),
+  git: GitSectionSchema,
+  checkpoint: CheckpointSectionSchema,
+  beads: BeadsSectionSchema,
+  agentMail: AgentMailSectionSchema,
+  ntm: NtmSectionSchema,
+  artifacts: ArtifactsSectionSchema,
+  attestations: AttestationsSectionSchema,
+  hints: z.array(HintSchema),
+  doctor: z
+    .object({
+      cached: z.boolean(),
+      ageMs: z.number().int().nonnegative().optional(),
+      overall: z.enum(['green', 'yellow', 'red']).optional(),
+      unavailable: z.literal(true).optional(),
+    })
+    .optional(),
+  /**
+   * Convergence state for the active plan (B-AC2).
+   *
+   * Optional + additive: existing observe consumers see no change in the field
+   * set they already use. Only populated when `checkpoint.planDocument` is set
+   * and a `.pi-flywheel/plans/<slug>/convergence.json` exists. A read error
+   * (invalid JSON, schema mismatch, score-version mismatch) drops to undefined
+   * + a `red` hint rather than failing the whole observe call.
+   */
+  convergence: ConvergenceStateSchema.optional(),
+  /**
+   * `convergenceGated` (B-AC2 §12.4) — `true` when `flywheel_advance_wave`
+   * will use convergence score for auto-approve recommendations on this run
+   * (driven by `flywheel.config.yaml > convergence.gate_advance_wave`).
+   * Top-level (NOT nested under `convergence`) so consumers can detect the
+   * orchestrator-gating mode without having any plan loaded.
+   */
+  convergenceGated: z.boolean().optional(),
+});
+
+export type FlywheelObserveReport = z.infer<typeof FlywheelObserveReportSchema>;
+export type ObserveHint = z.infer<typeof HintSchema>;
+
+// ─── Doctor cache (module-level, keyed by cwd) ────────────────────────────
+
+interface DoctorCacheEntry {
+  ts: number;
+  report: DoctorReport;
+}
+
+const doctorCache = new Map<string, DoctorCacheEntry>();
+
+/** Test/internal hook — flush the cache. Not exported via the tool envelope. */
+export function _resetDoctorCache(): void {
+  doctorCache.clear();
+}
+
+// ─── Probe helpers (each must degrade gracefully) ─────────────────────────
+
+async function probeGit(
+  ctx: ToolContext,
+): Promise<z.infer<typeof GitSectionSchema>> {
+  try {
+    const [branchR, headR, statusR] = await Promise.allSettled([
+      ctx.exec('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+        timeout: PROBE_TIMEOUT_MS,
+        cwd: ctx.cwd,
+        signal: ctx.signal,
+      }),
+      ctx.exec('git', ['rev-parse', 'HEAD'], {
+        timeout: PROBE_TIMEOUT_MS,
+        cwd: ctx.cwd,
+        signal: ctx.signal,
+      }),
+      ctx.exec('git', ['status', '--porcelain'], {
+        timeout: PROBE_TIMEOUT_MS,
+        cwd: ctx.cwd,
+        signal: ctx.signal,
+      }),
+    ]);
+
+    const allFailed =
+      branchR.status === 'rejected' &&
+      headR.status === 'rejected' &&
+      statusR.status === 'rejected';
+    if (allFailed) {
+      return { unavailable: true, warning: 'git probes failed' };
+    }
+
+    const branch =
+      branchR.status === 'fulfilled' && branchR.value.code === 0
+        ? branchR.value.stdout.trim()
+        : undefined;
+    const head =
+      headR.status === 'fulfilled' && headR.value.code === 0
+        ? headR.value.stdout.trim()
+        : undefined;
+
+    let dirty: boolean | undefined;
+    let untracked: string[] | undefined;
+    if (statusR.status === 'fulfilled' && statusR.value.code === 0) {
+      const lines = statusR.value.stdout
+        .split('\n')
+        .map((l) => l.trimEnd())
+        .filter(Boolean);
+      dirty = lines.length > 0;
+      untracked = lines
+        .filter((l) => l.startsWith('??'))
+        .map((l) => l.slice(3))
+        .slice(0, ARTIFACT_HARD_CAP);
+    }
+
+    return { branch, head, dirty, untracked };
+  } catch (err: unknown) {
+    log.warn('git probe failed', { err: String(err) });
+    return { unavailable: true, warning: 'git probe threw' };
+  }
+}
+
+function readCheckpointSection(
+  cwd: string,
+): z.infer<typeof CheckpointSectionSchema> {
+  try {
+    const result = readCheckpoint(cwd);
+    if (!result) {
+      return { exists: false, warnings: [] };
+    }
+    const state = result.envelope.state;
+    return {
+      exists: true,
+      phase: state.phase,
+      selectedGoal: state.selectedGoal,
+      planDocument: state.planDocument,
+      activeBeadIds: state.activeBeadIds,
+      warnings: result.warnings,
+    };
+  } catch (err: unknown) {
+    log.warn('checkpoint read failed', { err: String(err) });
+    return {
+      exists: false,
+      warnings: [`checkpoint read threw: ${String(err)}`],
+    };
+  }
+}
+
+async function probeBeads(
+  ctx: ToolContext,
+): Promise<z.infer<typeof BeadsSectionSchema>> {
+  const emptyCounts = {
+    open: 0,
+    in_progress: 0,
+    closed: 0,
+    deferred: 0,
+    total: 0,
+  };
+
+  let listResult: { code: number; stdout: string; stderr: string };
+  try {
+    listResult = await ctx.exec(
+      'br',
+      ['list', '--json', '--deferred'],
+      { timeout: PROBE_TIMEOUT_MS, cwd: ctx.cwd, signal: ctx.signal },
+    );
+  } catch (err: unknown) {
+    return {
+      initialized: false,
+      unavailable: true,
+      warning: `br unavailable: ${errMsg(err)}`,
+      counts: emptyCounts,
+      ready: [],
+    };
+  }
+
+  if (listResult.code !== 0) {
+    return {
+      initialized: false,
+      unavailable: true,
+      warning: `br list exited ${listResult.code}: ${listResult.stderr.slice(0, 200)}`,
+      counts: emptyCounts,
+      ready: [],
+    };
+  }
+
+  let parsed: { rows: ReturnType<typeof parseBrList>['rows']; rejected: number };
+  try {
+    parsed = parseBrList(listResult.stdout);
+  } catch (err: unknown) {
+    return {
+      initialized: true,
+      warning: `br list parse failed: ${errMsg(err)}`,
+      counts: emptyCounts,
+      ready: [],
+    };
+  }
+
+  const counts = { ...emptyCounts };
+  for (const row of parsed.rows) {
+    counts.total += 1;
+    const status = row.status as keyof typeof counts;
+    if (status === 'open' || status === 'in_progress' || status === 'closed' || status === 'deferred') {
+      counts[status] += 1;
+    }
+  }
+
+  // "ready" beads: open + no unmet dependencies. We approximate via `br ready`
+  // — falling back to "all open" if the subcommand is unavailable so we never
+  // fail the whole tool.
+  let ready: z.infer<typeof BeadReadyRowSchema>[] = [];
+  try {
+    const readyResult = await ctx.exec(
+      'br',
+      ['ready', '--json'],
+      { timeout: PROBE_TIMEOUT_MS, cwd: ctx.cwd, signal: ctx.signal },
+    );
+    if (readyResult.code === 0) {
+      const readyParsed = parseBrList(readyResult.stdout);
+      ready = readyParsed.rows.slice(0, ARTIFACT_HARD_CAP).map((r) => ({
+        id: r.id,
+        title: r.title,
+        priority: r.priority ?? 0,
+      }));
+    }
+  } catch {
+    // ready is optional — degrade silently.
+  }
+
+  return {
+    initialized: true,
+    counts,
+    ready,
+    ...(parsed.rejected > 0
+      ? { warning: `${parsed.rejected} bead row(s) rejected by parser` }
+      : {}),
+  };
+}
+
+async function probeAgentMail(
+  ctx: ToolContext,
+): Promise<z.infer<typeof AgentMailSectionSchema>> {
+  // Lightweight liveness probe via curl — keeps us off the agent-mail RPC
+  // path which has its own retry/timeout policy. We deliberately do NOT call
+  // a tool that mutates server state.
+  try {
+    const result = await ctx.exec(
+      'curl',
+      [
+        '-s',
+        '-o',
+        '/dev/null',
+        '-w',
+        '%{http_code}',
+        '--max-time',
+        '1',
+        'http://127.0.0.1:8765/health/liveness',
+      ],
+      { timeout: PROBE_TIMEOUT_MS, cwd: ctx.cwd, signal: ctx.signal },
+    );
+    if (result.code !== 0) {
+      return { reachable: false, warning: `curl exited ${result.code}` };
+    }
+    const status = result.stdout.trim();
+    if (status !== '200') {
+      return { reachable: false, warning: `liveness HTTP ${status}` };
+    }
+    return { reachable: true };
+  } catch (err: unknown) {
+    return {
+      reachable: false,
+      warning: `agent-mail probe failed: ${errMsg(err)}`,
+    };
+  }
+}
+
+async function probeNtm(
+  ctx: ToolContext,
+): Promise<z.infer<typeof NtmSectionSchema>> {
+  try {
+    const which = await ctx.exec('which', ['ntm'], {
+      timeout: PROBE_TIMEOUT_MS,
+      cwd: ctx.cwd,
+      signal: ctx.signal,
+    });
+    if (which.code !== 0 || !which.stdout.trim()) {
+      return { available: false };
+    }
+  } catch {
+    return { available: false };
+  }
+
+  // ntm panes are best-effort — list when supported, ignore failures.
+  try {
+    const list = await ctx.exec('ntm', ['list', '--json'], {
+      timeout: PROBE_TIMEOUT_MS,
+      cwd: ctx.cwd,
+      signal: ctx.signal,
+    });
+    if (list.code === 0 && list.stdout.trim()) {
+      try {
+        const parsed = JSON.parse(list.stdout) as unknown;
+        const panes = Array.isArray(parsed) ? parsed : [];
+        const cleaned = panes
+          .slice(0, ARTIFACT_HARD_CAP)
+          .map((p) => {
+            if (p && typeof p === 'object') {
+              const o = p as Record<string, unknown>;
+              return {
+                name: typeof o.name === 'string' ? o.name : String(o.id ?? '?'),
+                type: typeof o.type === 'string' ? o.type : undefined,
+                status: typeof o.status === 'string' ? o.status : undefined,
+              };
+            }
+            return { name: String(p) };
+          });
+        return { available: true, panes: cleaned };
+      } catch {
+        return { available: true, warning: 'ntm list output not JSON' };
+      }
+    }
+  } catch {
+    // available but list errored — leave panes undefined.
+  }
+  return { available: true };
+}
+
+function probeArtifacts(cwd: string): z.infer<typeof ArtifactsSectionSchema> {
+  const wizard: string[] = [];
+  const scratch: string[] = [];
+  let truncated = false;
+
+  try {
+    const entries = readdirSync(cwd, { withFileTypes: true });
+    for (const e of entries) {
+      if (wizard.length >= ARTIFACT_HARD_CAP) {
+        truncated = true;
+        break;
+      }
+      if (e.isFile() && /^WIZARD_.*\.md$/.test(e.name)) {
+        wizard.push(e.name);
+      }
+    }
+  } catch (err: unknown) {
+    log.warn('artifact glob failed', { err: String(err) });
+  }
+
+  for (const name of ['.simplify-ledger', 'refactor', '.pi-flywheel']) {
+    try {
+      if (existsSync(join(cwd, name))) {
+        const st = statSync(join(cwd, name));
+        scratch.push(st.isDirectory() ? `${name}/` : name);
+      }
+    } catch {
+      // ignore — graceful degrade
+    }
+  }
+
+  return {
+    wizard,
+    flywheelScratch: scratch,
+    ...(truncated ? { truncated: true } : {}),
+  };
+}
+
+/**
+ * Probe `.pi-flywheel/completion/<beadId>.json` for each in-flight bead.
+ *
+ * Uses T1's `readCompletionReport` (claude-orchestrator-2j1) so missing /
+ * malformed / schema-invalid files are classified consistently with the
+ * coordinator-side validators in `flywheel_verify_beads` and
+ * `flywheel_advance_wave`.
+ *
+ * Read-only (T6 hard rule): never writes anything. Caps probe count to
+ * `ATTESTATION_PROBE_CAP` so a runaway activeBeadIds list can't blow the
+ * 1.5s wall-clock budget.
+ */
+async function probeAttestations(
+  cwd: string,
+  beadIds: readonly string[],
+  now: number,
+): Promise<z.infer<typeof AttestationsSectionSchema>> {
+  if (beadIds.length === 0) {
+    return {
+      inFlightBeadIds: [],
+      missing: [],
+      stale: [],
+      invalid: [],
+      unavailable: true,
+    };
+  }
+  const capped = beadIds.slice(0, ATTESTATION_PROBE_CAP);
+  const truncated = beadIds.length > capped.length;
+  const missing: string[] = [];
+  const stale: string[] = [];
+  const invalid: string[] = [];
+
+  const results = await Promise.allSettled(
+    capped.map((id) => readCompletionReport(cwd, id)),
+  );
+
+  for (let i = 0; i < capped.length; i += 1) {
+    const id = capped[i]!;
+    const r = results[i]!;
+    if (r.status === 'rejected') {
+      // Reading itself threw (extremely rare with T1's helper, which catches
+      // ENOENT and JSON errors). Treat as missing — agent must rewrite.
+      missing.push(id);
+      continue;
+    }
+    const v = r.value;
+    if (!v.ok) {
+      if (v.error.code === 'not_found') {
+        missing.push(id);
+      } else {
+        // invalid_json or schema_invalid — file exists but unusable.
+        invalid.push(id);
+      }
+      continue;
+    }
+    const created = Date.parse(v.report.createdAt);
+    if (!Number.isNaN(created) && now - created > ATTESTATION_STALE_MS) {
+      stale.push(id);
+    }
+  }
+
+  return {
+    inFlightBeadIds: capped,
+    missing,
+    stale,
+    invalid,
+    ...(truncated ? { truncated: true } : {}),
+  };
+}
+
+async function getCachedOrFreshDoctor(
+  ctx: ToolContext,
+  now: number,
+): Promise<{
+  cached: boolean;
+  ageMs?: number;
+  overall?: 'green' | 'yellow' | 'red';
+  unavailable?: true;
+}> {
+  const entry = doctorCache.get(ctx.cwd);
+  if (entry && now - entry.ts < DOCTOR_CACHE_TTL_MS) {
+    return {
+      cached: true,
+      ageMs: now - entry.ts,
+      overall: entry.report.overall,
+    };
+  }
+
+  // Doctor budget: leave headroom inside the 1.5s wall-clock target.
+  // Budget runs the doctor but with a tight ceiling — partial reports are OK.
+  try {
+    const report = await runDoctorChecks(ctx.cwd, ctx.signal, {
+      totalBudgetMs: 800,
+      perCheckTimeoutMs: 400,
+      exec: ctx.exec,
+    });
+    doctorCache.set(ctx.cwd, { ts: now, report });
+    return { cached: false, ageMs: 0, overall: report.overall };
+  } catch (err: unknown) {
+    log.warn('doctor probe failed', { err: String(err) });
+    return { cached: false, unavailable: true };
+  }
+}
+
+// ─── Hints derivation ─────────────────────────────────────────────────────
+
+function deriveHints(
+  report: Omit<FlywheelObserveReport, 'hints'>,
+): ObserveHint[] {
+  const hints: ObserveHint[] = [];
+
+  if (report.checkpoint.exists && report.checkpoint.warnings.length > 0) {
+    for (const w of report.checkpoint.warnings) {
+      hints.push({
+        severity: 'warn',
+        message: `checkpoint warning: ${w}`,
+        nextAction: 'inspect .pi-flywheel/checkpoint.json or run flywheel_doctor',
+      });
+    }
+  }
+
+  if (report.beads.unavailable) {
+    hints.push({
+      severity: 'warn',
+      message: 'br CLI unavailable — bead state cannot be observed',
+      nextAction: 'install/update br (beads_rust) and rerun observe',
+    });
+  } else if (report.beads.initialized && report.beads.ready.length > 0) {
+    const top = report.beads.ready[0]!;
+    hints.push({
+      severity: 'info',
+      message: `${report.beads.ready.length} bead(s) ready to dispatch (top: ${top.id})`,
+      nextAction: 'spawn an implementor via /flywheel-swarm or NTM',
+    });
+  }
+
+  if (!report.agentMail.reachable) {
+    hints.push({
+      severity: 'warn',
+      message: `agent-mail unreachable${report.agentMail.warning ? `: ${report.agentMail.warning}` : ''}`,
+      nextAction: 'start agent-mail (am serve-http) or check port 8765',
+    });
+  }
+
+  if (report.artifacts.wizard.length > 0) {
+    hints.push({
+      severity: 'info',
+      message: `${report.artifacts.wizard.length} WIZARD_*.md duel artifact(s) present`,
+      nextAction:
+        'route into docs/duels/ if synthesizing, or run /flywheel-cleanup if older than 7d',
+    });
+  }
+
+  if (report.git.dirty) {
+    hints.push({
+      severity: 'info',
+      message: 'working tree is dirty',
+      nextAction: 'review uncommitted changes before phase transitions',
+    });
+  }
+
+  if (report.doctor?.overall === 'red') {
+    hints.push({
+      severity: 'red',
+      message: 'flywheel_doctor reports red overall',
+      nextAction: 'run flywheel_doctor for details, then flywheel_remediate',
+    });
+  }
+
+  // T7 (claude-orchestrator-2r8) — Completion Evidence integration.
+  // For each in-flight bead, surface missing or stale attestation files
+  // alongside the other observability hints. Co-located deliberately so
+  // recovery agents see one ranked list, not a separate channel.
+  for (const id of report.attestations.missing) {
+    hints.push({
+      severity: 'warn',
+      message: `bead ${id} in-flight without attestation`,
+      nextAction: 'agent should write completion JSON before advancing',
+    });
+  }
+  for (const id of report.attestations.stale) {
+    hints.push({
+      severity: 'info',
+      message: `stale attestation for closed-bead ${id}`,
+      nextAction: 'review .pi-flywheel/completion/' + id + '.json for currency',
+    });
+  }
+  for (const id of report.attestations.invalid) {
+    hints.push({
+      severity: 'warn',
+      message: `attestation for ${id} failed schema validation`,
+      nextAction: 'rewrite .pi-flywheel/completion/' + id + '.json against CompletionReportSchemaV1',
+    });
+  }
+
+  return hints;
+}
+
+// ─── Rendering ────────────────────────────────────────────────────────────
+
+function glyphForHint(severity: ObserveHint['severity']): string {
+  switch (severity) {
+    case 'info':
+      return '[i]';
+    case 'warn':
+      return '[!]';
+    case 'red':
+      return '[X]';
+  }
+}
+
+function renderObserveText(report: FlywheelObserveReport): string {
+  const lines: string[] = [];
+  lines.push(
+    `flywheel observe — ${report.cwd} (${report.elapsedMs}ms${report.doctor?.cached ? ', doctor cached' : ''})`,
+  );
+  if (report.git.unavailable) {
+    lines.push(`  git: unavailable`);
+  } else {
+    const dirtyMark = report.git.dirty ? ' (dirty)' : '';
+    lines.push(
+      `  git: ${report.git.branch ?? '(detached)'} @ ${report.git.head?.slice(0, 7) ?? '?'}${dirtyMark}`,
+    );
+  }
+  lines.push(
+    `  checkpoint: ${report.checkpoint.exists ? `phase=${report.checkpoint.phase}` : 'none'}`,
+  );
+  if (report.beads.unavailable) {
+    lines.push(`  beads: unavailable (${report.beads.warning})`);
+  } else {
+    lines.push(
+      `  beads: ${report.beads.counts.total} total | ${report.beads.counts.open} open, ${report.beads.counts.in_progress} in-progress, ${report.beads.counts.closed} closed | ${report.beads.ready.length} ready`,
+    );
+  }
+  lines.push(
+    `  agent-mail: ${report.agentMail.reachable ? 'reachable' : `unreachable${report.agentMail.warning ? ' — ' + report.agentMail.warning : ''}`}`,
+  );
+  lines.push(
+    `  ntm: ${report.ntm.available ? `available${report.ntm.panes ? ` (${report.ntm.panes.length} panes)` : ''}` : 'not on PATH'}`,
+  );
+  lines.push(
+    `  artifacts: ${report.artifacts.wizard.length} WIZARD_*.md, scratch=[${report.artifacts.flywheelScratch.join(', ') || 'none'}]`,
+  );
+  if (report.doctor && !report.doctor.unavailable) {
+    lines.push(
+      `  doctor: ${report.doctor.overall ?? '?'}${report.doctor.cached ? ` (cached ${Math.round((report.doctor.ageMs ?? 0) / 1000)}s)` : ' (fresh)'}`,
+    );
+  }
+  if (report.hints.length > 0) {
+    lines.push('');
+    lines.push('hints:');
+    for (const h of report.hints) {
+      lines.push(`  ${glyphForHint(h.severity)} ${h.message}${h.nextAction ? ` → ${h.nextAction}` : ''}`);
+    }
+  }
+  return lines.join('\n');
+}
+
+// ─── Public entry ─────────────────────────────────────────────────────────
+
+export interface ObserveArgs {
+  cwd: string;
+}
+
+interface ObserveStructuredContent {
+  tool: 'flywheel_observe';
+  version: 1;
+  status: 'ok';
+  phase: 'observe';
+  data: {
+    kind: 'observe_report';
+    report: FlywheelObserveReport;
+  };
+}
+
+/**
+ * Build a session-state snapshot in one MCP round-trip.
+ *
+ * Read-only. Never mutates checkpoint, never calls `saveState`, never writes
+ * any file on disk. Aggregates existing primitives via Promise.allSettled
+ * so a single probe failing degrades that section to `unavailable: true`
+ * rather than failing the whole call.
+ */
+export async function runObserve(
+  ctx: ToolContext,
+  args: ObserveArgs,
+): Promise<McpToolResult> {
+  const startMs = Date.now();
+  void args;
+  try {
+    // Checkpoint is sync + cheap; read it first so attestation probes can use
+    // its activeBeadIds as their input. Artifacts is sync too.
+    const checkpoint = readCheckpointSection(ctx.cwd);
+    const artifacts = probeArtifacts(ctx.cwd);
+    const activeBeadIds = checkpoint.activeBeadIds ?? [];
+
+    const [git, beads, agentMail, ntm, doctor, attestations] = await Promise.all([
+      probeGit(ctx),
+      probeBeads(ctx),
+      probeAgentMail(ctx),
+      probeNtm(ctx),
+      getCachedOrFreshDoctor(ctx, startMs),
+      probeAttestations(ctx.cwd, activeBeadIds, startMs),
+    ]);
+
+    // Convergence + kill-switch (B-AC2): both are best-effort sync reads of
+    // small files at the repo root and well under the probe budget. Any parse
+    // failure surfaces as a hint without failing observe.
+    const config = (() => {
+      try {
+        return loadFlywheelConfig(ctx.cwd);
+      } catch {
+        return null;
+      }
+    })();
+    const convergenceGated = config?.convergence.gate_advance_wave ?? true;
+
+    let convergence: FlywheelObserveReport['convergence'];
+    const convergenceHints: ObserveHint[] = [];
+    if (checkpoint.planDocument) {
+      try {
+        const slug = planSlugFromIdentifier(checkpoint.planDocument);
+        const result = await readConvergenceFromDisk(ctx.cwd, slug);
+        if (result.status === 'ok') {
+          convergence = result.data.state;
+        } else if (result.status === 'error') {
+          convergenceHints.push({
+            severity: result.code === 'score_version_mismatch' ? 'red' : 'warn',
+            message: `Convergence read error (${result.code}): ${result.message}`,
+            nextAction:
+              result.code === 'score_version_mismatch'
+                ? 'Recompute convergence state — the on-disk scoreVersion does not match the running algorithm.'
+                : 'Inspect the convergence.json file or rerun the convergence math.',
+          });
+        }
+      } catch (err: unknown) {
+        log.warn('convergence probe threw', { err: String(err) });
+      }
+    }
+
+    const elapsedMs = Date.now() - startMs;
+    const partial: Omit<FlywheelObserveReport, 'hints'> = {
+      version: 1,
+      cwd: ctx.cwd,
+      timestamp: new Date(startMs).toISOString(),
+      elapsedMs,
+      git,
+      checkpoint,
+      beads,
+      agentMail,
+      ntm,
+      artifacts,
+      attestations,
+      doctor,
+      convergence,
+      convergenceGated,
+    };
+    const hints = [...deriveHints(partial), ...convergenceHints];
+    const report: FlywheelObserveReport = { ...partial, hints };
+
+    const validated = FlywheelObserveReportSchema.safeParse(report);
+    if (!validated.success) {
+      log.warn('observe report failed self-validation', {
+        issues: validated.error.issues.length,
+      });
+      // Self-validation failure is a programming error — surface as red hint
+      // but still return the report so callers can recover.
+      report.hints.push({
+        severity: 'red',
+        message: 'observe report failed schema validation (programming error)',
+        nextAction: 'file a bug — report shape drifted from FlywheelObserveReportSchema',
+      });
+    }
+
+    const structured: ObserveStructuredContent = {
+      tool: 'flywheel_observe',
+      version: 1,
+      status: 'ok',
+      phase: 'observe',
+      data: { kind: 'observe_report', report },
+    };
+    return makeToolResult(renderObserveText(report), structured);
+  } catch (err: unknown) {
+    // The tool is wrapped in graceful-degrade probes, so reaching here means
+    // the orchestration layer itself failed. Classify and return a structured
+    // error envelope without crashing the MCP transport.
+    const classified = classifyExecError(err);
+    return makeFlywheelErrorResult('flywheel_observe', 'observe', {
+      code: classified.code,
+      message: errMsg(err),
+      retryable: classified.retryable,
+      hint:
+        'observe orchestration failed unexpectedly — rerun flywheel_observe or set FW_LOG_LEVEL=debug to capture the cause.',
+      cause: classified.cause,
+    });
+  }
+}
+

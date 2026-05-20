@@ -14,7 +14,7 @@ export function buildOrchestratePrompt(cwd: string, opts: { goal?: string; plann
 
   const sessionHint = opts.freshSession
     ? `Session: **start fresh** (checkpoint cleared or new).`
-    : `Session: **resume** from .pi-orchestrator/checkpoint.json if present.`;
+    : `Session: **resume** from .pi-flywheel/checkpoint.json if present.`;
 
   return [
     `Run the full **orchestrate** flywheel for this workspace.`,
@@ -37,6 +37,18 @@ export function buildSetupPrompt(cwd: string): string {
     `**cwd:** \`${cwd}\``,
     ``,
     `Check br, bv, agent-mail, pre-commit guard, orchestrator MCP build, and report the health checklist.`,
+  ].join("\n");
+}
+
+export function buildRecoverGatesPrompt(cwd: string, beadIds?: string): string {
+  const beads = beadIds?.trim() ? ` Bead ids: ${beadIds.trim()}.` : "";
+  return [
+    `Run **recover-gates** (post-implement recovery) for this workspace.`,
+    ``,
+    `**cwd:** \`${cwd}\`${beads}`,
+    ``,
+    `Follow \`.cursor/commands/recover-gates.md\` → \`flywheel-recover-gates.md\`.`,
+    `Call \`flywheel_wave_review_gate\` then \`flywheel_wrap_up_gate\` with numbered MCP menus — no ad-hoc "want to commit?" prompts.`,
   ].join("\n");
 }
 

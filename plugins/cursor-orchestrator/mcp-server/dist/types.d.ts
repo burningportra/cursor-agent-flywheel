@@ -1,3 +1,4 @@
+import { z } from 'zod';
 export interface RepoProfile {
     name: string;
     languages: string[];
@@ -142,8 +143,9 @@ export interface Bead {
     description: string;
     status: "open" | "in_progress" | "closed" | "deferred";
     priority: number;
-    type: string;
-    labels: string[];
+    type?: string;
+    issue_type?: string;
+    labels?: string[];
     estimate?: number;
     /** Parent bead ID (from --parent flag). */
     parent?: string;
@@ -193,6 +195,17 @@ export interface BeadReview {
     feedback: string;
     revisionInstructions?: string;
 }
+/**
+ * Estimated effort for a bead, used by the calibration system.
+ * @since v3.7.0
+ */
+export declare const EFFORT_LEVELS: readonly ["S", "M", "L", "XL"];
+export type EstimatedEffort = (typeof EFFORT_LEVELS)[number];
+/**
+ * Mapping from effort tier to expected minutes-of-work.
+ * @since v3.7.0
+ */
+export declare const EFFORT_TO_MINUTES: Record<EstimatedEffort, number>;
 export interface BeadTemplatePlaceholder {
     name: string;
     description: string;
@@ -204,6 +217,12 @@ export interface BeadTemplateExample {
 }
 export interface BeadTemplate {
     id: string;
+    /**
+     * Schema version for this template. Pinned at creation time so plans
+     * synthesised against an older template shape continue to expand even when
+     * newer versions are added. Defaults to 1 for legacy templates.
+     */
+    version: number;
     label: string;
     summary: string;
     descriptionTemplate: string;
@@ -212,13 +231,43 @@ export interface BeadTemplate {
     filePatterns: string[];
     dependencyHints?: string;
     examples: BeadTemplateExample[];
+    /** @since v3.7.0 */
+    estimatedEffort?: EstimatedEffort;
 }
+/**
+ * Structured input passed to `expandTemplate`. Every well-known key is
+ * optional here so callers can supply only what the synthesiser produced;
+ * the `expandTemplate` implementation validates that all `required: true`
+ * placeholders of the resolved template are present.
+ *
+ * Extra keys (via index signature) are tolerated so templates may declare
+ * their own domain-specific placeholders (e.g. `PARENT_WAVE_BEADS`,
+ * `TARGET_FILE`) without forcing the caller to stretch this interface.
+ */
+export interface TemplateExpansionInput {
+    title?: string;
+    scope?: string;
+    acceptance?: string;
+    test_plan?: string;
+    [key: string]: string | undefined;
+}
+/**
+ * Discriminated result from `expandTemplate`.
+ *
+ * On success: the fully rendered markdown body.
+ *
+ * On failure: one of the v3.4.0 FlywheelErrorCode values used to route
+ * MCP-boundary error envelopes. `detail` carries human-readable context
+ * (missing placeholder names, unknown template id, etc.) for hint rendering
+ * at the tool boundary.
+ */
 export type ExpandTemplateResult = {
     success: true;
     description: string;
 } | {
     success: false;
-    error: string;
+    error: "template_not_found" | "template_placeholder_missing" | "template_expansion_failed";
+    detail: string;
 };
 export interface IdeaScores {
     useful: number;
@@ -246,12 +295,28 @@ export interface CandidateIdea {
     synergies?: string[];
     /** Rubric scores (1-5 per axis). */
     scores?: IdeaScores;
+    /** Origin metadata when this idea came out of an adversarial duel run. Undefined for single-wizard / fast-path ideas. */
+    provenance?: IdeaProvenance;
+}
+export interface IdeaProvenance {
+    /** Where the idea came from. */
+    source: "single-wizard" | "duel" | "reality-check-duel" | "manual";
+    /** ISO timestamp of the duel run (or generator). */
+    runAt?: string;
+    /** Per-agent cross-scores out of 1000, keyed by agent shorthand (cc/cod/gmi). */
+    agentScores?: Record<string, number>;
+    /** True when the duel scored this idea inconsistently across agents (see references/SCORING.md threshold). */
+    contested?: boolean;
+    /** One-line summary of the strongest opponent critique that survived the reveal phase — feed straight into bead bodies. */
+    survivingCritique?: string;
+    /** Optional steelman framing produced in Phase 6.75; usually one line. */
+    steelman?: string;
 }
 export type IdeaCategory = "feature" | "refactor" | "docs" | "dx" | "performance" | "reliability" | "security" | "testing";
-export type OrchestratorPhase = "idle" | "profiling" | "discovering" | "awaiting_selection" | "planning" | "researching" | "awaiting_plan_approval" | "creating_beads" | "refining_beads" | "awaiting_bead_approval" | "implementing" | "reviewing" | "iterating" | "complete";
+export type FlywheelPhase = "idle" | "profiling" | "discovering" | "awaiting_selection" | "planning" | "researching" | "awaiting_plan_approval" | "creating_beads" | "refining_beads" | "awaiting_bead_approval" | "implementing" | "reviewing" | "iterating" | "complete" | "doctor" | "observe";
 export type CoordinationMode = "worktree" | "single-branch";
-export interface OrchestratorState {
-    phase: OrchestratorPhase;
+export interface FlywheelState {
+    phase: FlywheelPhase;
     repoProfile?: RepoProfile;
     scanResult?: ScanResult;
     candidateIdeas?: CandidateIdea[];
@@ -281,9 +346,9 @@ export interface OrchestratorState {
     coordinationStrategy?: import("./coordination.js").CoordinationStrategy;
     /** Coordination mode: worktree isolation vs single-branch */
     coordinationMode?: CoordinationMode;
-    /** Whether agent-mail session was bootstrapped for this orchestration */
+    /** Whether agent-mail session was bootstrapped for this flywheel run */
     agentMailSessionActive?: boolean;
-    /** Bead IDs created for this orchestration (ordered). */
+    /** Bead IDs created for this flywheel run (ordered). */
     activeBeadIds?: string[];
     /** Results keyed by bead ID. */
     beadResults?: Record<string, BeadResult>;
@@ -313,6 +378,25 @@ export interface OrchestratorState {
     driftCheckInterval?: number;
     /** Auto-approve beads when convergence >= 0.90 or polishConverged is true (default: true). */
     autoApproveOnConvergence?: boolean;
+    /** Confirmed Cursor Task models for implement waves (per bead complexity). */
+    implModels?: {
+        simple: string;
+        medium: string;
+        complex: string;
+    };
+    /** Set after the operator confirms implement models (one-time per flywheel run). */
+    implModelsConfirmed?: boolean;
+    /** Confirmed Cursor Task models for dueling wizards (wizard_a/b/c + synthesis). */
+    duelModels?: {
+        wizard_a: string;
+        wizard_b: string;
+        wizard_c: string;
+        synthesis: string;
+    };
+    /** Set after the operator confirms duel models (one-time per flywheel run). */
+    duelModelsConfirmed?: boolean;
+    /** Set after the operator picks a wrap-up path (Step 9.5 gate). */
+    wrapUpConfirmed?: boolean;
     /** Path to generated plan artifact. */
     planDocument?: string;
     /** Current plan refinement round. */
@@ -321,6 +405,12 @@ export interface OrchestratorState {
     planConvergenceScore?: number;
     /** Plan quality readiness score from the Plan Quality Oracle. */
     planReadinessScore?: unknown;
+    /**
+     * How the plan arrived in this session. Drives:
+     *   - Provenance-block injection at bead-creation time (duel only).
+     *   - Step 5.45 plan-stage menu gating (only fires when "picked-up-existing-plan").
+     */
+    planSource?: "standard" | "deep" | "duel" | "planning-workflow" | "external" | "picked-up-existing-plan";
     /**
      * Persisted across phases so a session restart can resume from the last
      * completed phase rather than rerunning the full 7-phase pipeline.
@@ -344,45 +434,536 @@ export interface OrchestratorState {
     /** Timestamp (ms) when the current phase started — used for phase duration display. */
     phaseStartedAt?: number;
     /**
-     * Number of consecutive review rounds where orch_review was called
+     * Number of consecutive review rounds where flywheel_review was called
      * with verdict="pass" and no revision instructions (guide §08 stop condition).
      * Reset to 0 on any fail or revision-instructions round.
      */
     consecutiveCleanRounds?: number;
+    /**
+     * Populated at session end with error-code frequency + recent events.
+     * Persisted through checkpoint for post-session analysis. Optional for
+     * backward-compatibility with v3.3.0 checkpoints.
+     */
+    errorCodeTelemetry?: ErrorCodeTelemetry;
+    /**
+     * Git SHA captured at session start. Used by post-mortem reconstruction
+     * to compute the diff boundary without consulting reflog. Optional for
+     * backward-compatibility with v3.3.0 checkpoints.
+     */
+    sessionStartSha?: string;
+    /**
+     * Path (relative to cwd) of the active rubric.md. Set by
+     * `flywheel_synthesize_rubric` and reset by `flywheel_select`.
+     */
+    outcomeRubricPath?: string;
+    /**
+     * Set to `true` by the Skip-rubric branch of the Step 5.6 rubric gate.
+     * Cleared at the next `flywheel_select` (one-cycle skip — OQ-B).
+     * `flywheel_grade_outcome` short-circuits to the skip sentinel when
+     * this is true.
+     */
+    outcomeGradingSkipped?: boolean;
+    /**
+     * Capped FIFO of past grading rounds (Tension #4). Each entry stores the
+     * iteration index, the verdict envelope, and the wall-clock timestamp
+     * the grader returned. Caller (T6) is responsible for the FIFO eviction
+     * to last-5 entries to keep the checkpoint bounded.
+     *
+     * The verdict shape is the v3.13.0 GraderVerdictSchemaV1 — schema-bumped
+     * via the v2 ladder pattern documented in `outcome-grading.ts`.
+     */
+    outcomeGradingHistory?: Array<{
+        iteration: number;
+        verdict: import('./outcome-grading.js').GraderVerdict;
+        timestamp: string;
+    }>;
+    /**
+     * Iteration cap. Default 3 at read (matches MA's `max_iterations`).
+     * Bounded `[1, 5]` by `getMaxOutcomeIterations(state)` from
+     * `outcome-grading.ts` — set this field freely; the helper clamps.
+     */
+    maxOutcomeIterations?: number;
+    /**
+     * Git SHA captured at `flywheel_select` time. Used by `gradeOutcome` as
+     * `commitRangeStart`. The 4-tier recovery ladder
+     * (state → checkpoint.gitHead → git-log-by-time → HEAD~50) protects
+     * against missing values; never defaults to `HEAD` (false `satisfied`).
+     */
+    cycleStartSha?: string;
+    /**
+     * Captured by the `_wrapup.md` test-runner hook. Truncated to 10K chars
+     * at write. Surfaced inside the grader prompt when the dynamic budget
+     * permits (Robustness D9 priority: rubric > diff stat > diff body >
+     * test output).
+     */
+    cycleEndTestOutput?: string;
+    /** @deprecated since 3.17.0 — unused. The batch-review gate computes
+     *  commit count LIVE via `countCommitsSinceLastBatchReview(cwd,
+     *  state.lastBatchReviewSha)` at gate-time rather than reading a stored
+     *  counter, so no production code writes to this field. Kept for checkpoint
+     *  forward-compat with the v3.17.0 release entry which initially declared it;
+     *  remove in a future major bump. */
+    commitBatchCounter?: number;
+    /** Threshold (commits) that triggers an auto fresh-eyes review.
+     *  Default 8 (set by checkpoint migration guard). 0 or unset disables the
+     *  feature; existing post-wave gate flow is unchanged. */
+    commitBatchThreshold?: number;
+    /** Baseline SHA used by the next batch-review diff. Updated when a batch
+     *  review dispatches (set to HEAD at dispatch time, NOT after verdict, so
+     *  in-flight commits during the review don't double-trigger the next batch). */
+    lastBatchReviewSha?: string;
+    /** Per-sha-range record of bead IDs auto-synthesized from blocking verdicts.
+     *  Key = `<from-sha>..<to-sha>`; value = ordered bead IDs created by
+     *  synthesizeBeadsFromFindings. Used for the rollback path
+     *  (rollbackSynthesizedBeads) when the user picks Reject all / Approve subset. */
+    batchReviewSynthesizedBeads?: Record<string, string[]>;
+    /** Sha range of an in-flight batch review (`<from>..<to>`), set at dispatch. */
+    pendingBatchReviewRange?: string;
+    /** ISO timestamp of the last flywheel_impl_tick (coordinator cadence). */
+    lastImplTickAt?: string;
 }
-/** On-disk checkpoint envelope — wraps OrchestratorState with crash-recovery metadata. */
+/** On-disk checkpoint envelope — wraps FlywheelState with crash-recovery metadata. */
 export interface CheckpointEnvelope {
     /** Schema version for forward compatibility. Start at 1. */
     schemaVersion: 1;
     /** ISO timestamp when this checkpoint was written. */
     writtenAt: string;
-    /** Orchestrator version that wrote this checkpoint. */
-    orchestratorVersion: string;
+    /** Flywheel version that wrote this checkpoint. */
+    flywheelVersion: string;
     /** Git HEAD hash at checkpoint time — detects branch changes between crash and resume. */
     gitHead?: string;
-    /** The full orchestrator state snapshot. */
-    state: OrchestratorState;
+    /** The full flywheel state snapshot. */
+    state: FlywheelState;
     /** SHA-256 hash of JSON.stringify(state) for integrity validation. */
     stateHash: string;
 }
-export declare function createInitialState(): OrchestratorState;
+export declare function createInitialState(): FlywheelState;
 export type { ExecFn } from './exec.js';
 export interface ToolContext {
     exec: import('./exec.js').ExecFn;
     cwd: string;
-    state: OrchestratorState;
-    saveState: (state: OrchestratorState) => void;
+    state: FlywheelState;
+    saveState: (state: FlywheelState) => Promise<boolean> | void;
     clearState: () => void;
+    signal?: AbortSignal;
 }
-export type McpToolResult = {
+export type FlywheelToolName = 'flywheel_profile' | 'flywheel_discover' | 'flywheel_select' | 'flywheel_plan' | 'flywheel_approve_beads' | 'flywheel_review' | 'flywheel_verify_beads' | 'flywheel_compliance_audit' | 'flywheel_advance_wave' | 'flywheel_confirm_impl_models' | 'flywheel_duel' | 'flywheel_wave_review_gate' | 'flywheel_wrap_up_gate' | 'flywheel_bead_approval_gate' | 'flywheel_memory' | 'flywheel_doctor' | 'flywheel_get_skill' | 'flywheel_observe' | 'flywheel_start_menu' | 'flywheel_impl_tick' | 'orch_profile' | 'orch_discover' | 'orch_select' | 'orch_plan' | 'orch_approve_beads' | 'orch_review' | 'orch_verify_beads' | 'orch_compliance_audit' | 'orch_advance_wave' | 'orch_memory' | 'orch_get_skill' | 'orch_observe';
+export interface ToolChoiceOption {
+    id: string;
+    label: string;
+    description?: string;
+    tool?: FlywheelToolName;
+    args?: Record<string, unknown>;
+}
+export interface ToolNextStep {
+    type: 'call_tool' | 'present_choices' | 'generate_artifact' | 'spawn_agents' | 'run_cli' | 'resume_phase' | 'none';
+    message: string;
+    tool?: FlywheelToolName;
+    argsSchemaHint?: Record<string, unknown>;
+    options?: ToolChoiceOption[];
+}
+export type { FlywheelErrorCode, FlywheelToolError, FlywheelStructuredError } from './errors.js';
+export { FLYWHEEL_ERROR_CODES, FlywheelStructuredErrorSchema } from './errors.js';
+export type McpToolResult<TStructured = unknown> = {
     content: Array<{
         type: "text";
         text: string;
     }>;
+    structuredContent?: TStructured;
     isError?: boolean;
 };
+export interface ProfileArgs {
+    cwd: string;
+    goal?: string;
+    force?: boolean;
+}
+export interface DiscoverArgs {
+    cwd: string;
+    ideas: CandidateIdea[];
+}
+export interface SelectArgs {
+    cwd: string;
+    goal: string;
+}
+export interface PlanArgs {
+    cwd: string;
+    mode?: "standard" | "deep" | "duel";
+    planContent?: string;
+    planFile?: string;
+    /**
+     * Provenance signal for the plan being registered. When set to
+     * "picked-up-existing-plan" (the Step 0d "Pick up existing plan" route),
+     * Step 5.45 surfaces a plan-stage menu (Validate / Approve / Refine / Scrap)
+     * before bead creation. Otherwise the plan flows straight to Step 5.5.
+     */
+    source?: "picked-up-existing-plan";
+}
+export interface ApproveArgs {
+    cwd: string;
+    action: "start" | "polish" | "reject" | "advanced" | "git-diff-review" | "remediate";
+    advancedAction?: string;
+    /** P2.4 / 2p5 — convergence threshold above which a polish call returns
+     * stop_reason="convergence_reached" instead of scheduling another round.
+     * Default 0.85. */
+    until_convergence_score?: number;
+    /** P2.4 / 2p5 — round cap; when state.polishRound >= max_rounds the call
+     * returns stop_reason="max_rounds_hit" instead of scheduling more rounds.
+     * Default 5. */
+    max_rounds?: number;
+    /**
+     * Required when `action: 'remediate'`. Each call creates exactly one
+     * bead via `br create`, populated from the §"Remediation Bead Template"
+     * verbatim shape. T11 (`_wrapup.md` Step 9.5) calls this once per
+     * failing criterion when the operator picks Iterate. Bead: T20
+     * (claude-orchestrator-38i).
+     */
+    remediation?: {
+        /** Plan slug — used to fill the verdict-file path in the bead body. */
+        planSlug: string;
+        /** Iteration index from the verdict — used for the verdict-file path. */
+        iteration: number;
+        /** Criterion id (e.g. `c2`). Mirrors PerCriterionVerdict.criterionId. */
+        criterionId: string;
+        /** Criterion description from rubric.md — looked up by the caller because PerCriterionVerdict carries only the id. */
+        criterionDescription: string;
+        /** Verdict status for this criterion. */
+        status: "unmet" | "partial";
+        /** Grader's evidence trace — quoted in the bead body unchanged. */
+        evidence: string;
+        /** Gaps the grader flagged — fold into bead acceptance criteria. */
+        gaps: string[];
+    };
+}
+/** P2.4 / 2p5 — explicit reason a polish loop terminated. Surfaced in the
+ * approve_beads response so operators don't have to infer "did we converge
+ * or did we hit the cap?" from text. */
+export type ApproveStopReason = "convergence_reached" | "max_rounds_hit" | "manual_start" | "manual_reject";
+/**
+ * Review modes (bead agent-flywheel-plugin-f0j): dispatch the same reviewer
+ * personas into four human-shaped workflows. The flag propagates into the
+ * reviewer agent prompts via `runReview` so reviewer tone/output matches the
+ * chosen mode — no new MCP tools, no new reviewer agents.
+ *
+ *   - "interactive"  — current default; AskUserQuestion per finding
+ *   - "autofix"      — reviewers emit diffs + commit; gated behind green
+ *                      doctor + clean `git status` (falls back to interactive)
+ *   - "report-only"  — reviewers write docs/reviews/<date>.md and exit
+ *   - "headless"     — CI-friendly exit-code signal per error count
+ */
+export type ReviewMode = "autofix" | "report-only" | "headless" | "interactive";
+export interface ReviewArgs {
+    cwd: string;
+    beadId: string;
+    action: "hit-me" | "looks-good" | "skip" | "batch_review";
+    /** Review-mode matrix (default "interactive"). */
+    mode?: ReviewMode;
+    /** Hint that reviewers can run in parallel without stepping on each other. */
+    parallelSafe?: boolean;
+    /** Sha range `<from-sha>..<to-sha>` for action="batch_review" (T4 — fresh-eyes
+     *  auto-trigger). Required when action="batch_review"; ignored otherwise. */
+    shaRange?: string;
+}
+export interface VerifyBeadsArgs {
+    cwd: string;
+    beadIds: string[];
+}
+export interface AdvanceWaveArgs {
+    cwd: string;
+    closedBeadIds: string[];
+    maxNextWave?: number;
+    /**
+     * Confirm implement-wave Cursor models before the first next-wave dispatch.
+     * Re-call with the same closedBeadIds after the user picks from implModelsGate.
+     */
+    confirmImplModels?: 'defaults' | 'recommended' | {
+        uniform: string;
+    } | {
+        simple: string;
+        medium: string;
+        complex: string;
+    };
+    /** Test / automation only — skip the one-time impl model confirmation gate. */
+    skipImplModelsGate?: boolean;
+}
+export interface ConfirmImplModelsArgs {
+    cwd: string;
+    confirmImplModels?: 'defaults' | 'recommended' | {
+        uniform: string;
+    } | {
+        simple: string;
+        medium: string;
+        complex: string;
+    };
+}
+export interface DuelArgs {
+    cwd: string;
+    mode?: 'ideas' | 'architecture' | 'security' | 'reliability' | 'ux' | 'performance';
+    focus?: string;
+    top?: number;
+    output?: string;
+    confirmDuelModels?: 'defaults' | 'recommended' | {
+        wizard_a: string;
+        wizard_b: string;
+        wizard_c?: string;
+    };
+    skipDuelModelsGate?: boolean;
+}
+export interface WaveReviewGateArgs {
+    cwd: string;
+    /** Bead IDs that finished in the current wave (from Agent Mail / swarm). */
+    beadIds: string[];
+}
+export interface WrapUpGateArgs {
+    cwd: string;
+    /** User choice after presenting the gate: "full" | "commit_only" | "skip". */
+    confirmWrapUp?: 'full' | 'commit_only' | 'skip';
+    /** Re-show the wrap-up menu even if already confirmed. */
+    force?: boolean;
+}
+export interface BeadApprovalGateArgs {
+    cwd: string;
+    /**
+     * review — Step 6 first menu (start / polish / reject).
+     * launch — score beads + launch / low-quality / hotspot menu (after user picks Start).
+     * coverage — plan section coverage (pass coveredSections, totalSections, missingSections).
+     * dedup — overlap sweep (pass overlapPairs count).
+     */
+    step?: 'review' | 'launch' | 'coverage' | 'dedup';
+    coveredSections?: number;
+    totalSections?: number;
+    missingSections?: string[];
+    overlapPairs?: number;
+}
+export type FlywheelUserGate = import('./cursor-user-gates.js').FlywheelUserGate;
+export interface MemoryArgs {
+    cwd: string;
+    query?: string;
+    operation?: "search" | "store" | "draft_postmortem" | "draft_solution_doc" | "refresh_learnings";
+    content?: string;
+    /** CASS entry id for the paired post-mortem. Required when operation="draft_solution_doc". */
+    entryId?: string;
+    /**
+     * Optional override for the docs/solutions/ root scanned by
+     * operation="refresh_learnings". Defaults to `<cwd>/docs/solutions`.
+     */
+    refreshRoot?: string;
+}
+export interface DoctorArgs {
+    cwd: string;
+}
 export interface HitMeResult {
     text: string;
     diff: string;
 }
+export type AgentMailResult<T> = {
+    ok: true;
+    data: T;
+} | {
+    ok: false;
+    error: AgentMailError;
+};
+export interface AgentMailError {
+    kind: "network" | "timeout" | "parse" | "rpc_error" | "empty_response";
+    message: string;
+    code?: number;
+    stderr?: string;
+}
+export declare const DoctorCheckSeveritySchema: z.ZodEnum<{
+    green: "green";
+    yellow: "yellow";
+    red: "red";
+}>;
+export type DoctorCheckSeverity = z.infer<typeof DoctorCheckSeveritySchema>;
+export declare const DoctorCheckSchema: z.ZodObject<{
+    name: z.ZodString;
+    severity: z.ZodEnum<{
+        green: "green";
+        yellow: "yellow";
+        red: "red";
+    }>;
+    message: z.ZodString;
+    hint: z.ZodOptional<z.ZodString>;
+    durationMs: z.ZodOptional<z.ZodNumber>;
+}, z.core.$strip>;
+export type DoctorCheck = z.infer<typeof DoctorCheckSchema>;
+export declare const DoctorReportSchema: z.ZodObject<{
+    version: z.ZodLiteral<1>;
+    cwd: z.ZodString;
+    overall: z.ZodEnum<{
+        green: "green";
+        yellow: "yellow";
+        red: "red";
+    }>;
+    criticalFails: z.ZodDefault<z.ZodNumber>;
+    partial: z.ZodDefault<z.ZodBoolean>;
+    checks: z.ZodArray<z.ZodObject<{
+        name: z.ZodString;
+        severity: z.ZodEnum<{
+            green: "green";
+            yellow: "yellow";
+            red: "red";
+        }>;
+        message: z.ZodString;
+        hint: z.ZodOptional<z.ZodString>;
+        durationMs: z.ZodOptional<z.ZodNumber>;
+    }, z.core.$strip>>;
+    elapsedMs: z.ZodNumber;
+    timestamp: z.ZodString;
+}, z.core.$strip>;
+export type DoctorReport = z.infer<typeof DoctorReportSchema>;
+export declare const HotspotSeveritySchema: z.ZodEnum<{
+    low: "low";
+    high: "high";
+    med: "med";
+}>;
+export type HotspotSeverity = z.infer<typeof HotspotSeveritySchema>;
+export declare const HotspotRowSchema: z.ZodObject<{
+    file: z.ZodString;
+    beadIds: z.ZodArray<z.ZodString>;
+    contentionCount: z.ZodNumber;
+    severity: z.ZodEnum<{
+        low: "low";
+        high: "high";
+        med: "med";
+    }>;
+    provenance: z.ZodEnum<{
+        "files-section": "files-section";
+        prose: "prose";
+    }>;
+}, z.core.$strip>;
+export type HotspotRow = z.infer<typeof HotspotRowSchema>;
+export declare const HotspotMatrixSchema: z.ZodObject<{
+    version: z.ZodLiteral<1>;
+    rows: z.ZodArray<z.ZodObject<{
+        file: z.ZodString;
+        beadIds: z.ZodArray<z.ZodString>;
+        contentionCount: z.ZodNumber;
+        severity: z.ZodEnum<{
+            low: "low";
+            high: "high";
+            med: "med";
+        }>;
+        provenance: z.ZodEnum<{
+            "files-section": "files-section";
+            prose: "prose";
+        }>;
+    }, z.core.$strip>>;
+    maxContention: z.ZodNumber;
+    recommendation: z.ZodEnum<{
+        "coordinator-serial": "coordinator-serial";
+        swarm: "swarm";
+    }>;
+    summaryOnly: z.ZodDefault<z.ZodBoolean>;
+}, z.core.$strip>;
+export type HotspotMatrix = z.infer<typeof HotspotMatrixSchema>;
+export declare const PostmortemDraftSchema: z.ZodObject<{
+    version: z.ZodLiteral<1>;
+    sessionStartSha: z.ZodOptional<z.ZodString>;
+    goal: z.ZodString;
+    phase: z.ZodString;
+    markdown: z.ZodString;
+    hasWarnings: z.ZodDefault<z.ZodBoolean>;
+    warnings: z.ZodDefault<z.ZodArray<z.ZodString>>;
+}, z.core.$strip>;
+export type PostmortemDraft = z.infer<typeof PostmortemDraftSchema>;
+/**
+ * v3.4.1 note: `BeadTemplateContractSchema` / `BeadTemplateContract` was
+ * declared here during v3.4.0 as a planned MCP-boundary contract but never
+ * wired to any `.parse()` call site. It was deleted per the v3.4.0 release
+ * gate's P1-5 finding — dead export-only code should not linger in the public
+ * surface. If a future MCP tool needs a wire-friendly template contract,
+ * reintroduce the schema beside the handler that actually validates it so
+ * the declaration, parse site, and tests ship together.
+ *
+ * The in-process `BeadTemplate` interface above (richer, with placeholder
+ * metadata) remains the canonical shape for `bead-templates.ts` consumers.
+ */
+/**
+ * Error-code telemetry. Keys of `counts` and the `code` field of each
+ * `recentEvents` entry SHOULD be `FlywheelErrorCode` values, but the schema
+ * accepts any string to stay forward-compatible with newer sessions that may
+ * have added codes we don't yet know about. The write path (in `telemetry.ts`,
+ * landed in I7) MUST validate the key is a known `FlywheelErrorCode` before
+ * incrementing; the read path tolerates unknown keys so checkpoints from
+ * future versions don't fail to load.
+ */
+export declare const ErrorCodeTelemetrySchema: z.ZodObject<{
+    version: z.ZodLiteral<1>;
+    sessionStartIso: z.ZodString;
+    counts: z.ZodRecord<z.ZodString, z.ZodNumber>;
+    recentEvents: z.ZodArray<z.ZodObject<{
+        code: z.ZodString;
+        ts: z.ZodString;
+        ctxHash: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
+export type ErrorCodeTelemetry = z.infer<typeof ErrorCodeTelemetrySchema>;
+/** Severity enum for batch-review findings. Validated via SeveritySchema
+ *  when parsing reviewer subagent output. */
+export type Severity = "low" | "medium" | "high" | "critical";
+/** A single finding emitted by the fresh-eyes review subagent. Shape is
+ *  contract-enforced via FindingSchema (see commit-batch.ts). */
+export interface Finding {
+    severity: Severity;
+    /** One-line description of the issue. */
+    summary: string;
+    /** Title for the auto-synthesized bead. */
+    suggested_bead_title: string;
+    /** Paths the finding touches (relative to cwd). */
+    affected_files: string[];
+    /** 2-10 line code excerpt or git-log line. */
+    evidence_excerpt: string;
+}
+/** Top-level shape of a batch-review verdict persisted to
+ *  `.pi-flywheel/batch-reviews/<sha-range>.json`. */
+export interface BatchReviewVerdict {
+    status: "pass" | "needs_attention" | "blocking";
+    findings: Finding[];
+    /** Adjective+noun pool name of the reviewer subagent (informational). */
+    reviewer_agent_name?: string;
+    /** How long the review subagent ran (ms). */
+    duration_ms?: number;
+    /** `<from-sha>..<to-sha>`. */
+    sha_range: string;
+}
+export declare const SeveritySchema: z.ZodEnum<{
+    medium: "medium";
+    low: "low";
+    high: "high";
+    critical: "critical";
+}>;
+export declare const FindingSchema: z.ZodObject<{
+    severity: z.ZodEnum<{
+        medium: "medium";
+        low: "low";
+        high: "high";
+        critical: "critical";
+    }>;
+    summary: z.ZodString;
+    suggested_bead_title: z.ZodString;
+    affected_files: z.ZodArray<z.ZodString>;
+    evidence_excerpt: z.ZodString;
+}, z.core.$strip>;
+export declare const BatchReviewVerdictSchema: z.ZodObject<{
+    status: z.ZodEnum<{
+        pass: "pass";
+        needs_attention: "needs_attention";
+        blocking: "blocking";
+    }>;
+    findings: z.ZodArray<z.ZodObject<{
+        severity: z.ZodEnum<{
+            medium: "medium";
+            low: "low";
+            high: "high";
+            critical: "critical";
+        }>;
+        summary: z.ZodString;
+        suggested_bead_title: z.ZodString;
+        affected_files: z.ZodArray<z.ZodString>;
+        evidence_excerpt: z.ZodString;
+    }, z.core.$strip>>;
+    reviewer_agent_name: z.ZodOptional<z.ZodString>;
+    duration_ms: z.ZodOptional<z.ZodNumber>;
+    sha_range: z.ZodString;
+}, z.core.$strip>;
 //# sourceMappingURL=types.d.ts.map

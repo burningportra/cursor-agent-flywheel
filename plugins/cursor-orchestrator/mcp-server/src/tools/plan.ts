@@ -1,32 +1,112 @@
-import { mkdirSync, writeFileSync, readFileSync, existsSync } from 'node:fs';
-import { join, resolve } from 'node:path';
-import type { ToolContext, McpToolResult } from '../types.js';
-import { slugifyGoal, pickRefinementModel, DEEP_PLAN_MODELS } from './shared.js';
+import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, lstatSync } from 'node:fs';
+import { join } from 'node:path';
+import type { ToolContext, McpToolResult, PlanArgs } from '../types.js';
+import { makeOkToolResult, slugifyGoal } from './shared.js';
 import { CODEX_SUBAGENT_TYPE } from '../prompts.js';
 import { getDeepPlanModels } from '../model-detection.js';
+import {
+  buildCursorDeepPlanAgents,
+  buildCursorDeepPlanInstructions,
+  getCursorDeepPlanModels,
+  useClaudeDeepPlanBackend,
+} from '../cursor-deep-plan.js';
+import {
+  buildCursorDuelRun,
+  buildDuelModelsGate,
+  formatCursorDuelModelTable,
+  recommendDuelModels,
+  useNtmDuelBackend,
+} from '../cursor-duel.js';
+import { readMemory } from '../memory.js';
+import type { FlywheelErrorCode } from '../errors.js';
+import { errMsg, makeFlywheelErrorResult } from '../errors.js';
+import {
+  assertSafeRelativePath,
+  resolveRealpathWithinRoot,
+} from '../utils/path-safety.js';
+import { normalizeText } from '../utils/text-normalize.js';
 
-interface PlanArgs {
-  cwd: string;
-  mode?: 'standard' | 'deep';
-  planContent?: string;
-  planFile?: string; // Path to already-written plan file (avoids passing large content over stdio)
+/**
+ * Locate the most-recent brainstorm artifact for this goal.
+ *
+ * Phase 0.5 of `skills/start/_planning.md` writes pressure-test outcomes to
+ * `docs/brainstorms/<goal-slug>-<YYYY-MM-DD>.md`. We pick the lexically-greatest
+ * match (dates in the filename make lexical order equal chronological order),
+ * falling back to `null` when the directory is missing or no slug match exists.
+ *
+ * Returns the raw file contents so the caller can splice them directly into
+ * the planner prompt — callers should NOT parse the file structure, because
+ * the orchestrator writes arbitrary synthesis prose.
+ */
+function readLatestBrainstorm(cwd: string, goalSlug: string): { path: string; content: string } | null {
+  try {
+    const dir = join(cwd, 'docs', 'brainstorms');
+    if (!existsSync(dir)) return null;
+    const entries = readdirSync(dir)
+      .filter(f => f.endsWith('.md') && f.startsWith(`${goalSlug}-`));
+    if (entries.length === 0) return null;
+    // Sort lexically descending — filenames embed ISO dates, so this == latest.
+    entries.sort().reverse();
+    const pick = entries[0];
+    const abs = join(dir, pick);
+    // lstatSync (NOT statSync): refuse symlinks outright so a planted
+    // `<slug>-2026-01-01.md -> /etc/passwd` cannot leak content into the
+    // planner prompt. Regular files only.
+    const st = lstatSync(abs);
+    if (!st.isFile() || st.isSymbolicLink()) return null;
+    const content = normalizeText(readFileSync(abs, 'utf8'));
+    return { path: `docs/brainstorms/${pick}`, content };
+  } catch {
+    return null;
+  }
+}
+
+/** Format a brainstorm artifact as a prompt section; empty string if null. */
+function formatBrainstormSection(brainstorm: { path: string; content: string } | null): string {
+  if (!brainstorm) return '';
+  return `\n## Phase 0.5 Brainstorm (read FIRST)\n\nSource: \`${brainstorm.path}\` — pressure-test outcome from Phase 0.5 of the planning skill. Anchor scope to the smallest version; reserve the 10x version as a "future direction" appendix, not a v1 requirement.\n\n\`\`\`markdown\n${brainstorm.content.trim()}\n\`\`\`\n`;
+}
+
+function okResult(text: string, phase: 'planning' | 'awaiting_plan_approval', data: Record<string, unknown>): McpToolResult {
+  return makeOkToolResult('flywheel_plan', phase, text, data);
+}
+
+function errorResult(
+  phase: 'planning' | 'awaiting_plan_approval',
+  code: FlywheelErrorCode,
+  message: string,
+  details?: Record<string, unknown>,
+  hint?: string,
+): McpToolResult {
+  return makeFlywheelErrorResult('flywheel_plan', phase, {
+    code,
+    message,
+    ...(hint ? { hint } : {}),
+    ...(details ? { details } : {}),
+  });
 }
 
 /**
- * orch_plan — Generate a plan document for the selected goal.
+ * flywheel_plan — Generate a plan document for the selected goal.
  *
  * mode="standard": Returns a prompt for the agent to generate a single plan
  * mode="deep": Returns spawn configs for 3 parallel planning agents (correctness, robustness, ergonomics)
  *              If planContent is provided, uses it directly to create beads.
+ * mode="duel":  Returns instructions to invoke /dueling-idea-wizards --mode=architecture for 2-agent
+ *               adversarial planning (CC + COD/GMI cross-scoring). Synthesis lands at
+ *               docs/plans/<date>-<slug>-duel.md and is registered via planFile on the next call.
  */
 export async function runPlan(ctx: ToolContext, args: PlanArgs): Promise<McpToolResult> {
   const { state, saveState, cwd } = ctx;
 
   if (!state.selectedGoal) {
-    return {
-      content: [{ type: 'text', text: 'Error: No goal selected. Call orch_select first.' }],
-      isError: true,
-    };
+    return errorResult(
+      'planning',
+      'missing_prerequisite',
+      'Error: No goal selected. Call flywheel_select first.',
+      undefined,
+      'Call flywheel_select with the chosen goal before flywheel_plan.',
+    );
   }
 
   const goal = state.selectedGoal;
@@ -39,59 +119,171 @@ export async function runPlan(ctx: ToolContext, args: PlanArgs): Promise<McpTool
 
   // ── If planFile path provided, read it from disk (avoids large stdio payloads) ──
   if (args.planFile) {
-    const absPath = resolve(cwd, args.planFile);
-    if (!existsSync(absPath)) {
-      return {
-        content: [{ type: 'text', text: `Error: planFile not found: ${absPath}` }],
-        isError: true,
-      };
+    // Path-traversal guard (bead mq3): the user-supplied planFile must stay inside cwd.
+    // allowAbsoluteInsideRoot=true preserves flows where callers already resolved
+    // to an absolute path inside the project.
+    const safe = assertSafeRelativePath(args.planFile, {
+      root: cwd,
+      allowAbsoluteInsideRoot: true,
+    });
+    if (!safe.ok) {
+      return errorResult(
+        'planning',
+        'invalid_input',
+        `Error: planFile rejected by path-safety (${safe.reason}): ${safe.message}`,
+        { planFile: args.planFile, reason: safe.reason },
+        'Provide a path relative to cwd without ".." segments, control chars, or absolute escape.',
+      );
     }
-    const content = readFileSync(absPath, 'utf8');
-    const relativePath = args.planFile.startsWith('docs/') ? args.planFile : `docs/plans/${args.planFile}`;
-    state.planDocument = args.planFile;
+    const resolvedPlanFile = resolveRealpathWithinRoot(safe.value, {
+      root: cwd,
+      label: 'planFile',
+      rootLabel: 'cwd',
+    });
+    if (!resolvedPlanFile.ok) {
+      const code: FlywheelErrorCode =
+        resolvedPlanFile.reason === 'not_found' || resolvedPlanFile.reason === 'root_not_found'
+          ? 'not_found'
+          : 'invalid_input';
+      return errorResult(
+        'planning',
+        code,
+        code === 'not_found'
+          ? `Error: planFile not found: ${resolvedPlanFile.absolutePath}`
+          : `Error: planFile rejected by realpath guard (${resolvedPlanFile.reason}): ${resolvedPlanFile.message}`,
+        {
+          planFile: args.planFile,
+          absolutePath: resolvedPlanFile.absolutePath,
+          reason: resolvedPlanFile.reason,
+        },
+        code === 'not_found'
+          ? 'Check the path is relative to cwd and that the plan file was saved before calling flywheel_plan.'
+          : 'Pass an existing plan file inside cwd. Symlinks that resolve outside the project root are rejected.',
+      );
+    }
+    const content = normalizeText(readFileSync(resolvedPlanFile.realPath, 'utf8'));
+    const planDocument = resolvedPlanFile.relativePath;
+    state.planDocument = planDocument;
     state.planRefinementRound = 0;
     state.phase = 'awaiting_plan_approval';
+    // Record planSource provenance. Explicit "picked-up-existing-plan" gates Step 5.45.
+    // mode==='duel' wins (handled later in the duel branch); otherwise honor args.source
+    // when supplied. Fresh brainstormed plans pass no source — leave it undefined so
+    // downstream code can default to the standard 5.5 path without a 5.45 prompt.
+    if (args.source === 'picked-up-existing-plan') {
+      state.planSource = 'picked-up-existing-plan';
+    }
     saveState(state);
 
-    return {
-      content: [{
-        type: 'text',
-        text: `**Plan loaded from \`${args.planFile}\`.**
+    const isPickedUp = state.planSource === 'picked-up-existing-plan';
+    const nextStepLine = isPickedUp
+      ? '**NEXT (Step 5.45): Surface the picked-up-plan menu (Validate / Approve / Refine / Scrap) before any bead creation. See `skills/start/SKILL.md` Step 5.45.**'
+      : '**NEXT: Call `flywheel_approve_beads` to review the plan and proceed to bead creation.**';
 
-**NEXT: Call \`orch_approve_beads\` to review the plan and proceed to bead creation.**
+    return okResult(
+      `**Plan loaded from \`${planDocument}\`.**
+
+${nextStepLine}
 
 Goal: "${goal}"${constraintsSummary}
 
 Plan loaded (${content.length} chars, ${content.split('\n').length} lines).`,
-      }],
-    };
+      'awaiting_plan_approval',
+      {
+        kind: 'plan_registered',
+        source: 'plan_file',
+        planSource: state.planSource ?? null,
+        pickedUp: isPickedUp,
+        goal,
+        mode,
+        planDocument,
+        planStats: {
+          chars: content.length,
+          lines: content.split('\n').length,
+        },
+      }
+    );
   }
 
   // ── If planContent is provided inline, write it to disk then register ──
-  if (args.planContent && args.planContent.trim()) {
+  if (args.planContent) {
+    const trimmed = args.planContent.trim();
+    if (trimmed.length === 0) {
+      return errorResult(
+        'planning',
+        'empty_plan',
+        'planContent is empty or whitespace.',
+        undefined,
+        'Generate plan content first, then pass it via planContent or write to disk and pass planFile.',
+      );
+    }
+    if (trimmed.includes('(No planner outputs provided.)')) {
+      return makeFlywheelErrorResult('flywheel_plan', 'planning', {
+        code: 'deep_plan_all_failed',
+        message: 'Deep plan failed: all perspective planners timed out or produced no output.',
+        hint: 'Retry with mode=standard as fallback.',
+      });
+    }
+    if (trimmed.startsWith('(AGENT')) {
+      return errorResult(
+        'planning',
+        'empty_plan',
+        `planContent is an agent failure sentinel: ${trimmed.slice(0, 80)}`,
+        { sentinelPrefix: '(AGENT' },
+        'The upstream planner agent failed — retry flywheel_plan with mode=standard or spawn a fresh planning agent.',
+      );
+    }
     const planDir = join(cwd, 'docs', 'plans');
-    mkdirSync(planDir, { recursive: true });
-    const planFilePath = join(planDir, `${new Date().toISOString().slice(0, 10)}-${planSlug}-synthesized.md`);
-    writeFileSync(planFilePath, args.planContent, 'utf8');
-
     const relativePath = `docs/plans/${new Date().toISOString().slice(0, 10)}-${planSlug}-synthesized.md`;
+    const planFilePath = join(planDir, relativePath.split('/').pop()!);
+
+    const prevPlanDocument = state.planDocument;
+    const prevPhase = state.phase;
+    const prevRound = state.planRefinementRound;
+    try {
+      mkdirSync(planDir, { recursive: true });
+      writeFileSync(planFilePath, args.planContent, 'utf8');
+    } catch (err: unknown) {
+      return errorResult(
+        'planning',
+        'cli_failure',
+        `Failed to write plan file: ${errMsg(err)}`,
+        { planFilePath },
+        'Check filesystem permissions on docs/plans/ and free disk space, then retry.',
+      );
+    }
+
     state.planDocument = relativePath;
     state.planRefinementRound = 0;
     state.phase = 'awaiting_plan_approval';
-    saveState(state);
+    const saved = await saveState(state);
+    if (saved === false) {
+      state.planDocument = prevPlanDocument;
+      state.phase = prevPhase;
+      state.planRefinementRound = prevRound ?? 0;
+    }
 
-    return {
-      content: [{
-        type: 'text',
-        text: `**Plan received and saved to \`${relativePath}\`.**
+    return okResult(
+      `**Plan received and saved to \`${relativePath}\`.**
 
-**NEXT: Call \`orch_approve_beads\` to review the plan and proceed to bead creation.**
+**NEXT: Call \`flywheel_approve_beads\` to review the plan and proceed to bead creation.**
 
 Goal: "${goal}"${constraintsSummary}
 
 Plan saved (${args.planContent.length} chars, ${args.planContent.split('\n').length} lines).`,
-      }],
-    };
+      'awaiting_plan_approval',
+      {
+        kind: 'plan_registered',
+        source: 'inline_plan_content',
+        goal,
+        mode,
+        planDocument: relativePath,
+        planStats: {
+          chars: args.planContent.length,
+          lines: args.planContent.split('\n').length,
+        },
+      }
+    );
   }
 
   state.phase = 'planning';
@@ -104,16 +296,18 @@ Plan saved (${args.planContent.length} chars, ${args.planContent.split('\n').len
       ? `\n\n### Repository Context\n- **Name:** ${profile.name}\n- **Languages:** ${profile.languages.join(', ')}\n- **Frameworks:** ${profile.frameworks.join(', ')}\n- **Has tests:** ${profile.hasTests}`
       : '';
 
+    // Phase 0.5 handoff: if the brainstorm artifact exists for this goal, surface it.
+    const brainstorm = readLatestBrainstorm(cwd, planSlug);
+    const brainstormSection = formatBrainstormSection(brainstorm);
+
     const planPath = `docs/plans/${new Date().toISOString().slice(0, 10)}-${planSlug}.md`;
     state.planDocument = planPath;
     saveState(state);
 
-    return {
-      content: [{
-        type: 'text',
-        text: `**NEXT: Generate a detailed plan document and save it to \`${planPath}\`.**
+    return okResult(
+      `**NEXT: Generate a detailed plan document and save it to \`${planPath}\`.**
 
-Goal: "${goal}"${constraintsSummary}${profileContext}
+Goal: "${goal}"${constraintsSummary}${profileContext}${brainstormSection}
 
 ## Plan Document Requirements
 
@@ -131,27 +325,135 @@ Target: 500-3000 lines. Be specific — vague plans produce vague beads.
 
 ### After generating the plan
 1. Save it to \`${planPath}\` using the Write tool or bash
-2. Call \`orch_approve_beads\` to review the plan and create beads from it`,
-      }],
-    };
+2. Call \`flywheel_approve_beads\` to review the plan and create beads from it`,
+      'planning',
+      {
+        kind: 'plan_prompt',
+        mode: 'standard',
+        goal,
+        planDocument: planPath,
+        constraints: state.constraints,
+        brainstormDocument: brainstorm?.path,
+      }
+    );
+  }
+
+  // ── Duel plan (Cursor-native Task wizards by default) ──────
+  if (mode === 'duel') {
+    const brainstorm = readLatestBrainstorm(cwd, planSlug);
+    const planPath = `docs/plans/${new Date().toISOString().slice(0, 10)}-${planSlug}-duel.md`;
+    state.planDocument = planPath;
+    state.planSource = 'duel';
+    saveState(state);
+
+    const brainstormHint = brainstorm
+      ? ` Pre-seed each wizard's study phase with \`${brainstorm.path}\`.`
+      : '';
+
+    if (!useNtmDuelBackend()) {
+      if (!state.duelModelsConfirmed) {
+        const gate = buildDuelModelsGate(cwd);
+        const text = [
+          '**Duel plan — confirm Cursor models first.**',
+          '',
+          `Goal: "${goal}"${constraintsSummary}`,
+          '',
+          `**Recommendation:** ${gate.rationale}`,
+          '',
+          formatCursorDuelModelTable(gate.recommended),
+          '',
+          'Present duelModelsGate.options as numbered choices, wait for the user, then call `flywheel_duel({ mode: "architecture", focus: "<goal>", confirmDuelModels: ... })` OR `flywheel_plan({ mode: "duel" })` again after models are confirmed.',
+          brainstormHint,
+        ].join('\n');
+        return okResult(text, 'planning', {
+          kind: 'duel_models_gate',
+          mode: 'duel',
+          goal,
+          planDocument: planPath,
+          duelModelsGate: gate,
+          brainstormDocument: brainstorm?.path,
+        });
+      }
+
+      const models = state.duelModels ?? recommendDuelModels(cwd).models;
+      const profileSummary = profile
+        ? `${profile.name} | ${profile.languages.join(', ')}`
+        : undefined;
+      const cursorDuel = buildCursorDuelRun({
+        cwd,
+        mode: 'architecture',
+        focus: goal,
+        outputPath: planPath,
+        top: 3,
+        models,
+        profileSummary,
+      });
+
+      const text = [
+        '## Cursor-native duel plan',
+        '',
+        `Goal: "${goal}"${constraintsSummary}${brainstormHint}`,
+        '',
+        cursorDuel.instructions,
+        '',
+        '---',
+        '',
+        cursorDuel.coordinatorPlaybook,
+        '',
+        `When synthesis lands in \`${planPath}\`, call \`flywheel_plan({ cwd, mode: "duel", planFile: "${planPath}" })\` then Step 5.55.`,
+      ].join('\n');
+
+      return okResult(text, 'planning', {
+        ...cursorDuel,
+        kind: 'cursor_duel_plan_spawn',
+        mode: 'duel',
+        goal,
+        constraints: state.constraints,
+        brainstormDocument: brainstorm?.path,
+        planDocument: planPath,
+      });
+    }
+
+    const text = `**NEXT (legacy):** Set \`FW_DUEL_BACKEND=ntm\` is active — invoke \`/dueling-idea-wizards --mode=architecture --top=3 --rounds=1 --focus="${goal.replace(/"/g, '\\"')}" --output=${planPath}\`. For Cursor-native duel, unset FW_DUEL_BACKEND and call \`flywheel_duel\` or \`flywheel_plan({ mode: "duel" })\`.`;
+
+    return okResult(text, 'planning', {
+      kind: 'duel_plan_spawn_ntm',
+      mode: 'duel',
+      goal,
+      constraints: state.constraints,
+      brainstormDocument: brainstorm?.path,
+      planDocument: planPath,
+      duelCommand: `/dueling-idea-wizards --mode=architecture --top=3 --rounds=1 --focus="${goal}" --output=${planPath}`,
+    });
   }
 
   // ── Deep plan (multi-model) ───────────────────────────────────
   // If no planContent provided, return agent spawn configs
   const profileSummary = profile
     ? `Repository: ${profile.name} | Languages: ${profile.languages.join(', ')} | Frameworks: ${profile.frameworks.join(', ')}`
-    : 'Repository: (profile not loaded — call orch_profile first for best results)';
+    : 'Repository: (profile not loaded — call flywheel_profile first for best results)';
 
-  const basePrompt = `You are a planning agent for an agentic coding workflow.
+  // Load CASS memory for planning context (best-effort)
+  let memorySection = "";
+  try {
+    const mem = readMemory(cwd, `planning architecture ${goal}`);
+    if (mem) memorySection = `\n## Prior Session Context\n${mem}\n`;
+  } catch { /* CASS unavailable — proceed without */ }
+
+  // Phase 0.5 handoff: inject brainstorm artifact if present.
+  const brainstorm = readLatestBrainstorm(cwd, planSlug);
+  const brainstormSection = formatBrainstormSection(brainstorm);
+
+  const basePrompt = `You are a planning agent for an agentic coding workflow. Use ultrathink.
 
 **Goal:** ${goal}${constraintsSummary}
 **${profileSummary}**
-
+${memorySection}${brainstormSection}
 Write a comprehensive implementation plan from your designated perspective. The plan will be synthesized with plans from other agents with different perspectives.
 
 ## Plan requirements
 - Executive summary
-- Architecture overview  
+- Architecture overview
 - Ordered implementation phases with dependencies
 - File-level changes (specific files to create/modify per phase)
 - Testing strategy
@@ -159,7 +461,65 @@ Write a comprehensive implementation plan from your designated perspective. The 
 - Risk & mitigation
 - Target: 500-2000 lines of detailed content
 
-Focus deeply on your assigned perspective lens.`;
+Focus deeply on your assigned perspective lens.
+
+Use ultrathink.`;
+
+  const planSlugForPaths = planSlug;
+  const synthesisPrompt = `Use ultrathink.
+
+## Best-of-All-Worlds Synthesis
+
+Use ultrathink.
+
+Read all competing plans. For EACH plan, BEFORE proposing any changes:
+
+1. **Honestly acknowledge** what that plan does better than the others — name the specific strengths, not generic praise.
+2. **Identify the unique insight** each plan contributes that the others miss.
+
+Then synthesize:
+
+3. **Blend the strongest ideas** from all plans into a single superior document.
+4. **For each major decision**, state which plan's approach you adopted and why.
+5. **Provide git-diff style changes** showing what was merged vs what was cut.
+6. **Flag unresolved tensions** — where plans fundamentally disagree and a judgment call was made.
+
+The synthesis must be BETTER than any individual plan, not a lowest-common-denominator average. Preserve bold ideas; don't sand them down.`;
+
+  if (!useClaudeDeepPlanBackend()) {
+    const cursorModels = getCursorDeepPlanModels(cwd);
+    const planAgents = buildCursorDeepPlanAgents(basePrompt, cursorModels);
+    const instructions = buildCursorDeepPlanInstructions(
+      planAgents,
+      cursorModels.synthesis,
+      planSlugForPaths,
+    );
+
+    const payload = {
+      kind: 'deep_plan_spawn',
+      mode: 'deep',
+      spawnBackend: 'cursor-task',
+      goal,
+      constraints: state.constraints,
+      brainstormDocument: brainstorm?.path,
+      deepPlanModels: cursorModels,
+      planAgents,
+      synthesisAgent: {
+        name: 'plan-synthesizer',
+        model: cursorModels.synthesis,
+        tier: 'A',
+        spawnWith: 'cursor-task',
+      },
+      instructions,
+      synthesisPrompt,
+    };
+
+    return okResult(
+      `${instructions}\n\n---\n\n**Goal:** ${goal}${constraintsSummary}\n\n**Synthesis prompt** is in \`data.synthesisPrompt\`.`,
+      'planning',
+      payload,
+    );
+  }
 
   const dynamicModels = getDeepPlanModels();
 
@@ -193,7 +553,6 @@ Ask: Is it easy to use correctly? Hard to misuse? Does it follow existing patter
     },
   ];
 
-  // Add optional 4th Gemini planner when Google model is available
   if (dynamicModels.freshPerspective) {
     planAgents.push({
       model: dynamicModels.freshPerspective,
@@ -208,16 +567,46 @@ Question every architectural choice: is there a simpler way? A more standard app
     });
   }
 
-  return {
-    content: [{
-      type: 'text',
-      text: JSON.stringify({
+  const payload = {
+    kind: 'deep_plan_spawn',
+    mode: 'deep',
+    spawnBackend: 'claude-agent',
+    goal,
+    constraints: state.constraints,
+    brainstormDocument: brainstorm?.path,
+    planAgents,
+    instructions: `Spawn these ${planAgents.length} planning agents in parallel using TeamCreate + Agent with run_in_background: true. Each agent must bootstrap Agent Mail (macro_start_session) and write their plan to docs/plans/<date>-<perspective>.md, then send the file path via send_message. After all complete, spawn a synthesis agent to read the ${planAgents.length} files and write the synthesized plan to docs/plans/<date>-<slug>-synthesized.md. Then call flywheel_plan with planFile: "docs/plans/<date>-<slug>-synthesized.md" (NOT planContent — passing large text through stdio stalls the MCP server).`,
+    synthesisPrompt: `Use ultrathink.
+
+## Best-of-All-Worlds Synthesis
+
+Use ultrathink.
+
+Read all ${planAgents.length} competing plans. For EACH plan, BEFORE proposing any changes:
+
+1. **Honestly acknowledge** what that plan does better than the others — name the specific strengths, not generic praise.
+2. **Identify the unique insight** each plan contributes that the others miss.
+
+Then synthesize:
+
+3. **Blend the strongest ideas** from all plans into a single superior document.
+4. **For each major decision**, state which plan's approach you adopted and why.
+5. **Provide git-diff style changes** showing what was merged vs what was cut.
+6. **Flag unresolved tensions** — where plans fundamentally disagree and a judgment call was made.
+
+The synthesis must be BETTER than any individual plan, not a lowest-common-denominator average. Preserve bold ideas; don't sand them down.`,
+  };
+
+  return okResult(
+    JSON.stringify({
         action: 'spawn-plan-agents',
         goal,
         constraints: state.constraints,
         planAgents,
-        instructions: `Spawn these ${planAgents.length} planning agents in parallel using TeamCreate + Agent with run_in_background: true. Each agent must bootstrap Agent Mail (macro_start_session) and write their plan to docs/plans/<date>-<perspective>.md, then send the file path via send_message. After all complete, spawn a synthesis agent to read the ${planAgents.length} files and write the synthesized plan to docs/plans/<date>-<slug>-synthesized.md. Then call orch_plan with planFile: "docs/plans/<date>-<slug>-synthesized.md" (NOT planContent — passing large text through stdio stalls the MCP server).`,
+        instructions: payload.instructions,
+        synthesisPrompt: payload.synthesisPrompt,
       }, null, 2),
-    }],
-  };
+    'planning',
+    payload
+  );
 }

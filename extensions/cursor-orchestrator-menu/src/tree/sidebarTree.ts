@@ -63,7 +63,7 @@ export class OrchestratorSidebar implements vscode.TreeDataProvider<OrchTreeNode
         {
           key: "session",
           label: "Session",
-          tooltip: ".pi-orchestrator/checkpoint.json",
+          tooltip: ".pi-flywheel/checkpoint.json",
           iconId: "dashboard",
           collapsible: vscode.TreeItemCollapsibleState.Expanded,
         },

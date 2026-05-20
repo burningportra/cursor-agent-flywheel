@@ -1,0 +1,1 @@
+{"version":3,"file":"allowlisted-helper.js","sourceRoot":"","sources":["../../../../../src/__tests__/lint/fixtures/reserve001/allowlisted-helper.ts"],"names":[],"mappings":"AAIA,MAAM,CAAC,KAAK,UAAU,aAAa,CAAC,IAAa;IAC/C,OAAO,YAAY,CAAC,IAAI,EAAE,wBAAwB,EAAE;QAClD,WAAW,EAAE,MAAM;QACnB,UAAU,EAAE,QAAQ;QACpB,KAAK,EAAE,CAAC,YAAY,CAAC;KACtB,CAAC,CAAC;AACL,CAAC"}

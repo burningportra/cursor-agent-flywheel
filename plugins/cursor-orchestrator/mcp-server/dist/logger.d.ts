@@ -1,8 +1,8 @@
 /**
- * Structured stderr logger for claude-orchestrator MCP server.
+ * Structured stderr logger for agent-flywheel MCP server.
  *
  * Writes JSON lines to process.stderr (safe for MCP stdio — never touches stdout).
- * Level filtering via ORCH_LOG_LEVEL env var (default: "warn").
+ * Level filtering via FW_LOG_LEVEL env var (default: "warn").
  * Level order: debug < info < warn < error.
  */
 export declare const LEVELS: readonly ["debug", "info", "warn", "error"];

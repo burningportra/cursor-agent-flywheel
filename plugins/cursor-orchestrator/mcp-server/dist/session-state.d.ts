@@ -1,7 +1,7 @@
 /**
  * Session-state detection and resumption helpers.
  *
- * Determines which orchestration stage the user is in — even after a cold
+ * Determines which flywheel stage the user is in — even after a cold
  * session restart where `oc.state.phase` may have been reset to "idle" —
  * by cross-checking the persisted state against on-disk evidence:
  *   • bead statuses from `br list`
@@ -14,10 +14,10 @@
  *   - provides the exact follow-up message to resume from that stage
  *   - rates its own confidence (high / medium / low)
  */
-import type { OrchestratorPhase, OrchestratorState, Bead } from "./types.js";
+import type { FlywheelPhase, FlywheelState, Bead } from "./types.js";
 export interface SessionStage {
     /** Resolved phase — may be inferred rather than taken verbatim from state. */
-    phase: OrchestratorPhase;
+    phase: FlywheelPhase;
     /** Short, human-readable phase title. */
     label: string;
     /** Leading emoji for the phase (used in UI labels). */
@@ -49,7 +49,7 @@ export interface SessionStage {
     inferredFrom: string[];
 }
 /**
- * Detect the current orchestration stage from persisted state + live bead data.
+ * Detect the current flywheel stage from persisted state + live bead data.
  *
  * Resolution order:
  * 1. If `state.phase` is a concrete non-idle phase → use it (confidence: "high")
@@ -60,9 +60,9 @@ export interface SessionStage {
  *    d. repoProfile but no beads → discovering
  *    e. nothing → idle
  */
-export declare function detectSessionStage(state: OrchestratorState, beads: Bead[]): SessionStage;
+export declare function detectSessionStage(state: FlywheelState, beads: Bead[]): SessionStage;
 /**
- * Builds the multi-line header string shown inside the `/orchestrate` select
+ * Builds the multi-line header string shown inside the `/start` select
  * prompt when an existing session is detected.
  *
  * Example output:

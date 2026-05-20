@@ -16,9 +16,12 @@ export interface AgentsMdHealth {
     /** Missing sections that should be added. */
     missing: string[];
 }
+/** Clear the scoreAgentsMd cache (call after modifying AGENTS.md). */
+export declare function resetAgentsMdScoreCache(): void;
 /**
  * Score an AGENTS.md file on completeness.
  * Returns a health assessment with 0-100 score and list of missing sections.
+ * Results are memoized per cwd for the session.
  */
 export declare function scoreAgentsMd(cwd: string): AgentsMdHealth;
 /**

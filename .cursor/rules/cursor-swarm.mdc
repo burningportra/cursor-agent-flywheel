@@ -1,0 +1,18 @@
+---
+description: Cursor swarm substitute for NTM — Task subagents, worktrees, Agent Mail
+alwaysApply: false
+---
+
+# Cursor swarm (NTM substitute)
+
+When implementing beads in parallel in Cursor:
+
+1. `macro_start_session` with `program: "cursor"` and your model id.
+2. `git worktree add` per bead — one worktree path per agent.
+3. **Task** subagent per bead with `run_in_background: true`; prompt includes worktree path only.
+4. **file_reservation_paths** via Agent Mail before edits.
+5. Coordinator polls `fetch_inbox` and `/flywheel-swarm-status`.
+
+NTM is **optional**. If `ntm` is missing, doctor reports warn — use this path instead.
+
+Follow `commands/flywheel-swarm.md`.

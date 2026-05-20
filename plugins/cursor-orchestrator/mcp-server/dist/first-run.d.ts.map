@@ -1,0 +1,1 @@
+{"version":3,"file":"first-run.d.ts","sourceRoot":"","sources":["../src/first-run.ts"],"names":[],"mappings":"AAAA;;;;;;;;;;;;;;;;;;GAkBG;AAKH,MAAM,MAAM,cAAc,GAAG;IAC3B,GAAG,EAAE,MAAM,CAAC;IACZ,MAAM,EAAE,MAAM,OAAO,CAAC,OAAO,EAAE,CAAC,CAAC;IACjC,UAAU,EAAE,MAAM,OAAO,CAAC,OAAO,EAAE,CAAC,CAAC;CACtC,CAAC;AAEF,wBAAsB,UAAU,CAAC,IAAI,EAAE,cAAc,GAAG,OAAO,CAAC,OAAO,CAAC,CASvE"}

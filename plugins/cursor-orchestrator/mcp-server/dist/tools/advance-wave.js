@@ -1,0 +1,380 @@
+import { runVerifyBeads } from './verify-beads.js';
+import { readyBeads } from '../beads.js';
+import { recommendComposition } from '../swarm.js';
+import { classifyBeadComplexity } from '../model-routing.js';
+import { allocateAgentNames } from '../adapters/agent-names.js';
+import { adaptPromptForClaude } from '../adapters/claude-prompt.js';
+import { adaptPromptForCodex } from '../adapters/codex-prompt.js';
+import { adaptPromptForGemini } from '../adapters/gemini-prompt.js';
+import { makeOkToolResult, makeToolError } from './shared.js';
+import { classifyExecError } from '../errors.js';
+import { createLogger } from '../logger.js';
+import * as path from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { readCheckpoint } from '../checkpoint.js';
+import { readConvergenceFromDisk, planSlugFromIdentifier, } from './convergence-tool.js';
+import { loadFlywheelConfig } from '../flywheel-config.js';
+import { countCommitsSinceLastBatchReview, shouldTriggerBatchReview } from '../commit-batch.js';
+import { adaptPromptForCursor, buildCursorImplSpawnInstructions, buildImplModelsGate, formatCursorImplModelTable, recommendImplModels, modelForComplexity, resolveImplModelsConfirm, useNtmImplBackend, } from '../cursor-implement-swarm.js';
+const log = createLogger('advance-wave');
+const execFileAsync = promisify(execFile);
+const GIT_TIMEOUT_MS = 5_000;
+const LANES = ['cc', 'cod', 'gem'];
+const LANE_ADAPTERS = {
+    cc: adaptPromptForClaude,
+    cod: adaptPromptForCodex,
+    gem: adaptPromptForGemini,
+};
+function isAttestationRequired() {
+    // Treat any non-empty value besides "0"/"false" as enabled. Empty / unset
+    // means warn-only (Stage 1 default — duel-agreed: PI2 reveal-phase
+    // concession that hard-blocking on day-one breaks in-flight workflows).
+    const v = process.env.FW_ATTESTATION_REQUIRED?.trim().toLowerCase();
+    return v != null && v !== '' && v !== '0' && v !== 'false';
+}
+/** Score threshold for the auto-approve recommendation. */
+const AUTO_APPROVE_SCORE = 0.9;
+/**
+ * Compute the convergence-recommendation block for an advance-wave outcome.
+ * Best-effort + side-effect-free: any I/O failure degrades to a "no_state"
+ * outcome rather than failing the whole call (matches the observe pattern).
+ */
+async function computeConvergenceRecommendation(cwd) {
+    let killSwitchOn = true;
+    try {
+        killSwitchOn = loadFlywheelConfig(cwd).convergence.gate_advance_wave;
+    }
+    catch {
+        killSwitchOn = true;
+    }
+    if (!killSwitchOn) {
+        return { armed: false, score: null, status: null, reason: 'kill_switch_off' };
+    }
+    let planDocument;
+    try {
+        const cp = readCheckpoint(cwd);
+        planDocument = cp?.envelope.state.planDocument;
+    }
+    catch {
+        /* no-op */
+    }
+    if (!planDocument) {
+        return { armed: false, score: null, status: null, reason: 'no_active_plan' };
+    }
+    const slug = planSlugFromIdentifier(planDocument);
+    let result;
+    try {
+        result = await readConvergenceFromDisk(cwd, slug);
+    }
+    catch {
+        return { armed: false, score: null, status: null, reason: 'no_state' };
+    }
+    if (result.status !== 'ok') {
+        return { armed: false, score: null, status: null, reason: 'no_state' };
+    }
+    const { state } = result.data;
+    if (state.score >= AUTO_APPROVE_SCORE && state.status === 'converged') {
+        return {
+            armed: true,
+            score: state.score,
+            status: state.status,
+            reason: 'auto_approve_recommended',
+        };
+    }
+    return {
+        armed: false,
+        score: state.score,
+        status: state.status,
+        reason: 'below_threshold',
+    };
+}
+function okResult(phase, text, data) {
+    return makeOkToolResult('flywheel_advance_wave', phase, text, data);
+}
+function beadToDispatchContext(bead, complexity, agentName, coordinatorName, projectKey) {
+    const descLines = bead.description.split('\n');
+    const acceptance = descLines
+        .filter((l) => /^\s*[-*]\s/.test(l))
+        .map((l) => l.replace(/^\s*[-*]\s*/, '').trim())
+        .filter(Boolean);
+    return {
+        beadId: bead.id,
+        title: bead.title,
+        description: bead.description,
+        acceptance: acceptance.length > 0 ? acceptance : ['Complete the bead as described.'],
+        complexity,
+        relevantFiles: [],
+        priorArtBeads: [],
+        agentName,
+        coordinatorName,
+        projectKey,
+    };
+}
+export async function runAdvanceWave(ctx, args) {
+    const { exec, cwd, state, saveState, signal } = ctx;
+    if (!Array.isArray(args.closedBeadIds) || args.closedBeadIds.length === 0) {
+        return makeToolError('flywheel_advance_wave', state.phase, 'invalid_input', 'Error: closedBeadIds must be a non-empty array of bead IDs from the completed wave.', { hint: 'Pass closedBeadIds as a non-empty string array — the wave of beads to verify before advancing.' });
+    }
+    // Step 1: verify the completed wave
+    const verifyResult = await runVerifyBeads(ctx, { cwd, beadIds: args.closedBeadIds });
+    const verification = verifyResult.structuredContent?.data;
+    if (!verification || verifyResult.isError) {
+        return verifyResult;
+    }
+    const convergenceRec = await computeConvergenceRecommendation(cwd);
+    if (verification.unclosedNoCommit.length > 0) {
+        const stragglerIds = verification.unclosedNoCommit.map((s) => s.id);
+        const outcome = {
+            verification,
+            nextWave: null,
+            waveComplete: false,
+            needsEvidence: false,
+            convergence: convergenceRec,
+        };
+        const lines = [
+            `Wave incomplete: ${verification.unclosedNoCommit.length} bead(s) still open without commits.`,
+            ...stragglerIds.map((id) => `  - ${id}`),
+            'Resolve these before advancing to the next wave.',
+        ];
+        return okResult(state.phase, lines.join('\n'), outcome);
+    }
+    // Step 1.5: attestation gate (Stage 1 — warn-only by default).
+    // `FW_ATTESTATION_REQUIRED=1` flips to hard-block.
+    const required = isAttestationRequired();
+    if (verification.invalidEvidence.length > 0 && required) {
+        const ids = verification.invalidEvidence.map((e) => e.beadId);
+        const summary = verification.invalidEvidence
+            .map((e) => `${e.beadId}: ${e.code}`)
+            .join('; ');
+        return makeToolError('flywheel_advance_wave', state.phase, 'attestation_invalid', `Cannot advance wave — ${verification.invalidEvidence.length} bead(s) have invalid completion attestation: ${summary}`, {
+            hint: 'Re-read the offending CompletionReport JSON, fix the schema or invariant violation (e.g. status=closed without beadClosedVerified=true), and rewrite the file before re-invoking flywheel_advance_wave.',
+            details: { beadIds: ids, invalidEvidence: verification.invalidEvidence },
+        });
+    }
+    if (verification.missingEvidence.length > 0 && required) {
+        return makeToolError('flywheel_advance_wave', state.phase, 'attestation_missing', `Cannot advance wave — ${verification.missingEvidence.length} closed bead(s) missing completion attestation: ${verification.missingEvidence.join(', ')}`, {
+            hint: 'Each closed bead must have a `.pi-flywheel/completion/<beadId>.json` file matching CompletionReportSchemaV1. Have the implementor write the report (see mcp-server/src/completion-report.ts) before re-invoking.',
+            details: { beadIds: verification.missingEvidence },
+        });
+    }
+    const needsEvidence = !required &&
+        (verification.missingEvidence.length > 0 || verification.invalidEvidence.length > 0);
+    // Step 1.6: batch-review gate (v3.17.0 fresh-eyes auto-trigger).
+    // Compute commits LIVE via git rev-list (not from a stored counter — that
+    // field was deprecated after self-review surfaced gaps W5a/W5b: nothing
+    // wrote to `state.commitBatchCounter`, so the gate could never fire). When
+    // the live count has crossed `commitBatchThreshold`, preempt the next-wave
+    // dispatch and surface a `batch_review_due` nextStep. The coordinator runs
+    // the review over `lastBatchReviewSha..HEAD`, persists the verdict, and
+    // only then re-invokes `flywheel_advance_wave` — by which time the baseline
+    // has advanced and the gate naturally re-arms.
+    let commitsSinceBaseline = 0;
+    if (typeof state.commitBatchThreshold === 'number' &&
+        state.commitBatchThreshold > 0) {
+        try {
+            commitsSinceBaseline = await countCommitsSinceLastBatchReview(cwd, state.lastBatchReviewSha);
+        }
+        catch (err) {
+            log.warn('batch-review gate: countCommitsSinceLastBatchReview failed; skipping gate', {
+                err: err instanceof Error ? err.message : String(err),
+            });
+            commitsSinceBaseline = 0;
+        }
+    }
+    if (shouldTriggerBatchReview(state, commitsSinceBaseline)) {
+        let reviewSha;
+        try {
+            const r = await execFileAsync('git', ['rev-parse', 'HEAD'], {
+                cwd,
+                timeout: GIT_TIMEOUT_MS,
+            });
+            reviewSha = r.stdout.trim();
+        }
+        catch (err) {
+            log.warn('batch-review gate: git rev-parse HEAD failed; skipping gate', {
+                err: err instanceof Error ? err.message : String(err),
+            });
+            reviewSha = '';
+        }
+        if (reviewSha) {
+            const outcome = {
+                verification,
+                nextWave: null,
+                waveComplete: false,
+                needsEvidence,
+                convergence: convergenceRec,
+                nextStep: {
+                    kind: 'batch_review_due',
+                    reviewSha,
+                    lastBaselineSha: state.lastBatchReviewSha,
+                },
+            };
+            const threshold = state.commitBatchThreshold ?? 0;
+            const rangeLabel = state.lastBatchReviewSha
+                ? `${state.lastBatchReviewSha.slice(0, 7)}..${reviewSha.slice(0, 7)}`
+                : `(initial)..${reviewSha.slice(0, 7)}`;
+            const text = [
+                `Wave verified (${verification.verified.length}/${args.closedBeadIds.length} closed).`,
+                `Batch-review threshold crossed: ${commitsSinceBaseline} ≥ ${threshold} commits since last baseline.`,
+                `Dispatch fresh-eyes review over ${rangeLabel} before the next wave.`,
+            ].join('\n');
+            return okResult(state.phase, text, outcome);
+        }
+    }
+    // Step 2: get ready beads for the next wave
+    let ready;
+    try {
+        ready = await readyBeads(exec, cwd);
+    }
+    catch (err) {
+        const classified = classifyExecError(err);
+        log.error('readyBeads threw', { err: String(err), code: classified.code });
+        return makeToolError('flywheel_advance_wave', state.phase, classified.code, `Error reading next frontier: ${classified.cause}`, {
+            retryable: classified.retryable,
+            hint: 'Check that br CLI is installed and operational, then retry.',
+        });
+    }
+    if (ready.length === 0) {
+        const outcome = {
+            verification,
+            nextWave: null,
+            waveComplete: true,
+            needsEvidence,
+            convergence: convergenceRec,
+            nextStep: {
+                kind: 'wave_review_gate',
+                beadIds: args.closedBeadIds,
+            },
+        };
+        const closedList = args.closedBeadIds.join(', ');
+        return okResult(state.phase, [
+            `Wave verified (${verification.verified.length}/${args.closedBeadIds.length} closed). Queue drained — no more beads to dispatch.`,
+            '',
+            '**NEXT (MANDATORY):** `flywheel_wave_review_gate({ cwd, beadIds: [...] })` — present Step 8 review menu for this wave.',
+            `Bead IDs from this advance call: ${closedList}`,
+            'After review, when the queue is empty: `flywheel_wrap_up_gate({ cwd })` — not ad-hoc "want to commit?" prompts.',
+        ].join('\n'), outcome);
+    }
+    const cursorBackend = !useNtmImplBackend();
+    // Step 3: determine wave size from composition tier (needed before model gate copy)
+    const composition = recommendComposition(ready.length);
+    const maxWave = args.maxNextWave ?? composition.total;
+    const waveCandidates = ready.slice(0, maxWave);
+    if (args.confirmImplModels !== undefined) {
+        const resolved = resolveImplModelsConfirm(cwd, args.confirmImplModels, ready);
+        state.implModels = resolved;
+        state.implModelsConfirmed = true;
+        saveState(state);
+    }
+    if (cursorBackend &&
+        !state.implModelsConfirmed &&
+        !args.skipImplModelsGate &&
+        args.confirmImplModels === undefined) {
+        const gate = buildImplModelsGate(cwd, ready);
+        const outcome = {
+            verification,
+            nextWave: null,
+            waveComplete: false,
+            needsEvidence,
+            convergence: convergenceRec,
+            implModelsGate: gate,
+        };
+        const text = [
+            `Wave verified (${verification.verified.length}/${args.closedBeadIds.length} closed).`,
+            'Before dispatching the next wave, recommend implement models and let the user choose.',
+            '',
+            `**Recommendation:** ${gate.rationale}`,
+            '',
+            formatCursorImplModelTable(gate.recommended),
+            '',
+            '(Config baseline for reference:)',
+            formatCursorImplModelTable(gate.defaults),
+            '',
+            'Explain the recommendation, present implModelsGate.options as numbered choices, wait for the user, then re-call flywheel_advance_wave with confirmImplModels (use "recommended" if they accept option 1).',
+        ].join('\n');
+        return okResult(state.phase, text, outcome);
+    }
+    const implModels = state.implModels ??
+        (cursorBackend ? recommendImplModels(cwd, ready).models : undefined);
+    // Step 4: classify complexity + allocate names
+    const complexityMap = {};
+    for (const bead of waveCandidates) {
+        complexityMap[bead.id] = classifyBeadComplexity(bead).complexity;
+    }
+    const projectKey = path.basename(cwd);
+    const coordinatorName = 'Coordinator';
+    const agentNames = allocateAgentNames(waveCandidates.length, projectKey);
+    // Step 5: render prompts (Cursor Task per complexity, or legacy cc/cod/gem lanes)
+    const prompts = [];
+    for (let i = 0; i < waveCandidates.length; i++) {
+        const bead = waveCandidates[i];
+        const complexity = complexityMap[bead.id];
+        const lane = LANES[i % LANES.length];
+        const dispatchCtx = beadToDispatchContext(bead, complexity, agentNames[i], coordinatorName, projectKey);
+        if (cursorBackend && implModels) {
+            const taskModel = modelForComplexity(implModels, complexity);
+            const adapted = adaptPromptForCursor(dispatchCtx, taskModel);
+            prompts.push({
+                beadId: bead.id,
+                lane,
+                prompt: adapted.prompt,
+                complexity,
+                model: taskModel,
+                spawnWith: 'cursor-task',
+            });
+        }
+        else {
+            const adapted = LANE_ADAPTERS[lane](dispatchCtx);
+            prompts.push({ beadId: bead.id, lane, prompt: adapted.prompt, complexity });
+        }
+    }
+    const outcome = {
+        verification,
+        nextWave: {
+            beadIds: waveCandidates.map((b) => b.id),
+            prompts,
+            complexity: complexityMap,
+            ...(cursorBackend && implModels
+                ? {
+                    spawnBackend: 'cursor-task',
+                    implModels,
+                    spawnInstructions: buildCursorImplSpawnInstructions(implModels),
+                }
+                : { spawnBackend: 'ntm-lanes' }),
+        },
+        waveComplete: true,
+        needsEvidence,
+        convergence: convergenceRec,
+    };
+    const lines = [
+        `Wave verified (${verification.verified.length}/${args.closedBeadIds.length} closed).`,
+    ];
+    if (needsEvidence) {
+        if (verification.missingEvidence.length > 0) {
+            lines.push(`⚠️  ${verification.missingEvidence.length} bead(s) advanced without completion attestation (Stage 1 warn-only — set FW_ATTESTATION_REQUIRED=1 to block).`);
+        }
+        if (verification.invalidEvidence.length > 0) {
+            lines.push(`⚠️  ${verification.invalidEvidence.length} bead(s) advanced with invalid completion attestation (Stage 1 warn-only — set FW_ATTESTATION_REQUIRED=1 to block).`);
+        }
+    }
+    if (convergenceRec.armed && convergenceRec.score !== null) {
+        lines.push(`Convergence: score=${convergenceRec.score.toFixed(2)} (${convergenceRec.status}) — auto-approve recommended for the next-wave AskUserQuestion (operator still picks; never silent).`);
+    }
+    else if (convergenceRec.reason === 'kill_switch_off') {
+        lines.push('Convergence gating disabled (flywheel.config.yaml > convergence.gate_advance_wave=false).');
+    }
+    else if (convergenceRec.score !== null) {
+        lines.push(`Convergence: score=${convergenceRec.score.toFixed(2)} (${convergenceRec.status}) — below auto-approve threshold; operator picks normally.`);
+    }
+    if (cursorBackend && implModels) {
+        lines.push(`Next wave: ${waveCandidates.length} bead(s) — Cursor Task spawn (models: simple=${implModels.simple}, medium=${implModels.medium}, complex=${implModels.complex}).`);
+        lines.push(...waveCandidates.map((b, i) => `  - ${b.id} → model ${prompts[i].model} (${complexityMap[b.id]})`));
+    }
+    else {
+        lines.push(`Next wave: ${waveCandidates.length} bead(s) dispatched across ${LANES.length} NTM lanes.`);
+        lines.push(...waveCandidates.map((b, i) => `  - ${b.id} → ${LANES[i % LANES.length]} (${complexityMap[b.id]})`));
+    }
+    return okResult(state.phase, lines.join('\n'), outcome);
+}
+//# sourceMappingURL=advance-wave.js.map

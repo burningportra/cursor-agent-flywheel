@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "rulesetVersion": 1,
+  "generated": "2026-05-20T14:38:53.888Z",
+  "entries": [
+    {
+      "ruleId": "SLASH001",
+      "rulesetVersion": 1,
+      "file": "skills/start/SKILL.md",
+      "line": 210,
+      "fingerprint": "sha256:3c53287e2cf8d4cd8214055e9e691a6acb73b0cee6915259b446e3d49d35ac69",
+      "reason": ""
+    },
+    {
+      "ruleId": "SLASH001",
+      "rulesetVersion": 1,
+      "file": "skills/start/SKILL.md",
+      "line": 586,
+      "fingerprint": "sha256:d3d5266e525685728295f880bc6f1efc36875e52a6181e1579c0419f6370e37d",
+      "reason": ""
+    },
+    {
+      "ruleId": "IMPL001",
+      "rulesetVersion": 1,
+      "file": "skills/start/SKILL.md",
+      "line": 12,
+      "fingerprint": "sha256:b4d26f6e0555ef9acec98b226695e3409c66ce3cf1feb51659913d7b54a88aa4",
+      "reason": ""
+    },
+    {
+      "ruleId": "RESERVE001",
+      "rulesetVersion": 1,
+      "file": "mcp-server/src/agent-mail.ts",
+      "line": 229,
+      "fingerprint": "sha256:0be8960270af77b4b37795ac08c6f2c710e5fadcb43c5911462e73ee1f4cfbb7",
+      "reason": ""
+    }
+  ]
+}

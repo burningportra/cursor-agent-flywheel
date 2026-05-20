@@ -1,20 +1,47 @@
 # Changelog
 
-All notable changes to **cursor-orchestrator** are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) for `plugins/cursor-orchestrator/.cursor-plugin/plugin.json` → `version`.
-
 ## [Unreleased]
 
 ### Added
 
-- Slash command **`flywheel`** — numbered menu in Agent; routes to the same `.md` runbooks as `/orchestrate`, `/orchestrate-setup`, etc.
-- **`.cursor/rules/flywheel-guided.mdc`** — always-on Agent guidance for slash-first flow and `orch_*` MCP usage.
-- Repo-root **`.cursor/commands/*.md`** symlinks to `plugins/cursor-orchestrator/commands/` so `/` commands work after clone (reload window once).
-- This changelog file and publishing guidance in the monorepo runbook.
-- `scripts/verify-cursor-orchestrator.mjs` now asserts repo-root `.cursor/commands` matches plugin commands (including symlink resolution).
-- `scripts/publish-gate.mjs` for a single local command that runs template + orchestrator checks (optional `--with-mcp`).
+- **`flywheel_bead_approval_gate`** — Cursor AskQuestion menus for bead review, quality score, polish, coverage, dedup, and launch (`step`: `review` → `launch`).
+- **`flywheel_impl_tick`** — Implement-phase supervision (~240s): commit-batch review dispatch, wave advance on closed beads.
+- Slash commands: **`/flywheel-beads-review`**, **`/flywheel-impl-tick`**; `/flywheel` menu item **26** (bead gates).
+- Playbooks: `skills/start/_beads.cursor.md`, `_implement.cursor.md` updates for native gates + impl tick polling.
+- `scripts/install-flywheel-cursor.sh` — global copy of `flywheel-beads-review` to `~/.cursor/commands/`.
+
+### Fixed
+
+- `flywheel_review` / batch review: `clearPendingBatchReview` persists via `ctx.state`.
+
+---
+
+## [3.18.1] — Cursor full parity port
+
+### Added
+
+- Full sync from [agent-flywheel-plugin](https://github.com/burningportra/agent-flywheel-plugin) v3.18.x (`SYNC_MANIFEST.json`, `scripts/sync-agent-flywheel-upstream.mjs`).
+- All upstream **flywheel_*** MCP tools (+ deprecated **orch_*** aliases).
+- Commands: `flywheel-*`, canonical **`/start`** → `skills/start/SKILL.md`, **`/flywheel`** menu.
+- Skills bundle (`skills.bundle.json`), `flywheel_get_skill`, doctor/remediate/observe/verify/advance/compliance tools.
+- `flywheel.config.yaml`, Cursor hooks (sessionStart, preToolUse agent-mail guard, postToolUse).
+- Rules: `cursor-user-gates.mdc`, `cursor-swarm.mdc`.
+- Legacy checkpoint migration: `.pi-orchestrator/` → `.pi-flywheel/` (one-time).
+- `scripts/link-cursor-commands.mjs` for workspace slash-command symlinks + `orchestrate-*` back-compat.
 
 ### Changed
 
-- **`orchestrate`** / **`orchestrate-setup`** — short “guided” pointers at the top pointing to `/flywheel` where helpful.
+- State directory: **`.pi-flywheel/`** (was `.pi-orchestrator/` in Cursor port v2.x).
+- MCP package **agent-flywheel-mcp@3.18.1** with upstream build pipeline (bundle, schemas, vitest).
+- README upstream pin → `agent-flywheel-plugin`.
 
-<!-- On release: rename [Unreleased] to [X.Y.Z] — YYYY-MM-DD, then add a new empty [Unreleased] above. -->
+### Cursor-specific
+
+- `skills/start/SKILL.md` — CURSOR PORT block (numbered gates, Task swarm, Cursor models).
+- Swarm: Task subagents + git worktree + Agent Mail (`program: cursor`); NTM optional.
+- Root [`.cursor/mcp.json`](../../.cursor/mcp.json) includes orchestrator stdio server.
+
+### Breaking
+
+- Prefer **`flywheel_*`** tool names; **`orch_*`** deprecated (removed upstream in v4.0).
+- Run **`/flywheel-setup`** after upgrade; reload Cursor window.

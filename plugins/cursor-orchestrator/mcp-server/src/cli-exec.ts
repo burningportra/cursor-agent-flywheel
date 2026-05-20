@@ -5,6 +5,23 @@
  * and graceful degradation when a CLI tool is unavailable mid-session.
  */
 import type { ExecFn } from "./exec.js";
+import { createLogger } from "./logger.js";
+import { BrStructuredErrorSchema } from "./parsers.js";
+import type { ParseResult } from "./parsers.js";
+import { classifyExecError, errMsg } from "./errors.js";
+
+const log = createLogger("cli-exec");
+
+/**
+ * Side-channel telemetry hook for cli-exec failure recording.
+ * telemetry.ts registers itself here so resilientExec can fire
+ * recordErrorCode without a direct dependency on telemetry.ts.
+ */
+let _cliExecTelemetryHook: ((code: string) => void) | null = null;
+
+export function registerCliExecTelemetryHook(hook: (code: string) => void): void {
+  _cliExecTelemetryHook = hook;
+}
 
 // ─── Types ────────────────────────────────────────────────────
 
@@ -63,6 +80,12 @@ export interface ResilientExecOptions {
   isTransient?: (exitCode: number | null, stderr: string, err: unknown) => boolean;
   /** Log structured warnings on failure. Default: true */
   logWarnings?: boolean;
+  /**
+   * Optional cancellation signal. Forwarded to every `exec` attempt; also used
+   * to short-circuit retry sleeps and the retry loop itself so that aborting
+   * stops the wrapper within one retry-delay window.
+   */
+  signal?: AbortSignal;
 }
 
 // ─── Transient detection ──────────────────────────────────────
@@ -101,11 +124,14 @@ function parseBrStructuredError(stderr: string): BrStructuredError | undefined {
   if (!candidate) return undefined;
 
   try {
-    const parsed = JSON.parse(candidate) as { error?: BrStructuredError };
+    const parsed = JSON.parse(candidate) as Record<string, unknown>;
     if (!parsed || typeof parsed !== "object" || !parsed.error || typeof parsed.error !== "object") {
       return undefined;
     }
-    return parsed.error;
+    // Validate the inner error object with the Zod schema
+    const validated = BrStructuredErrorSchema.safeParse(parsed.error);
+    if (!validated.success) return undefined;
+    return validated.data as BrStructuredError;
   } catch {
     return undefined;
   }
@@ -161,6 +187,41 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Abortable sleep — resolves after `ms` or immediately when `signal` aborts.
+ * Always resolves (never rejects) so callers observe abort via `signal.aborted`
+ * on the next loop iteration rather than as a thrown error.
+ */
+function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(() => {
+      signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
+/** Build a synthesized "aborted" CliExecError so callers/classifyExecError map it to `exec_aborted`. */
+function buildAbortedError(commandStr: string, args: string[], attempts: number): CliExecError {
+  const err = new Error("aborted");
+  return {
+    command: commandStr,
+    args,
+    exitCode: null,
+    stdout: "",
+    stderr: "",
+    isTransient: false,
+    attempts,
+    lastError: err,
+  };
+}
+
 function formatCommand(cmd: string, args: string[]): string {
   return [cmd, ...args].join(" ");
 }
@@ -182,6 +243,16 @@ function buildWarning(error: CliExecError): string {
   );
 }
 
+/** Fire telemetry for the final (non-retried) failure. Never throws. */
+function fireTelemetryForError(error: CliExecError): void {
+  try {
+    if (_cliExecTelemetryHook == null) return;
+    const raw = error.lastError ?? (error.stderr ? new Error(error.stderr) : new Error("cli failure"));
+    const classified = classifyExecError(raw);
+    _cliExecTelemetryHook(classified.code);
+  } catch { /* never throw from telemetry path */ }
+}
+
 // ─── Core wrapper ─────────────────────────────────────────────
 
 /**
@@ -200,15 +271,24 @@ export async function resilientExec(
   const retryDelayMs = opts?.retryDelayMs ?? 500;
   const transientCheck = opts?.isTransient ?? isTransientDefault;
   const logWarnings = opts?.logWarnings !== false;
+  const signal = opts?.signal;
   const commandStr = formatCommand(cmd, args);
 
   let lastError: CliExecError | undefined;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    // Short-circuit before each attempt if aborted.
+    if (signal?.aborted) {
+      lastError = buildAbortedError(commandStr, args, attempt + 1);
+      if (logWarnings) log.warn(buildWarning(lastError));
+      return { ok: false, error: lastError };
+    }
+
     try {
       const result = await exec(cmd, args, {
         cwd: opts?.cwd,
         timeout: opts?.timeout,
+        signal,
       });
 
       // Non-zero exit code is a failure, but not an exception
@@ -225,18 +305,34 @@ export async function resilientExec(
           attempts: attempt + 1,
         };
         if (transient && attempt < maxRetries) {
-          if (retryDelayMs > 0) await sleep(retryDelayMs);
+          if (retryDelayMs > 0) {
+            if (signal) await abortableSleep(retryDelayMs, signal);
+            else await sleep(retryDelayMs);
+          }
+          if (signal?.aborted) {
+            lastError = buildAbortedError(commandStr, args, attempt + 1);
+            if (logWarnings) log.warn(buildWarning(lastError));
+            return { ok: false, error: lastError };
+          }
           continue;
         }
         // Permanent or exhausted retries
-        if (logWarnings) console.warn(buildWarning(lastError));
+        if (logWarnings) log.warn(buildWarning(lastError));
+        fireTelemetryForError(lastError);
         return { ok: false, error: lastError };
       }
 
       // Success
       return { ok: true, value: result };
     } catch (err: unknown) {
-      // Exception path: timeout, ENOENT, etc.
+      // Exception path: timeout, ENOENT, abort, etc.
+      // If the signal caused this (or is now aborted), map to exec_aborted.
+      if (signal?.aborted) {
+        lastError = buildAbortedError(commandStr, args, attempt + 1);
+        if (logWarnings) log.warn(buildWarning(lastError));
+        return { ok: false, error: lastError };
+      }
+
       const transient = transientCheck(null, "", err);
       lastError = {
         command: commandStr,
@@ -249,17 +345,28 @@ export async function resilientExec(
         lastError: err,
       };
       if (transient && attempt < maxRetries) {
-        if (retryDelayMs > 0) await sleep(retryDelayMs);
+        if (retryDelayMs > 0) {
+          if (signal) await abortableSleep(retryDelayMs, signal);
+          else await sleep(retryDelayMs);
+        }
+        if (signal?.aborted) {
+          lastError = buildAbortedError(commandStr, args, attempt + 1);
+          if (logWarnings) log.warn(buildWarning(lastError));
+          return { ok: false, error: lastError };
+        }
         continue;
       }
-      if (logWarnings) console.warn(buildWarning(lastError));
+      if (logWarnings) log.warn(buildWarning(lastError));
+      fireTelemetryForError(lastError);
       return { ok: false, error: lastError };
     }
   }
 
   // Should not reach here, but safety net
   /* istanbul ignore next */
-  if (logWarnings && lastError) console.warn(buildWarning(lastError));
+  if (logWarnings && lastError) log.warn(buildWarning(lastError));
+  /* istanbul ignore next */
+  if (lastError) fireTelemetryForError(lastError);
   return { ok: false, error: lastError! };
 }
 
@@ -283,35 +390,54 @@ export async function brExec(
 /**
  * Like `brExec` but parses stdout as JSON.
  * Returns a structured permanent error if JSON parsing fails.
+ *
+ * When `validator` is provided, stdout is validated through the given
+ * `ParseResult`-returning function instead of a bare `JSON.parse`.
  */
 export async function brExecJson<T>(
   exec: ExecFn,
   args: string[],
-  opts?: ResilientExecOptions,
+  opts?: ResilientExecOptions & { validator?: (raw: string) => ParseResult<T> },
 ): Promise<ExecResult<T>> {
   const result = await brExec(exec, args, opts);
   if (!result.ok) return result;
 
-  try {
-    const parsed = JSON.parse(result.value.stdout) as T;
-    return { ok: true, value: parsed };
-  } catch (parseErr: unknown) {
-    const commandStr = formatCommand("br", args);
+  const commandStr = formatCommand("br", args);
+
+  if (opts?.validator) {
+    const validated = opts.validator(result.value.stdout);
+    if (validated.ok) return { ok: true, value: validated.data };
     const error: CliExecError = {
       command: commandStr,
       args,
       exitCode: 0,
       stdout: result.value.stdout,
-      stderr: `JSON parse error: ${parseErr instanceof Error ? parseErr.message : String(parseErr)}`,
+      stderr: `Validation error: ${validated.error}`,
+      isTransient: false,
+      attempts: 1,
+    };
+    if (opts?.logWarnings !== false) {
+      log.warn("Validation failure", { cmd: commandStr, error: validated.error });
+    }
+    return { ok: false, error };
+  }
+
+  try {
+    const parsed = JSON.parse(result.value.stdout) as T;
+    return { ok: true, value: parsed };
+  } catch (parseErr: unknown) {
+    const error: CliExecError = {
+      command: commandStr,
+      args,
+      exitCode: 0,
+      stdout: result.value.stdout,
+      stderr: `JSON parse error: ${errMsg(parseErr)}`,
       isTransient: false,
       attempts: 1,
       lastError: parseErr,
     };
     if (opts?.logWarnings !== false) {
-      console.warn(
-        `[cli-exec] JSON parse failure for ${commandStr}: ` +
-        `stdout preview=${JSON.stringify(result.value.stdout.slice(0, 200))}`,
-      );
+      log.warn("JSON parse failure", { cmd: commandStr, stdoutPreview: result.value.stdout.slice(0, 200) });
     }
     return { ok: false, error };
   }

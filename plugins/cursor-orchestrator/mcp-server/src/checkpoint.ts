@@ -1,27 +1,37 @@
 /**
  * Checkpoint persistence for crash recovery.
  *
- * Writes orchestrator state to `<cwd>/.pi-orchestrator/checkpoint.json`
+ * Writes flywheel state to `<cwd>/.pi-flywheel/checkpoint.json`
  * using atomic write-rename semantics. All I/O is non-throwing —
  * failures degrade gracefully to current session-log-only behavior.
  */
 
 import { createHash } from "crypto";
 import { execSync } from "child_process";
+import { createLogger } from "./logger.js";
+import { errMsg } from "./errors.js";
+import { VERSION } from "./version.js";
+
+const log = createLogger("checkpoint");
 import {
   existsSync,
   mkdirSync,
   readFileSync,
-  renameSync,
-  unlinkSync,
   writeFileSync,
 } from "fs";
 import { join } from "path";
-import type { CheckpointEnvelope, OrchestratorState } from "./types.js";
+import type { CheckpointEnvelope, FlywheelState } from "./types.js";
+import {
+  guardedRename,
+  guardedUnlink,
+  isFlywheelManagedPath,
+} from "./utils/fs-safety.js";
+import { normalizeText } from "./utils/text-normalize.js";
+import { migrateLegacyCheckpointIfNeeded } from "./checkpoint-legacy.js";
 
 // ─── Constants ────────────────────────────────────────────────
 
-export const CHECKPOINT_DIR = ".pi-orchestrator";
+export const CHECKPOINT_DIR = ".pi-flywheel";
 export const CHECKPOINT_FILE = "checkpoint.json";
 export const CHECKPOINT_TMP = "checkpoint.json.tmp";
 export const CHECKPOINT_CORRUPT = "checkpoint.json.corrupt";
@@ -48,7 +58,7 @@ function checkpointCorruptPath(cwd: string): string {
 }
 
 /** Compute SHA-256 hash of JSON.stringify(state). */
-export function computeStateHash(state: OrchestratorState): string {
+export function computeStateHash(state: FlywheelState): string {
   return createHash("sha256").update(JSON.stringify(state)).digest("hex");
 }
 
@@ -58,7 +68,8 @@ function getGitHead(cwd: string): string | undefined {
     return execSync("git rev-parse HEAD", { cwd, stdio: "pipe" })
       .toString()
       .trim();
-  } catch {
+  } catch (err: unknown) {
+    log.warn("git HEAD detection failed", { code: "cli_failure", cause: errMsg(err) });
     return undefined;
   }
 }
@@ -66,7 +77,7 @@ function getGitHead(cwd: string): string | undefined {
 // ─── Validation ───────────────────────────────────────────────
 
 export type ValidationResult =
-  | { valid: true }
+  | { valid: true; warnings?: string[] }
   | { valid: false; reason: string };
 
 /**
@@ -95,8 +106,10 @@ export function validateCheckpoint(envelope: unknown): ValidationResult {
     return { valid: false, reason: "writtenAt is not a valid ISO date" };
   }
 
-  if (typeof e.orchestratorVersion !== "string") {
-    return { valid: false, reason: "missing orchestratorVersion" };
+  // Migration: accept old orchestratorVersion field during transition from v2.x
+  const version = (e as any).flywheelVersion ?? (e as any).orchestratorVersion;
+  if (typeof version !== "string") {
+    return { valid: false, reason: "missing flywheelVersion" };
   }
 
   if (typeof e.state !== "object" || e.state === null) {
@@ -108,7 +121,7 @@ export function validateCheckpoint(envelope: unknown): ValidationResult {
   }
 
   // Verify hash integrity
-  const computed = computeStateHash(e.state as OrchestratorState);
+  const computed = computeStateHash(e.state as FlywheelState);
   if (computed !== e.stateHash) {
     return {
       valid: false,
@@ -122,10 +135,18 @@ export function validateCheckpoint(envelope: unknown): ValidationResult {
     return { valid: false, reason: "state.phase is not a string" };
   }
 
-  return { valid: true };
+  // Collect non-fatal warnings
+  const warnings: string[] = [];
+  if (version !== VERSION) {
+    warnings.push(`Checkpoint was written by v${String(version)}, current is v${VERSION}`);
+  }
+  return warnings.length > 0 ? { valid: true, warnings } : { valid: true };
 }
 
 // ─── Write ────────────────────────────────────────────────────
+
+// Per-cwd write mutex — serializes concurrent writes via Promise chaining.
+const writeLocks = new Map<string, Promise<boolean>>();
 
 /**
  * Atomically write a checkpoint to disk.
@@ -133,10 +154,9 @@ export function validateCheckpoint(envelope: unknown): ValidationResult {
  * Returns true if write succeeded, false otherwise.
  * Never throws.
  */
-export function writeCheckpoint(
+function writeCheckpointInner(
   cwd: string,
-  state: OrchestratorState,
-  orchestratorVersion: string
+  state: FlywheelState
 ): boolean {
   try {
     const dir = checkpointDir(cwd);
@@ -145,7 +165,7 @@ export function writeCheckpoint(
     const envelope: CheckpointEnvelope = {
       schemaVersion: 1,
       writtenAt: new Date().toISOString(),
-      orchestratorVersion,
+      flywheelVersion: VERSION,
       gitHead: getGitHead(cwd),
       state,
       stateHash: computeStateHash(state),
@@ -155,17 +175,38 @@ export function writeCheckpoint(
     const tmpFile = checkpointTmpPath(cwd);
     const mainFile = checkpointPath(cwd);
 
-    // Atomic write: tmp → rename
+    // Atomic write: tmp → rename (ownership-guarded; both paths must be
+    // inside the flywheel-managed `.pi-flywheel/` root).
     writeFileSync(tmpFile, json, "utf8");
-    renameSync(tmpFile, mainFile);
+    const r = guardedRename(tmpFile, mainFile, cwd);
+    if (!r.ok) {
+      log.warn("checkpoint rename refused by guard", {
+        code: "cli_failure",
+        cause: r.detail ?? r.reason,
+      });
+      return false;
+    }
 
     return true;
   } catch (err) {
-    console.warn(
-      `[claude-orchestrator] checkpoint write failed: ${err instanceof Error ? err.message : String(err)}`
-    );
+    log.warn("checkpoint write failed", { err: errMsg(err) });
     return false;
   }
+}
+
+/**
+ * Serialize checkpoint writes per cwd via Promise chaining.
+ * Concurrent callers for the same cwd are queued; a failed write
+ * resolves to false without blocking subsequent writes.
+ */
+export async function writeCheckpoint(
+  cwd: string,
+  state: FlywheelState
+): Promise<boolean> {
+  const prev = writeLocks.get(cwd) ?? Promise.resolve(true);
+  const next = prev.then(() => writeCheckpointInner(cwd, state)).catch(() => false);
+  writeLocks.set(cwd, next);
+  return next;
 }
 
 // ─── Read ─────────────────────────────────────────────────────
@@ -185,6 +226,7 @@ export interface ReadCheckpointResult {
  * Never throws.
  */
 export function readCheckpoint(cwd: string): ReadCheckpointResult | null {
+  migrateLegacyCheckpointIfNeeded(cwd);
   const mainFile = checkpointPath(cwd);
 
   if (!existsSync(mainFile)) {
@@ -194,28 +236,26 @@ export function readCheckpoint(cwd: string): ReadCheckpointResult | null {
   }
 
   try {
-    const raw = readFileSync(mainFile, "utf8");
+    const raw = normalizeText(readFileSync(mainFile, "utf8"));
     let parsed: unknown;
 
     try {
       parsed = JSON.parse(raw);
-    } catch {
-      // Corrupt JSON — move to .corrupt
+    } catch (err: unknown) {
+      log.warn("corrupt checkpoint JSON", { code: "parse_failure", cause: errMsg(err) });
       moveToCorrupt(cwd, mainFile);
       return null;
     }
 
     const validation = validateCheckpoint(parsed);
     if (!validation.valid) {
-      console.warn(
-        `[claude-orchestrator] checkpoint validation failed: ${validation.reason}`
-      );
+      log.warn("checkpoint validation failed", { reason: validation.reason });
       moveToCorrupt(cwd, mainFile);
       return null;
     }
 
     const envelope = parsed as CheckpointEnvelope;
-    const warnings: string[] = [];
+    const warnings: string[] = validation.warnings ? [...validation.warnings] : [];
 
     // Check staleness
     const age = Date.now() - Date.parse(envelope.writtenAt);
@@ -228,9 +268,7 @@ export function readCheckpoint(cwd: string): ReadCheckpointResult | null {
 
     return { envelope, warnings };
   } catch (err) {
-    console.warn(
-      `[claude-orchestrator] checkpoint read failed: ${err instanceof Error ? err.message : String(err)}`
-    );
+    log.warn("checkpoint read failed", { err: errMsg(err) });
     return null;
   }
 }
@@ -244,34 +282,55 @@ export function readCheckpoint(cwd: string): ReadCheckpointResult | null {
 export function clearCheckpoint(cwd: string): void {
   try {
     const mainFile = checkpointPath(cwd);
-    if (existsSync(mainFile)) {
-      unlinkSync(mainFile);
+    const r = guardedUnlink(mainFile, cwd);
+    if (!r.ok) {
+      log.warn("checkpoint clear refused by guard", {
+        code: "cli_failure",
+        cause: r.detail ?? r.reason,
+      });
     }
     // Also clean up any orphaned tmp
     cleanupOrphanedTmp(cwd);
   } catch (err) {
-    console.warn(
-      `[claude-orchestrator] checkpoint clear failed: ${err instanceof Error ? err.message : String(err)}`
-    );
+    log.warn("checkpoint clear failed", { err: errMsg(err) });
   }
 }
 
 // ─── Internal helpers ─────────────────────────────────────────
 
 function moveToCorrupt(cwd: string, filePath: string): void {
+  // Defence-in-depth: if anything upstream has handed us a filePath that
+  // isn't actually in .pi-flywheel/, refuse all destructive action rather
+  // than renaming a user-owned file into a .corrupt sibling.
+  if (!isFlywheelManagedPath(filePath, cwd)) {
+    log.warn("moveToCorrupt refused by guard", {
+      code: "cli_failure",
+      cause: `filePath '${filePath}' outside flywheel-managed dirs`,
+    });
+    return;
+  }
+
   try {
     const corruptPath = checkpointCorruptPath(cwd);
-    renameSync(filePath, corruptPath);
-    console.warn(
-      `[claude-orchestrator] corrupt checkpoint moved to ${CHECKPOINT_CORRUPT}`
-    );
-  } catch {
-    // If we can't even rename, just try to delete
-    try {
-      unlinkSync(filePath);
-    } catch {
-      // Give up silently
+    const r = guardedRename(filePath, corruptPath, cwd);
+    if (r.ok) {
+      log.warn("corrupt checkpoint moved", { dest: CHECKPOINT_CORRUPT });
+      return;
     }
+    log.warn("checkpoint rename refused, attempting delete", {
+      code: "cli_failure",
+      cause: r.detail ?? r.reason,
+    });
+  } catch (err: unknown) {
+    log.warn("checkpoint rename failed, attempting delete", { code: "cli_failure", cause: errMsg(err) });
+  }
+
+  const del = guardedUnlink(filePath, cwd);
+  if (!del.ok) {
+    log.warn("checkpoint delete also refused", {
+      code: "cli_failure",
+      cause: del.detail ?? del.reason,
+    });
   }
 }
 
@@ -279,10 +338,14 @@ function moveToCorrupt(cwd: string, filePath: string): void {
 export function cleanupOrphanedTmp(cwd: string): void {
   try {
     const tmpFile = checkpointTmpPath(cwd);
-    if (existsSync(tmpFile)) {
-      unlinkSync(tmpFile);
+    const r = guardedUnlink(tmpFile, cwd);
+    if (!r.ok) {
+      log.warn("orphaned tmp cleanup refused by guard", {
+        code: "cli_failure",
+        cause: r.detail ?? r.reason,
+      });
     }
-  } catch {
-    // Silently ignore
+  } catch (err: unknown) {
+    log.warn("orphaned tmp cleanup failed", { code: "cli_failure", cause: errMsg(err) });
   }
 }

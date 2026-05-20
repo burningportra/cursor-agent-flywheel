@@ -1,0 +1,264 @@
+/**
+ * Step 0d start menus — AskQuestion payloads + route hints for Cursor.
+ */
+
+import {
+  buildAskQuestionFromGate,
+  type CursorAskQuestionPayload,
+  type FlywheelUserGate,
+} from "./cursor-user-gates.js";
+
+export type StartMenuVariant =
+  | "previous-session-exists"
+  | "open-beads-exist"
+  | "fresh-start";
+
+export interface StartMenuOption {
+  id: string;
+  label: string;
+  description?: string;
+  route: string;
+  recommended?: boolean;
+}
+
+export interface StartMenuResult {
+  variant: StartMenuVariant;
+  askQuestion: CursorAskQuestionPayload;
+  options: StartMenuOption[];
+  routeHints: Record<string, string>;
+  recentPlanPaths: string[];
+  primaryEntryPointsMarkdown: string;
+}
+
+function gateFromOptions(
+  kind: FlywheelUserGate["kind"],
+  title: string,
+  rationale: string,
+  options: StartMenuOption[],
+): FlywheelUserGate {
+  return {
+    kind,
+    title,
+    rationale,
+    options: options.map((o) => ({
+      id: o.id,
+      label: o.recommended ? `${o.label} (Recommended)` : o.label,
+      detail: o.description,
+      coordinatorAction: o.route,
+    })),
+    instructions:
+      "Present AskQuestion with askQuestion. Map selected option id to routeHints[ id ].",
+  };
+}
+
+function primaryBlock(variant: StartMenuVariant, ctx: { goal?: string; phase?: string; openBeads?: number }): string {
+  const plans = "  • <RECENT_PLAN_PATHS[0]> … (see observe.recentPlanPaths)";
+  if (variant === "previous-session-exists") {
+    return [
+      `Primary entry points (active session: '${ctx.goal ?? "?"}' @ ${ctx.phase ?? "?"}):`,
+      "  • Resume swarm · Resume session · Set a goal · Pick up existing plan",
+      "",
+      "Recent plans:",
+      plans,
+      "",
+      "More: Work on beads · New goal · Reality check · Duel · Simplify · Research · Audit · Setup",
+    ].join("\n");
+  }
+  if (variant === "open-beads-exist") {
+    return [
+      `Primary entry points (${ctx.openBeads ?? "?"} open beads):`,
+      "  • Resume swarm · Work on beads · Set a goal · Pick up existing plan",
+      "",
+      "Recent plans:",
+      plans,
+      "",
+      "More: Reality check · Duel · New goal · Simplify · Research · Audit · Setup",
+    ].join("\n");
+  }
+  return [
+    "Primary entry points:",
+    "  • Set a goal · Pick up existing plan · Scan & discover · Reality check",
+    "",
+    "Recent plans:",
+    plans,
+    "",
+    "More: Research · Simplify · Duel · Audit · Setup · Quick fix",
+  ].join("\n");
+}
+
+export function buildStartMenu(input: {
+  variant: StartMenuVariant;
+  recentPlanPaths?: string[];
+  isFirstRun?: boolean;
+  goal?: string;
+  phase?: string;
+  openBeadCount?: number;
+}): StartMenuResult {
+  const recentPlanPaths = input.recentPlanPaths ?? [];
+  let options: StartMenuOption[];
+
+  switch (input.variant) {
+    case "previous-session-exists":
+      options = [
+        {
+          id: "resume-swarm",
+          label: "Resume swarm",
+          description: "/flywheel-resume — Cursor Task + worktrees",
+          route: "Resume swarm",
+          recommended: true,
+        },
+        {
+          id: "resume-session",
+          label: "Resume session",
+          description: "Continue manually from checkpoint",
+          route: "Resume session",
+        },
+        {
+          id: "set-goal",
+          label: "Set a goal",
+          description: "Type goal in Other; append-mode",
+          route: "Set a goal",
+        },
+        {
+          id: "pick-plan",
+          label: "Pick up existing plan",
+          description: "Path in Other → flywheel_plan → Step 5.45 validate",
+          route: "Pick up existing plan",
+        },
+      ];
+      break;
+    case "open-beads-exist":
+      options = [
+        {
+          id: "resume-swarm",
+          label: "Resume swarm",
+          description: "/flywheel-resume",
+          route: "Resume swarm",
+          recommended: true,
+        },
+        {
+          id: "work-beads",
+          label: "Work on beads",
+          description: "Manual refine / implement / inspect",
+          route: "Work on beads",
+        },
+        {
+          id: "set-goal",
+          label: "Set a goal",
+          description: "Append new beads",
+          route: "Set a goal",
+        },
+        {
+          id: "pick-plan",
+          label: "Pick up existing plan",
+          description: "Merge via Step 5.45",
+          route: "Pick up existing plan",
+        },
+      ];
+      break;
+    default: {
+      if (input.isFirstRun) {
+        options = [
+          {
+            id: "tour",
+            label: "Take the 5-min tour",
+            description: "_tutorial_bead.md",
+            route: "Take the 5-min tour",
+            recommended: true,
+          },
+          {
+            id: "set-goal",
+            label: "Set a goal",
+            description: "Type goal in Other",
+            route: "Set a goal",
+          },
+          {
+            id: "pick-plan",
+            label: "Pick up existing plan",
+            description: "Step 5.45 validate menu",
+            route: "Pick up existing plan",
+          },
+          {
+            id: "scan-discover",
+            label: "Scan & discover",
+            description: "Profile + discover ideas",
+            route: "Scan & discover",
+          },
+        ];
+      } else {
+        const rec =
+          recentPlanPaths.length > 0
+            ? "pick-plan"
+            : "scan-discover";
+        options = [
+          {
+            id: "set-goal",
+            label: "Set a goal",
+            description: "Type goal in Other",
+            route: "Set a goal",
+          },
+          {
+            id: "pick-plan",
+            label: "Pick up existing plan",
+            description: "Step 5.45 validate before beads",
+            route: "Pick up existing plan",
+            recommended: rec === "pick-plan",
+          },
+          {
+            id: "scan-discover",
+            label: "Scan & discover",
+            description: "Greenfield default",
+            route: "Scan & discover",
+            recommended: rec === "scan-discover",
+          },
+          {
+            id: "reality-check",
+            label: "Reality check",
+            description: "/reality-check-for-project",
+            route: "Reality check",
+          },
+        ];
+      }
+    }
+  }
+
+  const gate = gateFromOptions(
+    "review_mode",
+    "Start",
+    "What would you like to do? Extra entry points: slash commands listed in start_ceremony 0e.",
+    options,
+  );
+
+  const routeHints: Record<string, string> = {};
+  for (const o of options) routeHints[o.id] = o.route;
+
+  return {
+    variant: input.variant,
+    askQuestion: buildAskQuestionFromGate(gate),
+    options,
+    routeHints,
+    recentPlanPaths,
+    primaryEntryPointsMarkdown: primaryBlock(input.variant, {
+      goal: input.goal,
+      phase: input.phase,
+      openBeads: input.openBeadCount,
+    }),
+  };
+}
+
+/** Infer menu variant from observe-shaped hints (caller passes structured fields). */
+export function inferStartMenuVariant(input: {
+  hasCheckpoint: boolean;
+  checkpointPhase?: string;
+  openBeadCount: number;
+}): StartMenuVariant {
+  if (
+    input.hasCheckpoint &&
+    input.checkpointPhase &&
+    input.checkpointPhase !== "idle"
+  ) {
+    return "previous-session-exists";
+  }
+  if (input.openBeadCount > 0) return "open-beads-exist";
+  return "fresh-start";
+}

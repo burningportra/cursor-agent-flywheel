@@ -1,0 +1,22 @@
+---
+description: Cursor user decision gates — AskQuestion clickable UI for flywheel gates
+alwaysApply: true
+---
+
+# Cursor user gates
+
+When a flywheel command or `skills/start/SKILL.md` asks for a user decision:
+
+1. Call the matching **MCP gate tool** (`flywheel_bead_approval_gate`, `flywheel_confirm_impl_models`, `flywheel_wave_review_gate`, `flywheel_wrap_up_gate`).
+2. **AskQuestion** with `data.askQuestion` only — **do not** echo full gate JSON or `coordinatorAction` blobs into chat.
+3. Map the selected option id via **`data.actions`** (e.g. `looks-good-all`) per `rules/context-budget.mdc` and phase skills (`start_review`, `start_wrapup`).
+4. Do **not** use Claude `AskUserQuestion`. Do **not** ask "want to commit?" or "should I continue?" in prose.
+5. **Fallback only:** If `AskQuestion` is unavailable or rejected by the model, present `userGate.options` as numbered text and wait.
+
+**After beads created:** `flywheel_bead_approval_gate` (`step: review` → `step: launch`) → **AskQuestion** → only then `flywheel_approve_beads` `action: start`. See `skills/start/_beads.cursor.md`.
+
+**After implement:** `flywheel_wave_review_gate` → **AskQuestion** → `flywheel_review`. **When queue empty:** `flywheel_wrap_up_gate` → **AskQuestion** → `_wrapup.md`.
+
+**Dropped out of the flow?** `/recover-gates` or `/flywheel-recover-gates`.
+
+**Model note:** Some Cursor models skip `AskQuestion` in Agent mode; if the user only sees text choices, switch model or add a user rule: "Use AskQuestion for every flywheel gate menu."

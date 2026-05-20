@@ -13,7 +13,7 @@ Spawn a scrutiny sub-agent with this exact task prompt:
 
 If the user wants a second round of deeper suggestions after reviewing Phase 1 results, use this follow-up:
 
-> "I still think there are strong opportunities to enhance the UI/UX look and feel and to make everything work better and be more intuitive, user-friendly, visually appealing, polished, slick, and world class in terms of following UI/UX best practices like those used by Stripe, don't you agree? And I want you to carefully consider desktop UI/UX and mobile UI/UX separately while doing this and hyper-optimize for both separately to play to the specifics of each modality. I'm looking for true world-class visual appeal, polish, slickness, etc. that makes people gasp at how stunning and perfect it is in every way. Use ultrathink."
+> "I still think there are strong opportunities to enhance the UI/UX look and feel and to make everything work better and be more intuitive, user-friendly, visually appealing, polished, slick, and world-class in terms of following UI/UX best practices like those used by Stripe, don't you agree? And I want you to carefully consider desktop UI/UX and mobile UI/UX separately while doing this and hyper-optimize for both separately to play to the specifics of each modality. I'm looking for true world-class visual appeal, polish, slickness, etc. that makes people gasp at how stunning and perfect it is in every way. Think carefully and step-by-step; this is harder than it looks."
 
 The scrutiny agent should produce exactly 15–30 numbered improvement suggestions. Format:
 ```
@@ -37,7 +37,7 @@ For each selected suggestion, call `br create` with:
 
 ## Phase 4 — Implementation
 
-After bead creation, call `orch_approve_beads` to review the new beads and launch implementation via swarm.
+After bead creation, call `flywheel_approve_beads` to review the new beads and launch implementation via swarm.
 
 ## Phase 5 — De-slopification
 

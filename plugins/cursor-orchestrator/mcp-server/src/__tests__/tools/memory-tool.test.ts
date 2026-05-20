@@ -1,20 +1,27 @@
-import { describe, it, expect } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { describe, it, expect, vi } from 'vitest';
 import { runMemory } from '../../tools/memory-tool.js';
 import { createMockExec, makeState } from '../helpers/mocks.js';
-import type { OrchestratorState } from '../../types.js';
+import type { FlywheelState } from '../../types.js';
 import type { ExecCall } from '../helpers/mocks.js';
 
 // ─── Helpers ──────────────────────────────────────────────────
 
-function makeCtx(execCalls: ExecCall[] = [], stateOverrides: Partial<OrchestratorState> = {}) {
+function makeCtx(
+  execCalls: ExecCall[] = [],
+  stateOverrides: Partial<FlywheelState> = {},
+  cwd = '/fake/cwd',
+) {
   const exec = createMockExec(execCalls);
   const state = makeState(stateOverrides);
-  const saved: OrchestratorState[] = [];
+  const saved: FlywheelState[] = [];
   const ctx = {
     exec,
-    cwd: '/fake/cwd',
+    cwd,
     state,
-    saveState: (s: OrchestratorState) => { saved.push(structuredClone(s)); },
+    saveState: (s: FlywheelState) => { saved.push(structuredClone(s)); },
     clearState: () => {},
   };
   return { ctx, state, saved };
@@ -40,18 +47,56 @@ describe('runMemory', () => {
 
     const result = await runMemory(ctx, { cwd: '/fake/cwd' });
 
+    expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('not available');
-    expect(result.content[0].text).toContain('npm install');
+    expect((result.structuredContent as any)?.data?.error?.code).toBe('cli_not_available');
+    expect((result.structuredContent as any)?.data?.error?.hint).toContain('npm install -g @cass/cm');
   });
 
-  // ── search operation (default) ───────────────────────────────
+  it('returns cli_not_available when cm version check throws', async () => {
+    const exec = vi.fn().mockRejectedValueOnce(new Error('spawn cm ENOENT'));
+    const state = makeState();
+    const ctx = {
+      exec,
+      cwd: '/fake/cwd',
+      state,
+      saveState: (_s: FlywheelState) => {},
+      clearState: () => {},
+    };
+
+    const result = await runMemory(ctx, { cwd: '/fake/cwd' });
+
+    expect(result.isError).toBe(true);
+    expect((result.structuredContent as any)?.data?.error?.code).toBe('cli_not_available');
+  });
+
+  it('returns cli_failure when search exec throws', async () => {
+    const exec = vi.fn()
+      .mockResolvedValueOnce({ code: 0, stdout: 'cm 1.0.0', stderr: '' })
+      .mockRejectedValueOnce(new Error('context crashed'));
+    const state = makeState();
+    const ctx = {
+      exec,
+      cwd: '/fake/cwd',
+      state,
+      saveState: (_s: FlywheelState) => {},
+      clearState: () => {},
+    };
+
+    const result = await runMemory(ctx, { cwd: '/fake/cwd', query: 'test' });
+
+    expect(result.isError).toBe(true);
+    expect((result.structuredContent as any)?.data?.error?.code).toBe('cli_failure');
+  });
+
+  // ── search operation (default, no query → cm ls) ─────────────
 
   it('lists recent entries when no query given', async () => {
     const { ctx } = makeCtx([
       cmVersionCall(true),
       {
         cmd: 'cm',
-        args: ['list', '--limit', '10'],
+        args: ['ls', '--limit', '10'],
         result: { code: 0, stdout: 'entry 1\nentry 2\n', stderr: '' },
       },
     ]);
@@ -67,7 +112,7 @@ describe('runMemory', () => {
       cmVersionCall(true),
       {
         cmd: 'cm',
-        args: ['list', '--limit', '10'],
+        args: ['ls', '--limit', '10'],
         result: { code: 0, stdout: '', stderr: '' },
       },
     ]);
@@ -82,7 +127,7 @@ describe('runMemory', () => {
       cmVersionCall(true),
       {
         cmd: 'cm',
-        args: ['list', '--limit', '10'],
+        args: ['ls', '--limit', '10'],
         result: { code: 1, stdout: '', stderr: 'db error' },
       },
     ]);
@@ -93,20 +138,35 @@ describe('runMemory', () => {
     expect(result.content[0].text).toContain('Failed to list memory');
   });
 
-  it('searches with query', async () => {
+  // ── search with query (cm context) ──────────────────────────
+
+  it('searches with query using cm context', async () => {
+    const contextResponse = JSON.stringify({
+      success: true,
+      command: 'context',
+      data: {
+        task: 'auth middleware',
+        relevantBullets: [
+          { id: 'b-123', category: 'architecture', content: 'Auth middleware refactor note', finalScore: 2.5 },
+        ],
+        antiPatterns: [],
+        historySnippets: [],
+      },
+    });
     const { ctx } = makeCtx([
       cmVersionCall(true),
       {
         cmd: 'cm',
-        args: ['search', 'auth middleware'],
-        result: { code: 0, stdout: 'Found: auth middleware refactor note', stderr: '' },
+        args: ['context', 'auth middleware', '--json'],
+        result: { code: 0, stdout: contextResponse, stderr: '' },
       },
     ]);
 
     const result = await runMemory(ctx, { cwd: '/fake/cwd', query: 'auth middleware' });
 
     expect(result.content[0].text).toContain('auth middleware');
-    expect(result.content[0].text).toContain('Found:');
+    expect(result.content[0].text).toContain('b-123');
+    expect(result.content[0].text).toContain('Auth middleware refactor note');
   });
 
   it('returns message when search finds no matches', async () => {
@@ -114,7 +174,7 @@ describe('runMemory', () => {
       cmVersionCall(true),
       {
         cmd: 'cm',
-        args: ['search', 'nonexistent'],
+        args: ['context', 'nonexistent', '--json'],
         result: { code: 0, stdout: '', stderr: '' },
       },
     ]);
@@ -129,7 +189,7 @@ describe('runMemory', () => {
       cmVersionCall(true),
       {
         cmd: 'cm',
-        args: ['search', 'test'],
+        args: ['context', 'test', '--json'],
         result: { code: 1, stdout: '', stderr: 'search error' },
       },
     ]);
@@ -141,18 +201,66 @@ describe('runMemory', () => {
   });
 
   it('trims whitespace from query', async () => {
+    const contextResponse = JSON.stringify({
+      success: true,
+      data: {
+        relevantBullets: [{ id: 'b-1', content: 'result', finalScore: 1.0 }],
+      },
+    });
     const { ctx } = makeCtx([
       cmVersionCall(true),
       {
         cmd: 'cm',
-        args: ['search', 'trimmed query'],
-        result: { code: 0, stdout: 'result', stderr: '' },
+        args: ['context', 'trimmed query', '--json'],
+        result: { code: 0, stdout: contextResponse, stderr: '' },
       },
     ]);
 
     const result = await runMemory(ctx, { cwd: '/fake/cwd', query: '  trimmed query  ' });
 
     expect(result.content[0].text).toContain('result');
+  });
+
+  it('formats anti-patterns and history snippets', async () => {
+    const contextResponse = JSON.stringify({
+      success: true,
+      data: {
+        relevantBullets: [{ id: 'b-1', category: 'testing', content: 'Always test edge cases', finalScore: 3.0 }],
+        antiPatterns: [{ id: 'b-2', content: 'Never mock the database in integration tests' }],
+        historySnippets: [{ snippet: 'Previous session used real DB successfully' }],
+      },
+    });
+    const { ctx } = makeCtx([
+      cmVersionCall(true),
+      {
+        cmd: 'cm',
+        args: ['context', 'testing', '--json'],
+        result: { code: 0, stdout: contextResponse, stderr: '' },
+      },
+    ]);
+
+    const result = await runMemory(ctx, { cwd: '/fake/cwd', query: 'testing' });
+
+    expect(result.content[0].text).toContain('Relevant Rules');
+    expect(result.content[0].text).toContain('Anti-Patterns');
+    expect(result.content[0].text).toContain('History');
+    expect(result.content[0].text).toContain('Never mock the database');
+  });
+
+  it('handles raw output when JSON parse fails', async () => {
+    const { ctx } = makeCtx([
+      cmVersionCall(true),
+      {
+        cmd: 'cm',
+        args: ['context', 'broken', '--json'],
+        result: { code: 0, stdout: 'not valid json but has results', stderr: '' },
+      },
+    ]);
+
+    const result = await runMemory(ctx, { cwd: '/fake/cwd', query: 'broken' });
+
+    // Falls back to raw output
+    expect(result.content[0].text).toContain('not valid json but has results');
   });
 
   // ── store operation ──────────────────────────────────────────
@@ -242,14 +350,58 @@ describe('runMemory', () => {
       cmVersionCall(true),
       {
         cmd: 'cm',
-        args: ['list', '--limit', '10'],
+        args: ['ls', '--limit', '10'],
         result: { code: 0, stdout: 'entry', stderr: '' },
       },
     ]);
 
-    // No operation specified — should default to search
+    // No operation specified — should default to search (list mode)
     const result = await runMemory(ctx, { cwd: '/fake/cwd' });
 
     expect(result.content[0].text).toContain('Recent CASS memory');
+  });
+
+  it('returns structured not_found when refreshRoot does not exist', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'memory-refresh-'));
+
+    try {
+      const { ctx } = makeCtx([], {}, cwd);
+      const result = await runMemory(ctx, {
+        cwd,
+        operation: 'refresh_learnings',
+        refreshRoot: 'docs/solutions',
+      });
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toBe(`refreshRoot not found: ${join(cwd, 'docs', 'solutions')}`);
+      expect((result.structuredContent as any)?.data?.error?.code).toBe('not_found');
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects refreshRoot symlinks that resolve outside cwd', async () => {
+    const cwd = mkdtempSync(join(tmpdir(), 'memory-refresh-'));
+    const outsideDir = mkdtempSync(join(tmpdir(), 'memory-outside-'));
+
+    try {
+      mkdirSync(join(cwd, 'docs'), { recursive: true });
+      writeFileSync(join(outsideDir, 'note.md'), '# External\n');
+      symlinkSync(outsideDir, join(cwd, 'docs', 'solutions'));
+
+      const { ctx } = makeCtx([], {}, cwd);
+      const result = await runMemory(ctx, {
+        cwd,
+        operation: 'refresh_learnings',
+        refreshRoot: 'docs/solutions',
+      });
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('refreshRoot rejected by realpath guard');
+      expect((result.structuredContent as any)?.data?.error?.code).toBe('invalid_input');
+    } finally {
+      rmSync(cwd, { recursive: true, force: true });
+      rmSync(outsideDir, { recursive: true, force: true });
+    }
   });
 });

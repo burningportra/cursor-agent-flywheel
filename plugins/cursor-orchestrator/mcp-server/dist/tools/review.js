@@ -1,19 +1,140 @@
+import { promises as fs } from 'node:fs';
+import * as path from 'node:path';
+import { BatchReviewVerdictSchema } from '../types.js';
+import { errMsg, makeFlywheelErrorResult } from '../errors.js';
+import { createLogger } from '../logger.js';
+import { makeOkToolResult } from './shared.js';
+import { clearPendingBatchReview, markBatchReviewDispatched, synthesizeBeadsFromFindings, rollbackSynthesizedBeads, } from '../commit-batch.js';
+import { prepareBatchReviewDispatch } from '../batch-review-dispatch.js';
+import { appendMemory } from '../memory.js';
+const log = createLogger('review');
+// ─── Review-mode matrix (bead agent-flywheel-plugin-f0j) ──────────────
+//
+// Mode routing is skill-level — we do NOT introduce new MCP tools. The
+// reviewer personas are reused verbatim; `mode` only changes the agent
+// prompt preamble and the post-synthesis action (apply-diffs-and-commit
+// vs write-docs vs emit-exit-code vs ask-per-finding).
+export const AUTOFIX_GATE_HINT = 'Autofix refuses when the tree is dirty or the doctor is not green. Stash/commit local changes, run `flywheel_doctor`, then retry — or fall back to mode="interactive".';
+export const HEADLESS_EXIT_HINT = 'Headless mode returns error code "review_headless_findings" with details.findingCount when reviewers surface non-zero issues. CI wrappers should branch on structuredContent?.data?.error?.code and use details.exitCode (1 = findings, 2 = reviewer crash).';
+function modePreamble(mode, beadId) {
+    switch (mode) {
+        case 'autofix':
+            return `**Review mode: autofix.** After completing your review, APPLY your fixes directly via code-edit tools AND stage them for a single fixup commit per reviewer. When done, run \`git commit -m "fix(review/${beadId}): <reviewer-perspective>"\`. Do NOT ask the user per finding — your job is to ship the patch.\n\n`;
+        case 'report-only':
+            return `**Review mode: report-only.** Do NOT edit code. Write your full findings to \`docs/reviews/${beadId}-<perspective>-<YYYY-MM-DD>.md\` and exit. The coordinator aggregates reports — no interactive prompts.\n\n`;
+        case 'headless':
+            return `**Review mode: headless (CI).** Do NOT edit code and do NOT write markdown reports. Emit a compact machine-readable JSON summary on stdout: \`{ "beadId": "${beadId}", "perspective": "<your-perspective>", "findings": [{ "severity": "error|warn|info", "file": "...", "line": 0, "message": "..." }] }\`. The coordinator aggregates exit codes (0 = clean, 1 = findings, 2 = reviewer crash).\n\n`;
+        case 'interactive':
+        default:
+            return '';
+    }
+}
 /**
- * orch_review — Submit implementation work for review.
+ * Decide whether autofix mode is safe right now. Runs two cheap checks:
+ *   1. `git status --porcelain` — tree must be clean.
+ *   2. `flywheel_doctor` recent report (if checkpoint has one) — must be green.
+ * If either fails we fall back to interactive mode and surface a warning.
+ */
+async function autofixGateOk(ctx) {
+    const { exec, cwd, signal } = ctx;
+    try {
+        const statusResult = await exec('git', ['status', '--porcelain'], { cwd, timeout: 5000, signal });
+        if (statusResult.code !== 0) {
+            return { ok: false, reason: `git status failed (exit ${statusResult.code})` };
+        }
+        if (statusResult.stdout.trim().length > 0) {
+            return { ok: false, reason: 'working tree is dirty (uncommitted changes present)' };
+        }
+    }
+    catch (err) {
+        return { ok: false, reason: `git status threw: ${errMsg(err)}` };
+    }
+    // Doctor signal: if the session has a recent DoctorReport cached and any
+    // check is "red", refuse. Absence of a cached report is tolerated — the
+    // git-clean check alone is still a meaningful guard.
+    const report = ctx.state.lastDoctorReport;
+    if (report?.checks?.some((c) => c.severity === 'red')) {
+        return { ok: false, reason: 'flywheel_doctor reports at least one red check' };
+    }
+    return { ok: true };
+}
+function okResult(phase, text, data) {
+    return makeOkToolResult('flywheel_review', phase, text, data);
+}
+function errorResult(phase, code, message, details, hint) {
+    return makeFlywheelErrorResult('flywheel_review', phase, {
+        code,
+        message,
+        ...(hint ? { hint } : {}),
+        ...(details ? { details } : {}),
+    });
+}
+function parseBrShowBead(raw) {
+    try {
+        const parsed = JSON.parse(raw);
+        if (looksLikeBead(parsed))
+            return parsed;
+        if (parsed && typeof parsed === 'object') {
+            const candidateKeys = ['bead', 'issue', 'data', 'result'];
+            for (const key of candidateKeys) {
+                const candidate = parsed[key];
+                if (looksLikeBead(candidate))
+                    return candidate;
+            }
+        }
+    }
+    catch {
+        return null;
+    }
+    return null;
+}
+function looksLikeBead(value) {
+    return Boolean(value
+        && typeof value === 'object'
+        && typeof value.id === 'string'
+        && typeof value.title === 'string'
+        && typeof value.description === 'string'
+        && typeof value.status === 'string');
+}
+/**
+ * flywheel_review — Submit implementation work for review.
  *
  * action="hit-me"    — Return parallel review agent task specs for CC to spawn
  * action="looks-good"— Mark bead done, advance to next or enter gates
  * action="skip"      — Skip this bead (mark deferred), move to next
  */
 export async function runReview(ctx, args) {
-    const { exec, cwd, state, saveState } = ctx;
+    const { exec, cwd, state, saveState, signal } = ctx;
+    // ── action: batch_review (T4 — fresh-eyes auto-trigger) ──────
+    // Does NOT use a beadId (it reviews a sha-range of commits, not a single
+    // bead), so this branch runs BEFORE the beadId guard below.
+    if (args.action === 'batch_review') {
+        return handleBatchReview(ctx, args);
+    }
     if (!args.beadId) {
-        return {
-            content: [{ type: 'text', text: 'Error: beadId is required.' }],
-            isError: true,
-        };
+        return errorResult('reviewing', 'invalid_input', 'Error: beadId is required.', undefined, 'Pass beadId from `br list`, or use `__gates__` / `__regress_to_plan__` / `__regress_to_beads__` / `__regress_to_implement__` sentinels.');
     }
     const beadId = args.beadId;
+    // ── Resolve review mode + autofix gating (bead agent-flywheel-plugin-f0j) ─
+    // `mode` is advisory on `looks-good`/`skip` (those paths don't spawn
+    // reviewers) but drives the hit-me dispatch. Autofix is gated behind a
+    // clean git tree + non-red doctor report; failing the gate downgrades to
+    // interactive with a warning attached to the payload.
+    const requestedMode = args.mode ?? 'interactive';
+    let effectiveMode = requestedMode;
+    let modeGateWarning;
+    if (requestedMode === 'autofix' && args.action === 'hit-me') {
+        const gate = await autofixGateOk(ctx);
+        if (!gate.ok) {
+            effectiveMode = 'interactive';
+            modeGateWarning = `Autofix refused: ${gate.reason}. Falling back to interactive mode. ${AUTOFIX_GATE_HINT}`;
+            log.warn('autofix gate refused — downgrading to interactive', {
+                beadId,
+                reason: gate.reason,
+            });
+        }
+    }
+    const parallelSafe = args.parallelSafe ?? false;
     // ── Special sentinels ─────────────────────────────────────────
     if (beadId === '__gates__') {
         return runGates(ctx, args.action);
@@ -28,38 +149,52 @@ export async function runReview(ctx, args) {
         return regressToPhase(ctx, 'implementing', 'implementation');
     }
     // ── Look up bead ──────────────────────────────────────────────
-    const brShowResult = await exec('br', ['show', beadId, '--json'], { cwd, timeout: 8000 });
+    const brShowResult = await exec('br', ['show', beadId, '--json'], { cwd, timeout: 8000, signal });
     if (brShowResult.code !== 0) {
-        return {
-            content: [{
-                    type: 'text',
-                    text: `Bead ${beadId} not found. Run \`br list\` to see available beads.\n\nError: ${brShowResult.stderr}`,
-                }],
-            isError: true,
-        };
+        return errorResult(state.phase, 'not_found', `Bead ${beadId} not found. Run \`br list\` to see available beads.\n\nError: ${brShowResult.stderr}`, { beadId, stderr: brShowResult.stderr }, 'Run `br list` to confirm the bead id, or `br init` if beads have not been initialized in this repo.');
     }
-    let bead;
-    try {
-        bead = JSON.parse(brShowResult.stdout);
+    const bead = parseBrShowBead(brShowResult.stdout);
+    if (!bead) {
+        return errorResult(state.phase, 'parse_failure', `Error parsing bead ${beadId} from br show output.`, { beadId }, 'Run `br show <id> --json` manually to inspect raw output; this usually indicates a br CLI version mismatch.');
     }
-    catch {
-        return {
-            content: [{ type: 'text', text: `Error parsing bead ${beadId} from br show output.` }],
-            isError: true,
-        };
+    // ── Preflight: actual bead status (handles auto-close from impl agent) ─
+    // If `br show` says the bead is already closed, the impl agent (or someone
+    // else) ran `br update --status closed` without informing the agent-flywheel.
+    // Reconcile state and route based on the requested action.
+    //
+    // Note: state.beadResults is only synced on the looks-good path. Setting
+    // it for hit-me would trip the `alreadyCompleted` short-circuit below and
+    // suppress the post-close audit the caller asked for.
+    if (bead.status === 'closed') {
+        if (args.action === 'looks-good') {
+            if (!state.beadResults)
+                state.beadResults = {};
+            if (!state.beadResults[beadId]) {
+                state.beadResults[beadId] = {
+                    beadId,
+                    status: 'success',
+                    summary: 'Auto-closed by impl agent',
+                };
+                saveState(state);
+            }
+            return nextBeadOrGates(ctx, beadId, bead.title, 'Already closed by impl agent');
+        }
+        if (args.action === 'skip') {
+            return errorResult(state.phase, 'already_closed', `Bead ${beadId} is already closed; skip is not applicable. Move to the next bead or call flywheel_review with action=looks-good to acknowledge.`, { beadId, status: 'closed' }, 'Call flywheel_review with action=looks-good to acknowledge the already-closed bead, then continue.');
+        }
+        // hit-me on a closed bead falls through; payload is tagged postClose below.
     }
     const alreadyCompleted = state.beadResults?.[beadId]?.status === 'success';
     if (alreadyCompleted) {
-        return {
-            content: [{
-                    type: 'text',
-                    text: `Bead ${beadId} is already complete. Move to the next bead or call \`orch_review\` with beadId="__gates__" for guided review gates.`,
-                }],
-        };
+        return okResult(state.phase, `Bead ${beadId} is already complete. Move to the next bead or call \`flywheel_review\` with beadId="__gates__" for guided review gates.`, {
+            kind: 'review_gate',
+            scope: 'already_complete',
+            beadId,
+        });
     }
     // ── action: skip ──────────────────────────────────────────────
     if (args.action === 'skip') {
-        await exec('br', ['update', beadId, '--status', 'deferred'], { cwd, timeout: 5000 });
+        await exec('br', ['update', beadId, '--status', 'deferred'], { cwd, timeout: 5000, signal });
         if (!state.beadResults)
             state.beadResults = {};
         state.beadResults[beadId] = {
@@ -73,7 +208,7 @@ export async function runReview(ctx, args) {
     // ── action: looks-good ────────────────────────────────────────
     if (args.action === 'looks-good') {
         // Mark bead closed
-        await exec('br', ['update', beadId, '--status', 'closed'], { cwd, timeout: 5000 });
+        await exec('br', ['update', beadId, '--status', 'closed'], { cwd, timeout: 5000, signal });
         if (!state.beadResults)
             state.beadResults = {};
         state.beadResults[beadId] = {
@@ -87,20 +222,26 @@ export async function runReview(ctx, args) {
         state.beadReviewPassCounts[beadId] = (state.beadReviewPassCounts[beadId] ?? 0) + 1;
         // Auto-close parent if all siblings are done
         if (bead.parent) {
-            const brListResult = await exec('br', ['list', '--json'], { cwd, timeout: 8000 });
+            const brListResult = await exec('br', ['list', '--json'], { cwd, timeout: 8000, signal });
             if (brListResult.code === 0) {
                 try {
                     const allBeads = JSON.parse(brListResult.stdout);
                     const siblings = allBeads.filter(b => b.parent === bead.parent);
                     const allDone = siblings.every(b => b.status === 'closed' || b.id === beadId);
                     if (allDone && bead.parent) {
-                        await exec('br', ['update', bead.parent, '--status', 'closed'], { cwd, timeout: 5000 });
+                        await exec('br', ['update', bead.parent, '--status', 'closed'], { cwd, timeout: 5000, signal });
                         if (!state.beadResults)
                             state.beadResults = {};
                         state.beadResults[bead.parent] = { beadId: bead.parent, status: 'success', summary: 'All subtasks complete' };
                     }
                 }
-                catch { /* parse failure ok */ }
+                catch (err) {
+                    log.warn('Failed to parse sibling beads for parent auto-close', {
+                        code: 'parse_failure', tool: 'flywheel_review', phase: state.phase,
+                        cause: errMsg(err),
+                        parentId: bead.parent,
+                    });
+                }
             }
         }
         saveState(state);
@@ -108,9 +249,12 @@ export async function runReview(ctx, args) {
     }
     // ── action: hit-me — return parallel review agent specs ───────
     if (args.action === 'hit-me') {
-        const hitMeWasTriggered = state.beadHitMeTriggered?.[beadId] ?? false;
-        const hitMeWasCompleted = state.beadHitMeCompleted?.[beadId] ?? false;
         const round = state.beadReviewPassCounts?.[beadId] ?? 0;
+        const postClose = bead.status === 'closed';
+        const postCloseNote = postClose
+            ? `**Note:** this bead is already closed by the impl agent. This is a post-close audit — focus on what shipped, surface bugs in landed code, and propose follow-up fixes rather than blocking the close.\n\n`
+            : '';
+        const modeNote = modePreamble(effectiveMode, beadId);
         if (!state.beadHitMeTriggered)
             state.beadHitMeTriggered = {};
         if (!state.beadHitMeCompleted)
@@ -130,7 +274,7 @@ export async function runReview(ctx, args) {
             {
                 name: `FreshEyes-${beadId}-r${round}`,
                 perspective: 'fresh-eyes',
-                task: `Fresh-eyes code reviewer. You have NEVER seen this code before.
+                task: `${modeNote}${postCloseNote}Fresh-eyes code reviewer. You have NEVER seen this code before.
 
 **Bead:** ${beadId} — ${bead.title}
 **Files to review:** ${fileList}
@@ -144,21 +288,25 @@ Report what you found and what you fixed.`,
             {
                 name: `Adversary-${beadId}-r${round}`,
                 perspective: 'adversarial',
-                task: `Adversarial code reviewer. Your job is to break this implementation.
+                task: `${modeNote}${postCloseNote}Adversarial code reviewer. Your job is to break this implementation.
 
 **Bead:** ${beadId} — ${bead.title}
 **Files to review:** ${fileList}
 **cwd:** ${cwd}
 
-Try to: trigger edge cases, find security holes, construct inputs that cause failures.
+**Mandatory first step**: invoke \`/ubs-workflow\` on the changed files to run the Ultimate Bug Scanner comprehensive review. Its findings are your baseline before manual attack.
+
+Then go further: trigger edge cases, find security holes, construct inputs that cause failures.
 Fix any real vulnerabilities or bugs directly.
+
+If your review surfaces a crash, hang, or memory issue in compiled code, invoke \`/gdb-for-debugging\` to reproduce it under a debugger and capture a stack trace in the report.
 
 Report your attack attempts and findings.`,
             },
             {
                 name: `Ergonomics-${beadId}-r${round}`,
                 perspective: 'ergonomics',
-                task: `Ergonomics reviewer. Focus on usability and developer experience.
+                task: `${modeNote}${postCloseNote}Ergonomics reviewer. Focus on usability and developer experience.
 
 **Bead:** ${beadId} — ${bead.title}
 **Files to review:** ${fileList}
@@ -173,7 +321,7 @@ Report improvements made.`,
             {
                 name: `RealityCheck-${beadId}-r${round}`,
                 perspective: 'reality-check',
-                task: `Reality checker. Verify the implementation actually achieves the goal.
+                task: `${modeNote}${postCloseNote}Reality checker. Verify the implementation actually achieves the goal.
 
 **Goal:** ${goal}
 **Bead:** ${beadId} — ${bead.title}
@@ -187,7 +335,7 @@ Do NOT edit code — just report your findings.`,
             {
                 name: `Explorer-${beadId}-r${round}`,
                 perspective: 'exploration',
-                task: `Code explorer. Randomly explore the codebase to find related issues.
+                task: `${modeNote}${postCloseNote}Code explorer. Randomly explore the codebase to find related issues.
 
 **Bead:** ${beadId} — ${bead.title}
 **cwd:** ${cwd}
@@ -200,35 +348,251 @@ Pick 3 random files related to the bead's area and read them. Look for:
 Report what you found. Fix obvious issues directly.`,
             },
         ];
-        return {
-            content: [{
-                    type: 'text',
-                    text: JSON.stringify({
-                        action: 'spawn-agents',
-                        beadId,
-                        round,
-                        agentTasks,
-                        instructions: `Spawn these 5 review agents in parallel. After all complete, synthesize their findings and apply fixes. Then call \`orch_review\` with beadId="${beadId}" and action="looks-good" or action="hit-me" for another round.`,
-                    }, null, 2),
-                }],
+        const baseInstructions = `Spawn these 5 review agents in parallel. After all complete, synthesize their findings and apply fixes. Then call \`flywheel_review\` with beadId="${beadId}" and action="looks-good" or action="hit-me" for another round.`;
+        const modeInstructions = {
+            autofix: `Review mode=autofix: each reviewer applies and commits its fixes directly. After all 5 finish, verify the tree is green and call \`flywheel_review\` with action="looks-good" — do NOT AskUserQuestion per finding.`,
+            'report-only': `Review mode=report-only: reviewers write findings to docs/reviews/<perspective>-<date>.md and DO NOT edit code. After synthesizing, call \`flywheel_review\` with action="looks-good" to close the bead or action="hit-me" again if reports surfaced blockers.`,
+            headless: `Review mode=headless (CI): reviewers emit JSON-on-stdout only. The coordinator MUST aggregate finding counts and treat a non-zero count as review_headless_findings (CI exit code 1). Do NOT AskUserQuestion — this mode is for non-interactive shells.`,
+            interactive: baseInstructions,
         };
+        const instructions = postClose
+            ? `Bead ${beadId} is already closed; this is a post-close audit. ${modeInstructions[effectiveMode]} For looks-good, the bead stays closed (idempotent).`
+            : modeInstructions[effectiveMode];
+        const payload = {
+            kind: 'review_tasks',
+            strategy: 'hit_me',
+            beadId,
+            round,
+            postClose,
+            mode: effectiveMode,
+            requestedMode,
+            parallelSafe,
+            ...(modeGateWarning ? { modeGateWarning } : {}),
+            agentTasks,
+            files,
+            instructions,
+        };
+        return okResult(state.phase, JSON.stringify({
+            action: 'spawn-agents',
+            beadId,
+            round,
+            postClose,
+            mode: effectiveMode,
+            requestedMode,
+            parallelSafe,
+            ...(modeGateWarning ? { modeGateWarning } : {}),
+            agentTasks,
+            instructions,
+        }, null, 2), payload);
     }
-    return {
-        content: [{ type: 'text', text: `Unknown action: ${args.action}. Valid: hit-me, looks-good, skip` }],
-        isError: true,
+    return errorResult(state.phase, 'unsupported_action', `Unknown action: ${args.action}. Valid: hit-me, looks-good, skip, batch_review`, { beadId, action: args.action }, 'Pass action as one of: "hit-me" (spawn reviewers), "looks-good" (accept), "skip" (defer), "batch_review" (T4 fresh-eyes auto-trigger over a sha range).');
+}
+// ── action="batch_review" handler (T4) ─────────────────────────
+//
+// Two-call lifecycle, keyed off the verdict file at
+// `.pi-flywheel/batch-reviews/<shaRange>.json`:
+//
+//   1. Verdict file ABSENT  → emit a dispatch payload (the fresh-eyes prompt
+//      built via `buildFreshEyesPrompt({ emitStructuredFindings: true })`
+//      plus the verdict path). Coordinator routes the prompt to NTM
+//      `--robot-send` (primary) or `Agent(subagent_type="general-purpose")`
+//      (fallback). Reviewer writes its JSON verdict to the path.
+//
+//   2. Verdict file PRESENT → parse, validate via `BatchReviewVerdictSchema`,
+//      branch on `status`:
+//        • "pass"           → nextStep.kind="advance_wave"
+//        • "needs_attention"→ nextStep.kind="needs_attention" with findings
+//        • "blocking"       → call `synthesizeBeadsFromFindings`. On success
+//                              nextStep.kind="synthesized_beads_pending" with
+//                              bead IDs + finding-to-bead mapping. On synth
+//                              failure, partial-rollback via
+//                              `rollbackSynthesizedBeads` and fall back to
+//                              needs_attention.
+//
+// Malformed verdict (invalid JSON or schema parse failure) → record a CASS
+// note and fall back to needs_attention with the raw verdict text surfaced
+// so a human still sees the reviewer output.
+async function handleBatchReview(ctx, args) {
+    const { exec, cwd, state, saveState, signal } = ctx;
+    const shaRange = args.shaRange ?? '';
+    if (!/^[0-9a-f]+\.\.[0-9a-f]+$/i.test(shaRange)) {
+        return errorResult(state.phase, 'invalid_input', `Invalid or missing shaRange for action="batch_review": ${JSON.stringify(args.shaRange)}. Expected "<from-sha>..<to-sha>" (hex chars only).`, { shaRange: args.shaRange }, 'Pass shaRange as `<lastBatchReviewSha>..HEAD` (or any pair of commit SHAs). State.lastBatchReviewSha holds the prior baseline.');
+    }
+    const verdictDir = path.join(cwd, '.pi-flywheel', 'batch-reviews');
+    const verdictPath = path.join(verdictDir, `${shaRange}.json`);
+    let rawVerdict;
+    try {
+        rawVerdict = await fs.readFile(verdictPath, 'utf-8');
+    }
+    catch (err) {
+        if (err.code !== 'ENOENT') {
+            return errorResult(state.phase, 'internal_error', `Failed to read batch-review verdict file: ${errMsg(err)}`, { verdictPath }, 'Check that .pi-flywheel/batch-reviews/ is readable and the reviewer subagent has write permission. If permission denied, run `chmod -R u+rw .pi-flywheel/`.');
+        }
+        // ENOENT → verdict not yet present; fall through to dispatch.
+    }
+    // ── Phase 1: verdict absent → emit dispatch payload ───────────
+    if (rawVerdict === undefined) {
+        const toSha = shaRange.split('..')[1] ?? '';
+        const dispatch = await prepareBatchReviewDispatch(ctx, shaRange, toSha);
+        ctx.state = markBatchReviewDispatched(ctx.state, toSha, shaRange);
+        await saveState(ctx.state);
+        const text = `## Batch Review Dispatch — ${shaRange}\n\n` +
+            `**Verdict file (reviewer writes here):** \`${dispatch.verdictPath}\`\n` +
+            `**Changed files:** ${dispatch.changedFiles.length}\n\n` +
+            `**Cursor coordinator:** spawn one **Task** with \`data.batchReviewTask\` from \`flywheel_impl_tick\`, ` +
+            `or use the prompt below. Then \`flywheel_impl_tick\` or \`flywheel_review({ action: "batch_review", shaRange })\` to collect.\n\n` +
+            `---\n\n${dispatch.prompt}`;
+        return okResult(state.phase, text, {
+            kind: 'batch_review_dispatch',
+            shaRange,
+            verdictPath: dispatch.verdictPath,
+            changedFiles: dispatch.changedFiles,
+            prompt: dispatch.prompt,
+        });
+    }
+    // ── Phase 2: verdict present → parse + validate + branch ──────
+    let parsedJson;
+    try {
+        parsedJson = JSON.parse(rawVerdict);
+    }
+    catch (err) {
+        return needsAttentionFallback(ctx, shaRange, verdictPath, rawVerdict, `Verdict JSON parse failed: ${errMsg(err)}`);
+    }
+    const parseResult = BatchReviewVerdictSchema.safeParse(parsedJson);
+    if (!parseResult.success) {
+        const issues = parseResult.error.issues
+            .map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`)
+            .join('; ');
+        try {
+            appendMemory(cwd, `malformed batch-review verdict (sha range ${shaRange}): ${issues}`, 'batch-review');
+        }
+        catch { /* best-effort */ }
+        return needsAttentionFallback(ctx, shaRange, verdictPath, rawVerdict, `Verdict schema validation failed (BatchReviewVerdictSchema): ${issues}`);
+    }
+    const verdict = parseResult.data;
+    ctx.state = clearPendingBatchReview(ctx.state);
+    await saveState(ctx.state);
+    // Echo back: the reviewer's sha_range field MUST match the path's shaRange
+    // — otherwise the reviewer wrote to the wrong file. Treat as malformed.
+    if (verdict.sha_range !== shaRange) {
+        try {
+            appendMemory(cwd, `batch-review verdict sha_range mismatch (path=${shaRange}, verdict=${verdict.sha_range})`, 'batch-review');
+        }
+        catch { /* best-effort */ }
+        return needsAttentionFallback(ctx, shaRange, verdictPath, rawVerdict, `Verdict sha_range field "${verdict.sha_range}" does not match the path "${shaRange}". Treating as malformed.`);
+    }
+    // ── status: pass ────────────────────────────────────────────
+    if (verdict.status === 'pass') {
+        return okResult(state.phase, `## Batch Review: PASS — ${shaRange}\n\nNo findings. Coordinator: advance the wave normally.`, {
+            kind: 'batch_review_verdict',
+            verdict,
+            nextStep: { kind: 'advance_wave' },
+        });
+    }
+    // ── status: needs_attention ─────────────────────────────────
+    if (verdict.status === 'needs_attention') {
+        return okResult(state.phase, `## Batch Review: NEEDS ATTENTION — ${shaRange}\n\n` +
+            `${verdict.findings.length} finding(s) surfaced. Coordinator: prompt the user (Continue / Synthesize beads / Pause / Regress).`, {
+            kind: 'batch_review_verdict',
+            verdict,
+            nextStep: { kind: 'needs_attention', findings: verdict.findings },
+        });
+    }
+    // ── status: blocking → synthesize beads ─────────────────────
+    let synthesisError;
+    let synthesizedIds = [];
+    try {
+        synthesizedIds = await synthesizeBeadsFromFindings(cwd, state, verdict.findings, shaRange);
+    }
+    catch (err) {
+        synthesisError = errMsg(err);
+        const partialIds = state.batchReviewSynthesizedBeads?.[shaRange] ?? [];
+        if (partialIds.length > 0) {
+            try {
+                const rb = await rollbackSynthesizedBeads(cwd, partialIds);
+                log.warn('batch_review: partial-rollback after synthesize failure', {
+                    shaRange,
+                    deleted: rb.deleted.length,
+                    closed: rb.closed.length,
+                    failed: rb.failed.length,
+                });
+            }
+            catch (rbErr) {
+                log.error('batch_review: rollback also failed', { err: errMsg(rbErr) });
+            }
+            // Clear the partial record so a future call sees a clean slate.
+            if (state.batchReviewSynthesizedBeads) {
+                delete state.batchReviewSynthesizedBeads[shaRange];
+            }
+        }
+        try {
+            appendMemory(cwd, `batch-review synthesize failure (sha range ${shaRange}): ${synthesisError}`, 'batch-review');
+        }
+        catch { /* best-effort */ }
+    }
+    await saveState(state);
+    if (synthesisError) {
+        return okResult(state.phase, `## Batch Review: BLOCKING — ${shaRange} (synthesis failed)\n\n` +
+            `Verdict was blocking but bead synthesis failed: ${synthesisError}. ` +
+            `Partial-rollback ran on the in-flight set. Surfacing as needs_attention so the operator can decide.`, {
+            kind: 'batch_review_verdict',
+            verdict,
+            nextStep: { kind: 'needs_attention', findings: verdict.findings },
+            synthesisError,
+        });
+    }
+    const mapping = synthesizedIds.map((beadId, i) => ({
+        beadId,
+        finding: verdict.findings[i],
+    }));
+    return okResult(state.phase, `## Batch Review: BLOCKING — ${shaRange}\n\n` +
+        `Synthesized ${synthesizedIds.length} bead(s) from findings (all severities). ` +
+        `Coordinator: surface the four-option Approve/Reject gate (Approve all / Approve subset / Reject all / Regress to plan).\n\n` +
+        `Created beads: ${synthesizedIds.join(', ')}`, {
+        kind: 'batch_review_verdict',
+        verdict,
+        nextStep: {
+            kind: 'synthesized_beads_pending',
+            beadIds: synthesizedIds,
+            mapping,
+        },
+    });
+}
+function needsAttentionFallback(ctx, shaRange, verdictPath, rawVerdict, reason) {
+    const { state } = ctx;
+    log.warn('batch_review: falling back to needs_attention', { shaRange, reason });
+    // Surface the first ~2 KiB of raw verdict so the operator can still read
+    // what the reviewer wrote even if the schema parse failed.
+    const rawSnippet = rawVerdict.length > 2048 ? rawVerdict.slice(0, 2048) + '\n…(truncated)' : rawVerdict;
+    const fallback = {
+        status: 'needs_attention',
+        findings: [],
+        sha_range: shaRange,
     };
+    return okResult(state.phase, `## Batch Review: NEEDS ATTENTION (fallback) — ${shaRange}\n\n` +
+        `${reason}\n\n` +
+        `Verdict file: \`${verdictPath}\`\n\n` +
+        `**Raw reviewer output (first 2 KiB):**\n\n\`\`\`\n${rawSnippet}\n\`\`\`\n\n` +
+        `Coordinator: surface the raw output to the user; do not auto-synthesize.`, {
+        kind: 'batch_review_verdict',
+        verdict: fallback,
+        nextStep: { kind: 'needs_attention', findings: [] },
+        malformed: true,
+        reason,
+        rawVerdictSnippet: rawSnippet,
+    });
 }
 async function nextBeadOrGates(ctx, completedBeadId, completedTitle, status) {
-    const { exec, cwd, state, saveState } = ctx;
+    const { exec, cwd, state, saveState, signal } = ctx;
     // Get next ready beads
-    const brReadyResult = await exec('br', ['ready', '--json'], { cwd, timeout: 8000 });
+    const brReadyResult = await exec('br', ['ready', '--json'], { cwd, timeout: 8000, signal });
     let ready = [];
     if (brReadyResult.code === 0) {
         try {
             ready = JSON.parse(brReadyResult.stdout);
         }
         catch {
-            ready = [];
+            return errorResult(state.phase, 'parse_failure', 'br ready produced malformed JSON — fall back to manual bead selection.', { command: 'br ready --json', stdout: brReadyResult.stdout.slice(0, 200) }, 'Run `br ready --json` manually to inspect the output; upgrade br CLI if the JSON shape drifted.');
         }
     }
     // Filter out already-completed beads
@@ -242,30 +606,29 @@ async function nextBeadOrGates(ctx, completedBeadId, completedTitle, status) {
         state.iterationRound = 0;
         state.currentGateIndex = 0;
         saveState(state);
-        return {
-            content: [{
-                    type: 'text',
-                    text: `**${status}: Bead ${completedBeadId} (${completedTitle}).**
+        return okResult('iterating', `**${status}: Bead ${completedBeadId} (${completedTitle}).**
 
-All beads complete! Entering review gates.
+All beads in the queue are done. If you have not run wave review yet, call \`flywheel_wave_review_gate\` for the wave's bead IDs first. Then \`flywheel_wrap_up_gate\` after review — not ad-hoc commit prompts.
 
-**NEXT: Call \`orch_review\` with beadId="__gates__" to run guided review gates.**`,
-                }],
-        };
+**NEXT:** \`flywheel_review\` with beadId="__gates__" for guided review gates, OR \`flywheel_wrap_up_gate\` when review is finished.`, {
+            kind: 'all_beads_complete',
+            scope: 'bead_completion',
+            completedBeadId,
+            completedTitle,
+            status,
+            nextStep: { kind: 'wrap_up_gate' },
+        });
     }
     if (ready.length === 1) {
         const nextBead = ready[0];
-        await exec('br', ['update', nextBead.id, '--status', 'in_progress'], { cwd, timeout: 5000 });
+        await exec('br', ['update', nextBead.id, '--status', 'in_progress'], { cwd, timeout: 5000, signal });
         state.currentBeadId = nextBead.id;
         state.retryCount = 0;
         state.phase = 'implementing';
         saveState(state);
-        return {
-            content: [{
-                    type: 'text',
-                    text: `**${status}: Bead ${completedBeadId}.** Moving to bead ${nextBead.id}.
+        return okResult('implementing', `**${status}: Bead ${completedBeadId}.** Moving to bead ${nextBead.id}.
 
-**NEXT: Implement bead ${nextBead.id} (${nextBead.title}), then call \`orch_review\` when done.**
+**NEXT: Implement bead ${nextBead.id} (${nextBead.title}), then call \`flywheel_review\` when done.**
 
 ---
 
@@ -273,13 +636,17 @@ All beads complete! Entering review gates.
 
 ${nextBead.description}
 
-After implementing, commit and call \`orch_review\` with beadId="${nextBead.id}".`,
-                }],
-        };
+After implementing, commit and call \`flywheel_review\` with beadId="${nextBead.id}".`, {
+            kind: 'review_tasks',
+            strategy: 'single_bead',
+            completedBeadId,
+            nextBeadIds: [nextBead.id],
+            beads: [nextBead],
+        });
     }
     // Multiple ready — spawn parallel agents
     for (const bead of ready) {
-        await exec('br', ['update', bead.id, '--status', 'in_progress'], { cwd, timeout: 5000 });
+        await exec('br', ['update', bead.id, '--status', 'in_progress'], { cwd, timeout: 5000, signal });
     }
     state.phase = 'implementing';
     saveState(state);
@@ -288,18 +655,20 @@ After implementing, commit and call \`orch_review\` with beadId="${nextBead.id}"
         cwd,
         task: `Implement bead ${bead.id}: ${bead.title}\n\n${bead.description}\n\nAfter implementing, commit and report your summary.`,
     }));
-    return {
-        content: [{
-                type: 'text',
-                text: `**${status}: Bead ${completedBeadId}.** ${ready.length} beads now ready.
+    return okResult('implementing', `**${status}: Bead ${completedBeadId}.** ${ready.length} beads now ready.
 
-**NEXT: Spawn ${ready.length} parallel agents, then call \`orch_review\` for each when done.**
+**NEXT: Spawn ${ready.length} parallel agents, then call \`flywheel_review\` for each when done.**
 
 \`\`\`json
 ${JSON.stringify({ agents: agentConfigs }, null, 2)}
-\`\`\``,
-            }],
-    };
+\`\`\``, {
+        kind: 'review_tasks',
+        strategy: 'parallel_beads',
+        completedBeadId,
+        nextBeadIds: ready.map(bead => bead.id),
+        beads: ready,
+        agentConfigs,
+    });
 }
 async function runGates(ctx, action) {
     const { state, saveState, cwd } = ctx;
@@ -318,39 +687,38 @@ async function runGates(ctx, action) {
         state.consecutiveCleanRounds = (state.consecutiveCleanRounds ?? 0) + 1;
         const consecutiveClean = state.consecutiveCleanRounds;
         if (consecutiveClean >= 2) {
-            state.phase = 'complete';
+            state.phase = 'iterating';
             saveState(state);
-            return {
-                content: [{
-                        type: 'text',
-                        text: `## Orchestration Complete
+            return okResult('iterating', `## Review gates complete (${consecutiveClean} clean rounds)
 
-All gates passed for ${consecutiveClean} consecutive rounds. The implementation is done.
+All beads closed and review gates passed. **Do not ask the user "want to commit?" in free text.**
 
-**Summary:** All beads closed, all review gates clean.
-
-Run \`/claude-orchestrator:orchestrate-status\` for a final report.`,
-                    }],
-            };
+**NEXT (MANDATORY):** \`flywheel_wrap_up_gate({ cwd })\` — present Step 9.5 numbered wrap-up options (full / commit only / skip), then follow \`skills/start/_wrapup.md\`.`, {
+                kind: 'review_gates_complete',
+                scope: 'gates',
+                consecutiveCleanRounds: consecutiveClean,
+                nextStep: { kind: 'wrap_up_gate' },
+            });
         }
         saveState(state);
         const nextGate = gateChecks[nextGateIndex];
-        return {
-            content: [{
-                    type: 'text',
-                    text: `Gate passed. Moving to next gate (${consecutiveClean}/2 clean rounds needed to finish).
+        return okResult(state.phase, `Gate passed. Moving to next gate (${consecutiveClean}/2 clean rounds needed to finish).
 
 ## Next Review Gate
 
 ${nextGate}
 
 After checking:
-- If it **passes**: call \`orch_review\` with beadId="__gates__" and action="looks-good"
-- If it **fails**: fix it, then call \`orch_review\` with beadId="__gates__" and action="hit-me"
+- If it **passes**: call \`flywheel_review\` with beadId="__gates__" and action="looks-good"
+- If it **fails**: fix it, then call \`flywheel_review\` with beadId="__gates__" and action="hit-me"
 
-**cwd:** ${cwd}`,
-                }],
-        };
+**cwd:** ${cwd}`, {
+            kind: 'review_gate',
+            scope: 'gates',
+            gateIndex: nextGateIndex,
+            consecutiveCleanRounds: consecutiveClean,
+            gatePrompt: nextGate,
+        });
     }
     // action="hit-me" or first entry: show current gate and reset clean streak
     state.iterationRound = (state.iterationRound ?? 0) + 1;
@@ -359,20 +727,22 @@ After checking:
     const gateIndex = (state.currentGateIndex ?? 0) % gateChecks.length;
     const currentGate = gateChecks[gateIndex];
     saveState(state);
-    return {
-        content: [{
-                type: 'text',
-                text: `## Review Gate (Round ${round})
+    return okResult(state.phase, `## Review Gate (Round ${round})
 
 ${currentGate}
 
 After completing this gate check:
-- If it **passes**: call \`orch_review\` with beadId="__gates__" and action="looks-good" to advance
-- If it **fails**: fix the issue and call \`orch_review\` with beadId="__gates__" and action="hit-me" to spawn fixers
+- If it **passes**: call \`flywheel_review\` with beadId="__gates__" and action="looks-good" to advance
+- If it **fails**: fix the issue and call \`flywheel_review\` with beadId="__gates__" and action="hit-me" to spawn fixers
 
-**cwd:** ${cwd}`,
-            }],
-    };
+**cwd:** ${cwd}`, {
+        kind: 'review_gate',
+        scope: 'gates',
+        gateIndex,
+        round,
+        consecutiveCleanRounds: state.consecutiveCleanRounds,
+        gatePrompt: currentGate,
+    });
 }
 function regressToPhase(ctx, targetPhase, phaseName) {
     const { state, saveState } = ctx;
@@ -381,9 +751,9 @@ function regressToPhase(ctx, targetPhase, phaseName) {
     state.iterationRound = 0;
     saveState(state);
     const instructions = {
-        planning: `Revise the plan${state.planDocument ? ` at \`${state.planDocument}\`` : ''}, then call \`orch_approve_beads\` to re-enter the approval flow.`,
-        creating_beads: `Create/revise beads using \`br create\` and \`br update\`, then call \`orch_approve_beads\` to return to the approval menu.`,
-        implementing: `Use \`br ready\` to find the next unblocked bead and implement it, then call \`orch_review\` when done.`,
+        planning: `Revise the plan${state.planDocument ? ` at \`${state.planDocument}\`` : ''}, then call \`flywheel_approve_beads\` to re-enter the approval flow.`,
+        creating_beads: `Create/revise beads using \`br create\` and \`br update\`, then call \`flywheel_approve_beads\` to return to the approval menu.`,
+        implementing: `Use \`br ready\` to find the next unblocked bead and implement it, then call \`flywheel_review\` when done.`,
     };
     return {
         content: [{
@@ -393,6 +763,9 @@ function regressToPhase(ctx, targetPhase, phaseName) {
     };
 }
 function extractFilesFromBead(bead) {
+    if (!bead || typeof bead.description !== 'string' || bead.description.length === 0) {
+        return [];
+    }
     const files = [];
     // Heuristic: lines that look like file paths
     const lines = bead.description.split('\n');

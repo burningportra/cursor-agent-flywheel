@@ -5,6 +5,8 @@
  * and graceful degradation when a CLI tool is unavailable mid-session.
  */
 import type { ExecFn } from "./exec.js";
+import type { ParseResult } from "./parsers.js";
+export declare function registerCliExecTelemetryHook(hook: (code: string) => void): void;
 export interface BrStructuredError {
     code?: string;
     message?: string;
@@ -60,6 +62,12 @@ export interface ResilientExecOptions {
     isTransient?: (exitCode: number | null, stderr: string, err: unknown) => boolean;
     /** Log structured warnings on failure. Default: true */
     logWarnings?: boolean;
+    /**
+     * Optional cancellation signal. Forwarded to every `exec` attempt; also used
+     * to short-circuit retry sleeps and the retry loop itself so that aborting
+     * stops the wrapper within one retry-delay window.
+     */
+    signal?: AbortSignal;
 }
 /**
  * br-specific transient classification.
@@ -88,6 +96,11 @@ export declare function brExec(exec: ExecFn, args: string[], opts?: ResilientExe
 /**
  * Like `brExec` but parses stdout as JSON.
  * Returns a structured permanent error if JSON parsing fails.
+ *
+ * When `validator` is provided, stdout is validated through the given
+ * `ParseResult`-returning function instead of a bare `JSON.parse`.
  */
-export declare function brExecJson<T>(exec: ExecFn, args: string[], opts?: ResilientExecOptions): Promise<ExecResult<T>>;
+export declare function brExecJson<T>(exec: ExecFn, args: string[], opts?: ResilientExecOptions & {
+    validator?: (raw: string) => ParseResult<T>;
+}): Promise<ExecResult<T>>;
 //# sourceMappingURL=cli-exec.d.ts.map

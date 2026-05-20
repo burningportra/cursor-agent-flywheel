@@ -1,17 +1,39 @@
 import type { ExecFn } from "./exec.js";
-import type { OrchestratorState } from "./types.js";
+import type { FlywheelState } from "./types.js";
 import { polishInstructions, summaryInstructions, realityCheckInstructions, deSlopifyInstructions, landingChecklistInstructions, learningsExtractionPrompt } from "./prompts.js";
-import { reflectMemory } from "./memory.js";
+import { reflectMemory, readMemory } from "./memory.js";
 import { readBeads, extractArtifacts as extractBeadArtifacts } from "./beads.js";
 import { agentMailTaskPreamble } from "./agent-mail.js";
 import { detectUbs } from "./coordination.js";
 import { resilientExec } from "./cli-exec.js";
 import { getDomainChecklist, formatDomainReviewItems } from "./domain-knowledge.js";
 
+export interface FreshEyesPromptOpts {
+  round: number;
+  memoryContext: string;
+  allArtifacts: string[];
+  callbackHint: string;
+  regressionHint: string;
+  /** `<from-sha>..<to-sha>` placeholder echoed into the structured-findings contract block when the batch-review path is the caller. */
+  shaRange?: string;
+  /** When true, append the `Finding[]` verdict contract used by the `review.ts` batch_review auto-synthesis path. The wave-gate caller passes `false` so its prompt is byte-identical to the legacy form. */
+  emitStructuredFindings?: boolean;
+}
+
+export function buildFreshEyesPrompt(opts: FreshEyesPromptOpts): string {
+  const { round, memoryContext, allArtifacts, callbackHint, regressionHint, shaRange, emitStructuredFindings } = opts;
+  const filesBlock = allArtifacts.map((a) => `- ${a}`).join("\n");
+  const shaRangePlaceholder = shaRange ?? "<from-sha>..<to-sha>";
+  const structuredFindingsBlock = emitStructuredFindings
+    ? `\n\n## STRUCTURED FINDINGS REQUIRED\nWhen you finish your fresh-eyes pass, append a JSON object (and ONLY this object) at the end of your response, fenced in \`\`\`json ... \`\`\`:\n\n\`\`\`json\n{\n  "status": "pass" | "needs_attention" | "blocking",\n  "findings": [\n    {\n      "severity": "low" | "medium" | "high" | "critical",\n      "summary": "<one-line description>",\n      "suggested_bead_title": "<verb-phrase title for the auto-synthesized bead>",\n      "affected_files": ["<relative path>", "..."],\n      "evidence_excerpt": "<2-10 lines of code or git log excerpt>"\n    }\n  ],\n  "sha_range": "${shaRangePlaceholder}"\n}\n\`\`\`\n\n- \`status = "pass"\` when the diff is clean.\n- \`status = "needs_attention"\` when findings exist but none warrant an auto-bead.\n- \`status = "blocking"\` when at least one finding is severe enough to auto-synthesize a bead (every finding in the array will become a \`br create\`).\n- \`findings = []\` is mandatory for \`status = "pass"\`.`
+    : "";
+  return `## Fresh Self-Review - Round ${round}${memoryContext}\n\n**⚠ DO NOT close, kill, restart, or retire any NTM panes during this gate.** If an impl swarm is still alive (tmux session present, panes responsive), the live codex/claude-code agents in those panes are the right reviewers — they wrote the code and have the most context. Self-review is delegation, not coordinator solo work, and it MUST NOT trigger pane teardown.\n\n**Routing:**\n1. Run \`list_window_identities\` (Agent Mail) and \`ntm --robot-tail\` to confirm which NTM panes are still alive and which agent identity each holds.\n2. For each closed bead in this wave, dispatch the self-review back to the *same* pane that implemented it via \`ntm --robot-send\` (NOT \`ntm send\` — CASS-dedup will silently abort it). One pane = one bead's self-review.\n3. If a pane has gone silent or been recycled, fall back to coordinator-side review for that bead's files only — do NOT spawn fresh reviewers and do NOT touch other panes.\n4. The tender daemon should already be \`kill -TERM\`'d at this point (see \`_implement.md\` Post-wave bridge). Do NOT start a new daemon and do NOT issue \`ntm --robot-restart-pane\`, \`--hard-kill\`, or \`tmux kill-pane\` against any pane that is responsive.\n\n**Self-review prompt to dispatch to each pane (substitute the pane's bead ID + files):**\n\nCarefully re-read ALL new and modified code with fresh eyes. For each file changed, work through these 4 questions:\n\n1. **Is it correct?** Does the implementation actually do what the bead description says it should?\n2. **Are edge cases handled?** Empty inputs, concurrent access, error paths, boundary conditions - what breaks under stress?\n3. **Are there similar issues elsewhere?** If you found a bug, search for the same pattern in other files. Bugs travel in packs.\n4. **Was the approach right?** Sometimes the implementation is correct but there's a simpler or more robust alternative. Consider it now, not after review.\n\nFix everything you find. If you find a bug, do the pattern search (#3) before moving on. Report findings back to the coordinator via Agent Mail with subject \`[review] <bead-id> self-review\`.\n\nFiles changed (all-wave, partition by bead before dispatch):\n${filesBlock}${structuredFindingsBlock}\n\nUse ultrathink.${callbackHint}${regressionHint}`;
+}
+
 export async function runGuidedGates(
   exec: ExecFn,
   cwd: string,
-  st: OrchestratorState,
+  st: FlywheelState,
   extraInfo: string,
   saveState: () => void
 ): Promise<{ content: { type: "text"; text: string }[]; details: any }> {
@@ -24,6 +46,13 @@ export async function runGuidedGates(
   const beadResults = Object.values(st.beadResults ?? {});
   const polish = polishInstructions(goal, allArtifacts);
   const summaryText = summaryInstructions(goal, activeBeads, beadResults);
+
+  // Load CASS memory context for review gates (best-effort)
+  let memoryContext = "";
+  try {
+    const mem = readMemory(cwd, `review patterns ${goal}`);
+    if (mem) memoryContext = `\n\n## Prior Session Learnings\n${mem}\n`;
+  } catch { /* CASS unavailable — proceed without */ }
 
   // Domain-specific review items based on tech stack
   const domainChecklist = st.repoProfile ? getDomainChecklist(st.repoProfile) : null;
@@ -41,6 +70,7 @@ export async function runGuidedGates(
     { emoji: "peers", label: "Peer review", desc: "parallel agents review each other's work", auto: false },
     { emoji: "tests", label: "Test coverage", desc: "check unit tests + e2e, create tasks for gaps", auto: true },
     { emoji: "slop", label: "De-slopify", desc: "remove AI writing patterns from docs", auto: true },
+    { emoji: "adversarial", label: "Adversarial reading", desc: "trace random execution flows to find hidden bugs", auto: true },
     { emoji: "ubs", label: "UBS scan", desc: "run ubs on changed files, fix all issues", auto: true },
     { emoji: "commit", label: "Commit", desc: "logical groupings with detailed messages", auto: false },
     { emoji: "ship", label: "Ship it", desc: "commit, tag, release, deploy, monitor CI", auto: false },
@@ -74,14 +104,14 @@ export async function runGuidedGates(
 
   if (!chosen) chosen = "done";
 
-  const callbackHint = `\n\nAfter completing this, call \`orch_review\` with beadId "__gates__" and verdict "pass" for the next gate.`;
+  const callbackHint = `\n\nAfter completing this, call \`flywheel_review\` with beadId "__gates__" and verdict "pass" for the next gate.`;
 
   // Regression hint appended to gates where fundamental issues might surface.
   // Flywheel: "If a gate fails, drop back a phase instead of pushing forward."
   const regressionHint = `\n\n---\n**If this gate revealed fundamental issues:**\n` +
-    `- \`orch_review\` with beadId \"__regress_to_beads__\" -> go back to bead creation\n` +
-    `- \`orch_review\` with beadId \"__regress_to_plan__\" -> go back to plan refinement\n` +
-    `- \`orch_review\` with beadId \"__regress_to_implement__\" -> go back to implementation`;
+    `- \`flywheel_review\` with beadId \"__regress_to_beads__\" -> go back to bead creation\n` +
+    `- \`flywheel_review\` with beadId \"__regress_to_plan__\" -> go back to plan refinement\n` +
+    `- \`flywheel_review\` with beadId \"__regress_to_implement__\" -> go back to implementation`;
 
   if (chosen === "done" || chosen.startsWith("done")) {
     st.currentGateIndex = 0;
@@ -92,7 +122,7 @@ export async function runGuidedGates(
 
     const learningsText = learningsExtractionPrompt(goal, activeBeads.map((b) => b.id));
 
-    // Self-improvement loop: save structured feedback for future orchestrations
+    // Self-improvement loop: save structured feedback for future flywheel runs
     try {
       const { collectFeedback, saveFeedback } = await import("./feedback.js");
       const feedback = collectFeedback(st);
@@ -122,10 +152,17 @@ export async function runGuidedGates(
       content: [
         {
           type: "text",
-          text: `## Fresh Self-Review - Round ${round}\n\nCarefully re-read ALL new and modified code with fresh eyes. For each file changed, work through these 4 questions:\n\n1. **Is it correct?** Does the implementation actually do what the bead description says it should?\n2. **Are edge cases handled?** Empty inputs, concurrent access, error paths, boundary conditions - what breaks under stress?\n3. **Are there similar issues elsewhere?** If you found a bug, search for the same pattern in other files. Bugs travel in packs.\n4. **Was the approach right?** Sometimes the implementation is correct but there's a simpler or more robust alternative. Consider it now, not after review.\n\nFix everything you find. If you find a bug, do the pattern search (#3) before moving on.\n\nFiles changed:\n${allArtifacts.map((a) => `- ${a}`).join("\n")}\n\nUse ultrathink.${callbackHint}${regressionHint}`,
+          text: buildFreshEyesPrompt({
+            round,
+            memoryContext,
+            allArtifacts,
+            callbackHint,
+            regressionHint,
+            emitStructuredFindings: false,
+          }),
         },
       ],
-      details: { iterating: true, round, selfReview: true },
+      details: { iterating: true, round, selfReview: true, preserveNtmPanes: true },
     };
   }
 
@@ -139,7 +176,7 @@ export async function runGuidedGates(
     const peerAgents = [
       {
         name: `peer-bugs-r${round}`,
-        task: `${peerPreamble(`peer-bugs-r${round}`)}Peer reviewer (round ${round}). Review code written by your fellow agents. Check for issues, bugs, errors, inefficiencies, security problems, reliability issues. Diagnose root causes using first-principle analysis. Don't restrict to latest commits - cast a wider net and go super deep!\n\nGoal: ${goal}\nFiles: ${allArtifacts.join(", ")}${domainReviewExtras}\n\nFix issues directly using the edit tool. Your changes persist to disk.\n\nUse ultrathink.\n\ncd ${cwd}`,
+        task: `${peerPreamble(`peer-bugs-r${round}`)}Peer reviewer (round ${round}). Review code written by your fellow agents. Check for issues, bugs, errors, inefficiencies, security problems, reliability issues. Diagnose root causes using first-principle analysis. Don't restrict to latest commits - cast a wider net and go super deep!${memoryContext}\n\nGoal: ${goal}\nFiles: ${allArtifacts.join(", ")}${domainReviewExtras}\n\nFix issues directly using the edit tool. Your changes persist to disk.\n\nUse ultrathink.\n\ncd ${cwd}`,
       },
       {
         name: `peer-polish-r${round}`,
@@ -159,7 +196,7 @@ export async function runGuidedGates(
       content: [
         {
           type: "text",
-          text: `**NEXT: Call \`parallel_subagents\` NOW with the config below.**\n\n## Peer Review - Round ${round}\n\n\`\`\`json\n${peerJson}\n\`\`\`\n\nAfter all complete, present findings and apply fixes. Then call \`orch_review\` with beadId "__gates__" and verdict "pass".${regressionHint}`,
+          text: `**NEXT: Call \`parallel_subagents\` NOW with the config below.**\n\n## Peer Review - Round ${round}\n\n\`\`\`json\n${peerJson}\n\`\`\`\n\nAfter all complete, present findings and apply fixes. Then call \`flywheel_review\` with beadId "__gates__" and verdict "pass".${regressionHint}`,
         },
       ],
       details: { iterating: true, round, peerReview: true },
@@ -169,7 +206,7 @@ export async function runGuidedGates(
   if (chosen.startsWith("tests")) {
     const ubsAvailable = await detectUbs(exec, cwd);
     const ubsRequired = ubsAvailable
-      ? `\n\n**Required:** Run \`ubs <changed-files>\` and fix ALL issues before calling orch_review.`
+      ? `\n\n**Required:** Run \`ubs <changed-files>\` and fix ALL issues before calling flywheel_review.`
       : "";
     return {
       content: [
@@ -179,6 +216,38 @@ export async function runGuidedGates(
         },
       ],
       details: { iterating: true, round, testCoverage: true },
+    };
+  }
+
+  if (chosen.startsWith("adversarial")) {
+    // Adversarial reading: randomly select files and trace execution flows
+    // to find bugs invisible to targeted self-review
+    const shuffled = [...allArtifacts].sort(() => Math.random() - 0.5);
+    const sampleSize = Math.min(shuffled.length, 5);
+    const randomFiles = shuffled.slice(0, sampleSize);
+    return {
+      content: [{
+        type: "text",
+        text: `## Adversarial Code Exploration - Round ${round}
+
+You are an adversarial reader. You do NOT know what was changed or why. Your job is to find bugs by tracing execution flows through randomly selected files.
+
+**Randomly selected files to start from:**
+${randomFiles.map(f => `- \`${f}\``).join("\n")}
+
+**Instructions:**
+1. For each file, pick a public function or entry point
+2. Trace its execution path through the codebase — follow every call, check every branch
+3. At each step, ask: "What happens if this input is null? Empty? Huge? Concurrent?"
+4. Look for: missing error handling, race conditions, resource leaks, type mismatches, logic errors
+5. Do NOT limit yourself to these files — follow the execution wherever it leads
+6. Fix any bugs you find directly
+
+**Key principle:** You are NOT reviewing changes. You are hunting bugs by reading code as an adversary who wants to break it. Cast a wide net.
+
+Use ultrathink.${callbackHint}${regressionHint}`,
+      }],
+      details: { iterating: true, round, adversarialReading: true },
     };
   }
 
@@ -201,7 +270,7 @@ export async function runGuidedGates(
           : "(no output)");
     const ubsSection = ubsClean
       ? `\n\n✅ **UBS scan passed** — no issues found.`
-      : `\n\n❌ **UBS found issues — fix before committing:**\n\`\`\`\n${ubsOutput}\n\`\`\`\n\nFix all issues, then call \`orch_review\` with beadId "__gates__" and verdict "fail" to re-run this gate.`;
+      : `\n\n❌ **UBS found issues — fix before committing:**\n\`\`\`\n${ubsOutput}\n\`\`\`\n\nFix all issues, then call \`flywheel_review\` with beadId "__gates__" and verdict "fail" to re-run this gate.`;
     return {
       content: [{
         type: "text",
@@ -277,7 +346,7 @@ export async function runGuidedGates(
   // Unreachable: all gate choices are handled above.
   // If we get here something is wrong - return a safe fallback.
   return {
-    content: [{ type: "text", text: `Unknown gate choice: "${chosen}". Call \`orch_review\` with beadId "__gates__" to continue.` }],
+    content: [{ type: "text", text: `Unknown gate choice: "${chosen}". Call \`flywheel_review\` with beadId "__gates__" to continue.` }],
     details: { iterating: true, round, unknownGate: chosen },
   };
 }

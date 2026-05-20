@@ -2,15 +2,15 @@
 
 Multi-agent coding orchestrator for **Cursor**. Implements the **Agentic Coding Flywheel**: scan → discover → plan → implement → review — using Cursor’s **Agent**, **Task** (subagents), **Shell**, plugin **commands**, **skills**, **hooks**, and **MCP** servers.
 
-This plugin is a **Cursor port** of [claude-orchestrator](https://github.com/burningportra/claude-orchestrator). All **LLM** steps use **only models available in Cursor** (see **Cursor model policy** below). Infrastructure CLIs (`br`, `bv`, `git`, **agent-mail**) are unchanged from upstream.
+This plugin is a **Cursor port** of [agent-flywheel-plugin](https://github.com/burningportra/agent-flywheel-plugin). All **LLM** steps use **only models available in Cursor** (see **Cursor model policy** below). Infrastructure CLIs (`br`, `bv`, `git`, **agent-mail**) are unchanged from upstream.
 
 ## Upstream baseline
 
 
 | Field            | Value                                                                                                                                                             |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Pinned ref**   | `66a85a59010ea9348696b280e1442ecae752806a` (`master`)                                                                                                             |
-| **Merge policy** | When updating from upstream, diff `commands/`, `mcp-server/src/`, and `hooks/` deliberately; do not drop command files or MCP tools without an explicit decision. |
+| **Pinned ref**   | `v3.18.1` (see `SYNC_MANIFEST.json` after `node scripts/sync-agent-flywheel-upstream.mjs`)                                                                        |
+| **Merge policy** | Re-sync from upstream via `scripts/sync-agent-flywheel-upstream.mjs`, then re-apply Cursor overlays (`cursor-adapters.ts`, `checkpoint-legacy.ts`, `hooks/hooks.json`, rules). |
 
 
 ## Prerequisites
@@ -35,21 +35,39 @@ The repo’s [`.cursor-plugin/marketplace.json`](../../.cursor-plugin/marketplac
 
 To test the full plugin (what you’d get after publish), use Cursor’s **local plugins** directory ([official docs](https://cursor.com/docs/plugins.md#test-plugins-locally)):
 
+From the repo root (recommended — handles commands + MCP build + local install):
+
 ```bash
-ln -sf /absolute/path/to/cursor-agent-flywheel/plugins/cursor-orchestrator ~/.cursor/plugins/local/cursor-orchestrator
+./scripts/install-flywheel-cursor.sh
 ```
 
-Then **Cmd/Ctrl+Shift+P → Developer: Reload Window**. Adjust the first path to your clone.
+Or copy the plugin manually ( **do not use `ln -s`** — Cursor often ignores symlinked local plugins; see [cursor/plugins#35](https://github.com/cursor/plugins/issues/35)):
 
-**Teams / Enterprise:** Import this GitHub repo as a **team marketplace** under **Dashboard → Settings → Plugins → Team Marketplaces → Import** so members see it in the Marketplace panel ([docs](https://cursor.com/docs/plugins.md#add-a-team-marketplace)).
+```bash
+rsync -a --delete --exclude node_modules --exclude .git \
+  /absolute/path/to/cursor-agent-flywheel/plugins/cursor-orchestrator/ \
+  ~/.cursor/plugins/local/cursor-orchestrator/
+```
+
+Then **Cmd/Ctrl+Shift+P → Developer: Reload Window**.
+
+**Where it shows up:** local plugins usually do **not** appear in the public **Marketplace** panel until published. After reload, check **Settings → Rules**, **Settings → Features → MCP**, and **`/`** commands (`flywheel`, `start`) with this repo open.
+
+**Teams / Enterprise:** Import `https://github.com/burningportra/cursor-agent-flywheel` as a **team marketplace** (**Dashboard → Settings → Plugins → Team Marketplaces → Import**). Members install **cursor-orchestrator** from the Marketplace panel. Step-by-step: [docs/publishing/team-marketplace.md](../../docs/publishing/team-marketplace.md).
 
 ### Workspace only — MCP without installing the plugin bundle
 
 If you only open this repo (no symlink), you still get **workspace MCP** from the root [`.cursor/mcp.json`](../../.cursor/mcp.json) (orchestrator + agent-mail). That does **not** automatically load the plugin’s **commands, rules, skills, and hooks** from `plugins/cursor-orchestrator/`; use the **local** symlink above (or a published Marketplace install) for the full bundle.
 
-### Slash commands (`/flywheel`, `/orchestrate-setup`, etc.)
+### Slash commands (`/flywheel`, `/start`, `/flywheel-setup`, …)
 
-Cursor’s **`/`** menu in **Agent** loads **project** commands from **[`.cursor/commands/`](../../.cursor/commands/)** at the repo root. This repository adds **symlinks** there pointing at `plugins/cursor-orchestrator/commands/*.md` so names like **`/flywheel`** (numbered guided menu), **`/orchestrate-setup`**, and **`/orchestrate`** appear without relying on Marketplace UI. **Reload the window** after a fresh clone. If a command is missing, confirm the symlinks exist under `.cursor/commands/`.
+Cursor’s **`/`** menu loads **project** commands from **[`.cursor/commands/`](../../.cursor/commands/)**. Regenerate symlinks after clone:
+
+```bash
+node scripts/link-cursor-commands.mjs
+```
+
+Canonical entry: **`/start`** → `skills/start/SKILL.md`. Menu: **`/flywheel`**. Setup: **`/flywheel-setup`**. **`/orchestrate*`** names are back-compat aliases. **Reload the window** after linking.
 
 **Always-on guidance** for Agent is in **[`.cursor/rules/flywheel-guided.mdc`](../../.cursor/rules/flywheel-guided.mdc)** (repo root).
 
@@ -60,19 +78,29 @@ This repository includes `[.cursor/mcp.json](../../.cursor/mcp.json)` at the **r
 - **agent-mail** — remote MCP via top-level `**url`** (see [Cursor MCP docs](https://cursor.com/docs/context/mcp)); default `http://127.0.0.1:8765/mcp` (start agent-mail first, or this entry errors until it is up).
 - **orchestrator** — `**type`: `"stdio"`**, `node` → `plugins/cursor-orchestrator/scripts/start-orchestrator-mcp.cjs` (path **relative to the workspace folder**, not `${workspaceFolder}`—see **MCP path resolution**).
 
-Then: **Cmd/Ctrl+Shift+P → Developer: Reload Window** (or restart Cursor), open **Output → MCP**, confirm both servers. In Agent, run **`/flywheel`** (menu) or **`/orchestrate-setup`** when ready.
+Then: **Reload Window**, **Output → MCP** — confirm both servers. Run **`/flywheel-setup`**, then **`/start`** or **`/flywheel`**.
 
 CLI checks from repo root (no IDE):
 
 ```bash
+node scripts/link-cursor-commands.mjs
 node scripts/verify-cursor-orchestrator.mjs
-node scripts/validate-template.mjs
-cd plugins/cursor-orchestrator/mcp-server && npm ci && npm run build && npm test
+node scripts/publish-gate.mjs --with-mcp
+node scripts/sync-agent-flywheel-upstream.mjs --check   # optional: manifest drift
 ```
+
+**After upstream sync** (restores cursor overlays for ceremony, discover, commands, rules):
+
+```bash
+cd plugins/cursor-orchestrator/mcp-server && npm run build
+node ../../../scripts/link-cursor-commands.mjs
+```
+
+Then **Developer → Reload Window** so MCP and the `cursor-native` skills bundle reload.
 
 `verify-cursor-orchestrator.mjs` asserts `**mcp-server/dist/server.js**`, the **MCP launcher**, valid `**mcp.json`** and `**hooks/hooks.json`**, every `commands/*.md` with a matching **`.cursor/commands/`** symlink, and runs `**validate-template.mjs`**.
 
-Hook smoke (optional): with a fake `.pi-orchestrator/checkpoint.json` under the workspace root, `node plugins/cursor-orchestrator/scripts/session-start-orchestrator-notice.cjs` should print a resume line (delete the folder afterward).
+Hook smoke (optional): with a fake `.pi-flywheel/checkpoint.json` under the workspace root, `node plugins/cursor-orchestrator/scripts/session-start-orchestrator-notice.cjs` should print a resume line (delete afterward).
 
 ## Build the MCP server
 
@@ -135,6 +163,19 @@ If a label differs in your Cursor version, treat the **command file** name as th
 
 
 Configure available models under **Cursor → Settings → Models**. **Do not** use external LLM CLIs (`codex`, etc.) for orchestration steps.
+
+### Deep plan models (automatic)
+
+`flywheel_plan({ mode: "deep" })` assigns **different Cursor models** per planner by default:
+
+| Perspective | Default model |
+| ----------- | ------------- |
+| correctness | `opus-4.6` |
+| ergonomics | `composer-2.5` |
+| robustness | `gpt-5.5-xhigh` |
+| synthesis | `opus-4.6` |
+
+Override in repo-root **`flywheel.config.yaml`** → `deep_plan:` or env `FW_DEEP_PLAN_MODEL_*`. See `agents/planning-trinity.md`.
 
 ### Roles → tiers (suggested)
 
@@ -208,7 +249,7 @@ mcp-server/dist/       ← orch_* MCP tools, state via .pi-orchestrator/checkpoi
 
 ## State
 
-Orchestrator state lives under `**.pi-orchestrator/**` in the **project workspace** (e.g. `checkpoint.json`). Do not hand-edit; use `orch_`* MCP tools.
+Orchestrator state lives under `**.pi-flywheel/**` in the **project workspace** (e.g. `checkpoint.json`). Legacy `**.pi-orchestrator/**` is migrated on first read. Do not hand-edit; use `flywheel_*` (or `orch_*`) MCP tools.
 
 ## Troubleshooting
 

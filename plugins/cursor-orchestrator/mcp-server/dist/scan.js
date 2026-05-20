@@ -1,9 +1,10 @@
+import { errMsg } from "./errors.js";
 import { profileRepo, createEmptyRepoProfile } from "./profiler.js";
 const CCC_SCAN_QUERIES = [
     {
         id: "workflow-entrypoints",
         title: "Workflow and entrypoints",
-        query: "orchestrator workflow command entrypoint state machine",
+        query: "flywheel workflow command entrypoint state machine",
     },
     {
         id: "planning-review",
@@ -73,13 +74,15 @@ export async function scanRepo(exec, cwd, signal) {
         }
         catch (fallbackError) {
             // Double fault: both providers failed. Return emergency minimal result.
-            process.stderr.write(`[scan] builtin profiler also failed: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}\n`);
+            process.stderr.write(`[scan] builtin profiler also failed: ${errMsg(fallbackError)}\n`);
             const emptyProfile = createEmptyRepoProfile(cwd);
             const result = createFallbackScanResult(emptyProfile, "ccc", errorInfo);
+            result.codebaseAnalysis.summary =
+                "Scan failed: both ccc and builtin providers failed. Results may be incomplete.";
             if (result.sourceMetadata) {
                 result.sourceMetadata.warnings = [
                     ...(result.sourceMetadata.warnings ?? []),
-                    `Profiler also failed: ${fallbackError instanceof Error ? fallbackError.message : String(fallbackError)}`,
+                    `Profiler also failed: ${errMsg(fallbackError)}`,
                 ];
             }
             return result;
@@ -98,11 +101,13 @@ export function createBuiltinScanResult(profile) {
     };
 }
 export function createFallbackScanResult(profile, source, error) {
+    const analysis = createEmptyCodebaseAnalysis();
+    analysis.summary = `Partial scan: fell back from ${source} to builtin provider.`;
     return {
         source: "builtin",
         provider: builtinScanProvider.id,
         profile,
-        codebaseAnalysis: createEmptyCodebaseAnalysis(),
+        codebaseAnalysis: analysis,
         sourceMetadata: {
             label: builtinScanProvider.label,
             warnings: [`Fell back from ${source} to builtin scan provider.`],
@@ -118,7 +123,7 @@ export function createFallbackScanResult(profile, source, error) {
 }
 export function createEmptyCodebaseAnalysis() {
     return {
-        summary: undefined,
+        summary: "",
         recommendations: [],
         structuralInsights: [],
         qualitySignals: [],
@@ -128,6 +133,7 @@ async function ensureCccReady(exec, cwd, signal) {
     const versionCheck = await exec("ccc", ["--help"], {
         cwd,
         timeout: 5000,
+        signal,
     });
     if (versionCheck.code !== 0) {
         throw new Error(versionCheck.stderr.trim() || "ccc is not available");
@@ -135,12 +141,14 @@ async function ensureCccReady(exec, cwd, signal) {
     const status = await exec("ccc", ["status"], {
         cwd,
         timeout: 10000,
+        signal,
     });
     const statusOutput = `${status.stdout}\n${status.stderr}`;
     if (status.code !== 0 && /Not in an initialized project directory/i.test(statusOutput)) {
         const init = await exec("ccc", ["init", "-f"], {
             cwd,
             timeout: 10000,
+            signal,
         });
         if (init.code !== 0) {
             throw new Error(init.stderr.trim() || init.stdout.trim() || "ccc init failed");
@@ -152,20 +160,21 @@ async function ensureCccReady(exec, cwd, signal) {
     const index = await exec("ccc", ["index"], {
         cwd,
         timeout: 120000,
+        signal,
     });
     if (index.code !== 0) {
         throw new Error(index.stderr.trim() || index.stdout.trim() || "ccc index failed");
     }
 }
-async function runCccQuery(exec, cwd, entry) {
-    const result = await exec("ccc", ["search", "--limit", "3", ...entry.query.split(" ")], { cwd, timeout: 30000 });
+async function runCccQuery(exec, cwd, entry, signal) {
+    const result = await exec("ccc", ["search", "--limit", "3", ...entry.query.split(" ")], { cwd, timeout: 30000, signal });
     if (result.code !== 0) {
         throw new Error(`ccc search "${entry.id}" exited ${result.code}: ${result.stderr.trim() || result.stdout.trim() || "no output"}`);
     }
     return parseCccSearchResults(result.stdout);
 }
 async function collectCccCodebaseAnalysis(exec, cwd, signal) {
-    const settled = await Promise.allSettled(CCC_SCAN_QUERIES.map((entry) => runCccQuery(exec, cwd, entry)));
+    const settled = await Promise.allSettled(CCC_SCAN_QUERIES.map((entry) => runCccQuery(exec, cwd, entry, signal)));
     const searches = [];
     for (let i = 0; i < settled.length; i++) {
         const result = settled[i];

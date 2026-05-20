@@ -1,4 +1,7 @@
 import { execFileSync } from "child_process";
+import { parseCmResult } from "./parsers.js";
+import { createLogger } from "./logger.js";
+const log = createLogger("memory");
 // ─── CASS Detection ─────────────────────────────────────────
 let _cassAvailable = null;
 let _cassCheckedAt = 0;
@@ -55,13 +58,12 @@ function runCm(args, cwd) {
 function parseCmJson(output) {
     if (!output)
         return null;
-    try {
-        const parsed = JSON.parse(output);
-        return parsed?.success ? parsed.data : null;
-    }
-    catch {
+    const result = parseCmResult(output);
+    if (!result.ok) {
+        log.warn("cm JSON parse failed", { error: result.error });
         return null;
     }
+    return result.data;
 }
 // ─── Core API ───────────────────────────────────────────────
 /**
@@ -81,7 +83,7 @@ export function getContext(task, cwd) {
 export function readMemory(cwd, task) {
     if (!detectCass())
         return "";
-    const ctx = getContext(task || "orchestration session", cwd);
+    const ctx = getContext(task || "flywheel session", cwd);
     if (!ctx)
         return "";
     const parts = [];
@@ -137,20 +139,22 @@ export function listMemoryEntries(cwd) {
     }));
 }
 /**
- * Search memory entries by query using CASS similar command.
+ * Search memory entries by query using CASS context command.
+ * Uses `cm context` (task-aware semantic matching) instead of `cm similar`
+ * (keyword mode) which returns empty for most queries.
  */
 export function searchMemory(cwd, query) {
     if (!detectCass())
         return [];
-    const output = runCm(["similar", query, "--json"], cwd);
+    const output = runCm(["context", query, "--json"], cwd);
     const data = parseCmJson(output);
-    if (!data?.results)
+    if (!data?.relevantBullets)
         return [];
-    return data.results.map((r, i) => ({
+    return data.relevantBullets.map((b, i) => ({
         index: i + 1,
-        id: r.id ?? `r-${i}`,
-        category: r.category ?? "general",
-        content: r.text,
+        id: b.id,
+        category: b.category ?? "general",
+        content: b.content ?? b.text ?? "",
     }));
 }
 /**
@@ -167,7 +171,7 @@ export function markRule(bulletId, helpful, reason, cwd) {
 }
 /**
  * Run `cm onboard` to bootstrap memory for a new project.
- * Should be called once when starting orchestration on a project that has no
+ * Should be called once when starting flywheel on a project that has no
  * existing CASS memory. Best-effort — returns true if successful.
  */
 export function onboardMemory(cwd) {
@@ -176,11 +180,13 @@ export function onboardMemory(cwd) {
     const status = runCm(["onboard", "status", "--json"], cwd);
     let data = null;
     if (status) {
-        try {
-            const raw = JSON.parse(status);
-            data = raw?.success ? (raw.data ?? null) : raw;
+        const parsed = parseCmResult(status);
+        if (parsed.ok) {
+            data = parsed.data;
         }
-        catch { /* fall through */ }
+        else {
+            log.warn("cm onboard status parse failed", { error: parsed.error });
+        }
     }
     if (data?.needsOnboarding === false)
         return true; // already onboarded
@@ -206,26 +212,32 @@ export function reflectMemory(cwd) {
  * that involved planning activity, then extracts recurring patterns.
  * Returns null if cm unavailable or no relevant sessions found.
  */
-export function mineSkillGaps(cwd, topic = "planning beads orchestration") {
+export function mineSkillGaps(cwd, topic = "planning beads flywheel") {
     if (!detectCass())
         return null;
-    const output = runCm(["search", topic, "--json", "--limit", "20"], cwd);
+    const output = runCm(["context", topic, "--json"], cwd);
     if (!output)
         return null;
-    try {
-        const data = JSON.parse(output);
-        const sessions = (data?.results ?? data?.sessions ?? []);
-        if (sessions.length === 0)
-            return null;
-        const snippets = sessions
-            .slice(0, 10)
-            .map((s, i) => `Session ${i + 1}:\n${(s.text ?? s.content ?? "").slice(0, 500)}`)
-            .join("\n\n---\n\n");
-        return snippets;
-    }
-    catch {
+    // cm context returns { relevantBullets: [...], historySnippets: [...] }
+    const cmParsed = parseCmResult(output);
+    if (!cmParsed.ok) {
+        log.warn("cm context parse failed", { error: cmParsed.error });
         return null;
     }
+    const bullets = cmParsed.data?.relevantBullets ?? [];
+    const history = cmParsed.data?.historySnippets ?? [];
+    if (bullets.length === 0 && history.length === 0)
+        return null;
+    const parts = [];
+    for (const b of bullets.slice(0, 10)) {
+        const text = (b.content ?? b.text ?? "").slice(0, 500);
+        parts.push(`Rule [${b.id ?? "?"}]:\n${text}`);
+    }
+    for (const h of history.slice(0, 5)) {
+        const text = (h.snippet ?? h.text ?? "").slice(0, 500);
+        parts.push(`History:\n${text}`);
+    }
+    return parts.join("\n\n---\n\n");
 }
 /**
  * Run the skill-refiner meta-pattern: given a skill file path and optional

@@ -1,14 +1,5 @@
-/**
- * Minimal exec function signature — avoids depending on the full ExtensionAPI.
- */
-export type ExecFn = (cmd: string, args: string[], opts?: {
-    timeout?: number;
-    cwd?: string;
-}) => Promise<{
-    code: number;
-    stdout: string;
-    stderr: string;
-}>;
+import type { ExecFn } from "./exec.js";
+import type { AgentMailResult } from "./types.js";
 export declare const AGENT_MAIL_URL = "http://127.0.0.1:8765";
 export interface AgentMailReservation {
     id?: number | string;
@@ -40,17 +31,27 @@ export interface BuildSlotInfo {
 }
 /**
  * Call an agent-mail MCP tool via its JSON-RPC HTTP endpoint.
- * Used by the orchestrator itself (not sub-agents) to manage projects/reservations.
+ * Used by the agent-flywheel itself (not sub-agents) to manage projects/reservations.
+ *
+ * Returns a discriminated union: `{ ok: true, data }` on success,
+ * `{ ok: false, error }` with a classified error kind on failure.
  */
-export declare function agentMailRPC(exec: ExecFn, toolName: string, args: Record<string, unknown>): Promise<any>;
+export declare function agentMailRPC<T = any>(exec: ExecFn, toolName: string, args: Record<string, unknown>): Promise<AgentMailResult<T>>;
+/**
+ * Backward-compatible unwrapper: extracts data from AgentMailResult
+ * or returns null on error (matching the old agentMailRPC return contract).
+ */
+export declare function unwrapRPC<T>(result: AgentMailResult<T>): T | null;
 /**
  * Read an agent-mail MCP resource via the same JSON-RPC HTTP endpoint.
  */
 export declare function agentMailReadResource(exec: ExecFn, uri: string): Promise<any>;
 /**
- * Ensure project exists in agent-mail. Called once during orch_profile.
+ * Ensure project exists in agent-mail. Called once during flywheel_profile.
  */
 export declare function ensureAgentMailProject(exec: ExecFn, cwd: string): Promise<void>;
+export declare function matchesReservationPath(file: string, reservation: AgentMailReservation): boolean;
+export declare function normalizeReservations(payload: any): AgentMailReservation[];
 /**
  * Reserve files for an agent before launch/hand-off.
  */
@@ -154,32 +155,77 @@ export declare function installPreCommitGuardViaMCP(exec: ExecFn, cwd: string): 
  */
 export declare function amRpcCmd(tool: string, args: Record<string, unknown>): string;
 /**
+ * Safely wrap a string in bash single quotes.
+ * Single-quoted strings in bash are literal — no variable expansion, no command
+ * substitution, no backtick evaluation. The only character that cannot appear
+ * inside a single-quoted string is the single-quote itself, which we handle by
+ * ending the quote, inserting a literal escaped single-quote, then reopening.
+ *
+ * Example: /path/it's/here  →  '/path/it'"'"'s/here'
+ */
+export declare function shellSingleQuote(s: string): string;
+/**
+ * Build a bash helper script that wraps agent-mail calls.
+ * Sub-agents source this to get am_send, am_inbox, am_release functions
+ * with their agent name and project key baked in — no manual substitution needed.
+ */
+export declare function amHelperScript(cwd: string, threadId: string): string;
+/**
  * Generates an agent-mail bootstrap preamble for a parallel sub-agent's task.
  * Uses a bash helper script approach — sub-agents get am_send/am_inbox/am_release
  * functions with correct field names baked in. No manual JSON construction needed.
  */
 export declare function agentMailTaskPreamble(cwd: string, _agentName: string, stepDesc: string, artifacts: string[], threadId: string, mode?: "worktree" | "single-branch"): string;
 /**
- * Register the orchestrator as a named agent in agent-mail.
- * Call this once during orch_profile before any sub-agent spawning.
+ * Register the agent-flywheel as a named agent in agent-mail.
+ * Call this once during flywheel_profile before any sub-agent spawning.
  */
-export declare function registerOrchestratorAgent(exec: ExecFn, cwd: string, agentName?: string): Promise<any>;
+export declare function registerFlywheelAgent(exec: ExecFn, cwd: string, agentName?: string): Promise<any>;
 /**
  * Start a full agent-mail session (register, bootstrap, set up file reservations).
- * Replaces bare ensureAgentMailProject() in orch_profile.
+ * Replaces bare ensureAgentMailProject() in flywheel_profile.
  */
 export declare function agentMailStartSession(exec: ExecFn, cwd: string, agentName?: string): Promise<any>;
 /**
  * Send a bead completion message to the bead's thread.
- * Call in orch_approve_beads when a bead result = success.
+ * Call in flywheel_approve_beads when a bead result = success.
  */
 export declare function sendBeadCompletionMessage(exec: ExecFn, cwd: string, beadId: string, senderName: string, summary: string): Promise<any>;
 /**
- * Acknowledge a batch of message IDs. Called in /orchestrate-status after inbox read.
+ * Acknowledge a batch of message IDs. Called in /flywheel-status after inbox read.
  */
 export declare function acknowledgeMessages(exec: ExecFn, cwd: string, agentName: string, messageIds: number[]): Promise<void>;
 /**
- * Fetch inbox messages for the orchestrator agent.
+ * Fetch inbox messages for the flywheel agent.
  */
 export declare function fetchInboxMessages(exec: ExecFn, cwd: string, agentName?: string): Promise<AgentMailMessage[]>;
+export type AgentMailRole = 'coordinator' | 'implementer' | 'reviewer' | 'generic';
+export interface BootstrapCoordinatorOptions {
+    /**
+     * Program name passed to `macro_start_session`. Contact-policy hardening is
+     * only applied for `claude-code` coordinators (where the planner's
+     * first-contact path was previously blocked by default `contacts_only`).
+     */
+    program?: string;
+    /** Role hint — `coordinator` triggers contact-policy hardening. */
+    role?: AgentMailRole;
+    /** Model identifier forwarded to `macro_start_session`. */
+    model?: string;
+    /** Human-readable task description. */
+    taskDescription?: string;
+}
+export interface BootstrapCoordinatorResult {
+    /** Raw session payload from `macro_start_session`, or null on failure. */
+    session: any | null;
+    /** True when `set_contact_policy` was invoked and succeeded. */
+    contactPolicyApplied: boolean;
+    /** Non-fatal warnings (e.g. contact-policy set failed). */
+    warnings: string[];
+}
+/**
+ * Test-only: reset the in-flight dedupe map. Production callers must never
+ * invoke this; the map is a process-lifetime singleton by design.
+ */
+export declare function _resetBootstrapDedupeForTest(): void;
+export declare function bootstrapCoordinator(exec: ExecFn, cwd: string, agentName?: string, options?: BootstrapCoordinatorOptions): Promise<BootstrapCoordinatorResult>;
 //# sourceMappingURL=agent-mail.d.ts.map

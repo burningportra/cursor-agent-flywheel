@@ -1,0 +1,183 @@
+---
+name: flywheel-doctor
+description: One-shot diagnostic of every flywheel dependency — MCP connectivity, Agent Mail liveness, br/bv/ntm/cm binaries, node version, git status, dist-drift, orphaned worktrees, and checkpoint validity. Use when debugging toolchain issues, before starting a new session, after /flywheel-cleanup, or as a CI gate.
+---
+
+Run a one-shot diagnostic sweep of the flywheel's toolchain and report each dependency's state with a single glyph per line. $ARGUMENTS
+
+The underlying engine is the `flywheel_doctor` MCP tool — a bounded, cancellable, read-only check battery. This skill is the user-facing surface that triggers the tool and renders its `DoctorReport` envelope.
+
+## When to invoke
+
+- **Onboarding a new session** — run once before `/start` to confirm every required tool resolves and MCP is registered. Catches missing binaries, dist drift, and Agent Mail down before any agent spawns.
+- **After `/flywheel-cleanup`** — cleanup removes orphaned worktrees and stale state; doctor verifies the cleanup left the tree in a coherent condition.
+- **CI gate** — run doctor in CI prior to `npm run build` / `npm test` so a toolchain regression surfaces as a red line rather than a confusing test failure.
+- **Toolchain drift suspected** — a bead fails in a way that smells like missing binary or MCP tool not registered; run doctor first and triage from its output.
+
+## What it does
+
+`flywheel_doctor` runs these 11 checks in parallel, each with a per-check timeout (default 2s) and a global sweep budget (default 10s):
+
+1. `mcp_connectivity` — the MCP server (agent-flywheel) responds to a ping.
+2. `agent_mail_liveness` — `curl -s --max-time 3 http://127.0.0.1:8765/health/liveness` returns 200.
+3. `br_binary` — `br --version` resolves.
+4. `bv_binary` — `bv --version` resolves.
+5. `ntm_binary` — `ntm --version` resolves (optional — yellow if missing).
+6. `cm_binary` — `cm --version` resolves (optional — yellow if missing).
+7. `node_version` — `node --version` is >= the minimum supported version.
+8. `git_status` — cwd is a git repo and `git status --short` succeeds.
+9. `dist_drift` — `mcp-server/dist/server.js` is newer than the most-recently-modified file under `mcp-server/src/`.
+10. `orphaned_worktrees` — `.claude/worktrees/` contains no sessions without a matching `.pi-flywheel/checkpoint.json`.
+11. `checkpoint_validity` — `.pi-flywheel/checkpoint.json` parses and its `sessionStartSha` still resolves in `git log`.
+
+Checks are bounded and cancellable: if the signal fires before a check completes, the report is returned with `partial: true` and whatever results finished. Individual check failures never throw — they become `red` / `yellow` entries.
+
+## Expected output format
+
+Render the `DoctorReport` envelope as:
+
+```
+┌─ flywheel doctor ─────────────────────────────────┐
+│ cwd: <abs-path>                                   │
+│ overall: [OK|WARN|FAIL]   elapsed: <ms>ms         │
+├───────────────────────────────────────────────────┤
+│ [OK]   mcp_connectivity       — server responded  │
+│ [OK]   agent_mail_liveness    — 200 in 14ms       │
+│ [OK]   br_binary              — v1.2.3            │
+│ [OK]   bv_binary              — v1.1.0            │
+│ [WARN] ntm_binary             — not on PATH       │
+│ [OK]   cm_binary              — v0.9.1            │
+│ [OK]   node_version           — v22.5.1           │
+│ [OK]   git_status             — clean             │
+│ [FAIL] dist_drift             — src/errors.ts     │
+│        newer than dist/server.js by 43 min        │
+│ [OK]   orphaned_worktrees     — 0                 │
+│ [OK]   checkpoint_validity    — sha resolves      │
+└───────────────────────────────────────────────────┘
+```
+
+Glyph mapping: `green → [OK]`, `yellow → [WARN]`, `red → [FAIL]`. If `partial: true`, prefix the header with `[PARTIAL — sweep budget exhausted]` and list only the checks that finished.
+
+Append the glossary footer (single source of truth in `mcp-server/src/glossary.ts` — `GLOSSARY_LINE`) immediately below the report so new operators have one-line context for the core vocabulary:
+
+```
+Glossary: bead=atomic task · plan=grouped beads · flywheel=full loop · NTM=tmux multi-agent · agent-mail=inter-agent inbox · MCP=Model Context Protocol
+```
+
+## Inline remediation
+
+After rendering the report, for **each** failing check (yellow or red severity), immediately present a prompt **inline** — spatially adjacent to that check's row — before moving to the next failing check.
+
+**Automated remediation is available for 10 checks:** `dist_drift`, `mcp_connectivity`, `agent_mail_liveness`, `orphaned_worktrees`, `checkpoint_validity`, `br_binary`, `bv_binary`, `ntm_binary`, `cm_binary`, `projects_base_misconfig`. For these, present:
+
+```
+AskUserQuestion(questions: [{
+  question: "[<CHECK_NAME>] failed: <DETAIL>. Apply the canonical fix now?",
+  header: "Fix it?",
+  options: [
+    { label: "Yes, dry-run first (Recommended)", description: "Call flywheel_remediate({ checkName: '<CHECK_NAME>', mode: 'dry_run' }) — shows the steps without mutating" },
+    { label: "Yes, execute", description: "Call flywheel_remediate({ checkName: '<CHECK_NAME>', mode: 'execute', autoConfirm: true }) — applies the fix immediately" },
+    { label: "Skip", description: "Leave this check failing for now; the manual hint is below" }
+  ],
+  multiSelect: false
+}])
+```
+
+After the user picks "Yes, execute" and `flywheel_remediate` returns, log the time-to-healthy event to CASS for the calibration loop:
+
+```
+flywheel_memory(operation: "store", content: {
+  type: "doctor-remediation",
+  checkName: "<CHECK_NAME>",
+  mode: "execute",
+  startedAt: <pre-call-iso>,
+  completedAt: <post-call-iso>,
+  durationMs: <ms>,
+  verifiedGreen: <bool from result>,
+  reversible: <from result.plan>,
+  date: "<YYYY-MM-DD>"
+})
+```
+
+This entry feeds the "time-to-healthy" rollup in a future calibration enhancement (Feature 2).
+
+**Checks with no automated handler** — fall through to the manual hint below the check row:
+
+- `node_version` → "Upgrade node to >=18.18 (per `mcp-server/package.json` engines)"
+- `git_status` → "cwd is not a git repo or `.git/` corrupted; re-clone or re-init"
+- `claude_cli` / `codex_cli` / `gemini_cli` missing → run `/agent-flywheel:flywheel-setup` (system AI CLIs install paths vary by user)
+- `swarm_model_ratio`, `codex_config_compat`, `rescues_last_30d` → manual investigation required
+
+The four flywheel-owned CLI checks (`br_binary`, `bv_binary`, `ntm_binary`, `cm_binary`) are now auto-remediated via the canonical curl|bash installers. `flywheel_remediate` runs the install command and re-probes `<binary> --version` afterwards. If the install fails (network/permission), the result envelope reports `verifiedGreen:false` with stderr captured for inspection.
+
+`agent_mail_liveness` remediation is service-aware: it stops the supervised Agent Mail runtime to release `.mailbox.activity.lock`, runs `am doctor repair --yes` and `am doctor archive-normalize --yes`, restarts the service, then verifies `/health/liveness`. This is the canonical fix for the common `Resource is temporarily busy ... mailbox activity lock is busy` failure. Do not tell agents to delete the lock files.
+
+`projects_base_misconfig` remediation (v3.16.0 noob-onboarding) reads `projects_base` from `ntm config show`, then issues `ln -s <cwd> <projects_base>/<basename(cwd)>` so `ntm spawn` resolves to the correct working tree. The handler is idempotent — a present symlink at the target short-circuits with `stepsRun: 0`. Verification re-probes the symlink after execute. Reversible: remove the symlink with `rm` to restore the prior state.
+
+### `--auto` / unattended mode
+
+For CI or scripted runs, pass `--auto` to `/flywheel-doctor` (or to the underlying tool: `flywheel_remediate({ mode: 'execute', autoConfirm: true })`). This skips the AskUserQuestion gate and applies automated remediations. Use sparingly — it can run shell installers and restart the local Agent Mail service without an additional prompt.
+
+If `overall` is `red`, do NOT run `/start` until the red checks are fixed — downstream gates will fail with more confusing errors.
+
+## Strategic-alignment advisory (manual, run after the MCP report — new in v3.6.5)
+
+After rendering the MCP `DoctorReport`, run one additional **agent-side advisory check** that the MCP tool does NOT yet implement: reality-check freshness. This is documentation of a check the agent performs by querying CASS — eventually it should move into `mcp-server/src/tools/doctor.ts` as a proper check, but it ships as an advisory until then.
+
+Procedure:
+1. Call `flywheel_memory(operation: "search", cwd, query: "reality-check gap report")`.
+2. Inspect the most-recent matching entry's date (entries are stored with a `date` field per `_reality_check.md` §2).
+3. Count distinct prior flywheel sessions for this `cwd` (via CASS or `git log` since the project's first flywheel commit — heuristic only).
+4. If ≥3 prior sessions exist AND the most recent reality-check is older than 7 sessions (or never run), append below the doctor report:
+
+   ```
+   [INFO] reality_check_freshness — last reality-check: <X> sessions ago
+          → consider /agent-flywheel:flywheel-reality-check before continuing
+   ```
+
+5. If <3 prior sessions OR the most recent reality-check was within the last 7 sessions, skip silently.
+
+This is **advisory only** — never gate on it, never mark the doctor report `red` because of it. It's a nudge, not a blocker. Single-session projects don't need reality-checks; the threshold exists to avoid noise on fresh repos.
+
+## Skill tool invocation
+
+Invoke the MCP tool directly with a single argument — the current working directory:
+
+```
+flywheel_doctor({ cwd: "<abs-path-to-repo-root>" })
+```
+
+Read the returned `structuredContent.data` as a `DoctorReport`:
+
+```ts
+type DoctorReport = {
+  version: 1;
+  cwd: string;
+  overall: "green" | "yellow" | "red";
+  partial: boolean;
+  checks: Array<{
+    name: string;
+    severity: "green" | "yellow" | "red";
+    detail: string;
+    elapsedMs: number;
+  }>;
+  elapsedMs: number;
+  timestamp: string;
+};
+```
+
+Render each `check` as one line using the glyph mapping above. If `structuredContent?.data?.error?.code` is set, branch on `FlywheelErrorCode` — the two codes this tool can emit are `doctor_blocking_failure` (the sweep itself couldn't start, e.g. cwd isn't a directory) and `doctor_partial_result` (signalled abort before all checks finished). Do NOT parse `error.message` text.
+
+## Notes
+
+- Doctor is **read-only**. It never mutates `.pi-flywheel/checkpoint.json`, never writes spool files, never kills worktrees. Remediation is always user-gated.
+- Safe to run concurrently with `/start` — doctor does not lock anything.
+- Runtime target: under 2 seconds on a warm machine; the 10s sweep budget exists only to cap pathological cases (binary hangs).
+
+## See also (triage chain)
+
+Doctor is the **first** of three diagnostic commands. Run them in order:
+
+1. **`/agent-flywheel:flywheel-doctor`** (this skill) — read-only snapshot, always safe. Run first.
+2. **`/agent-flywheel:flywheel-setup`** — apply-fixes stage; installs tools, registers MCP, configures hooks. Run when doctor reports `red`/`yellow` checks.
+3. **`/agent-flywheel:flywheel-healthcheck`** — deep periodic audit of codebase + bead graph + dependencies. Run on a cadence, not to fix setup problems.

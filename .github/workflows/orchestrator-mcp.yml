@@ -52,6 +52,8 @@ jobs:
           cache-dependency-path: plugins/cursor-orchestrator/mcp-server/package-lock.json
       - run: npm ci
       - run: npm run build
+      - run: npm run check:skills-bundle
+      - run: npm run verify:error-meta
       - run: npm test
       - name: Committed dist matches clean build (no drift)
         working-directory: ${{ github.workspace }}

@@ -1,4 +1,32 @@
 import { resilientExec, brExec, brExecJson } from "./cli-exec.js";
+import { createLogger } from "./logger.js";
+import { errMsg } from "./errors.js";
+import { parseBvInsights, parseBvNextPicks, parseBvNextPick } from "./parsers.js";
+const log = createLogger("beads");
+// ─── Session Cache ─────────────────────────────────────────────
+// Caches expensive CLI results within a session to avoid redundant calls.
+// TTL-based: entries expire after CACHE_TTL_MS.
+const CACHE_TTL_MS = 30_000; // 30 seconds
+const _sessionCache = new Map();
+function getCached(key) {
+    const entry = _sessionCache.get(key);
+    if (!entry || Date.now() > entry.expiresAt) {
+        _sessionCache.delete(key);
+        return null;
+    }
+    return entry.value;
+}
+function setCache(key, value, ttlMs = CACHE_TTL_MS) {
+    _sessionCache.set(key, { value, expiresAt: Date.now() + ttlMs });
+}
+/** Clear all session caches. Call after bead mutations (create/update/close). */
+export function invalidateBeadCache() {
+    _sessionCache.delete("readBeads");
+    _sessionCache.delete("readyBeads");
+    _sessionCache.delete("bvTriage");
+    _sessionCache.delete("bvInsights");
+    _sessionCache.delete("bvNext");
+}
 /**
  * Check if a bead ID matches the expected br-NNN pattern.
  * The br CLI generates IDs like "br-1", "br-42", "br-123".
@@ -96,16 +124,21 @@ export function resetBvCache() {
  * Returns null if bv is unavailable or output can't be parsed.
  */
 export async function bvInsights(exec, cwd) {
+    const cached = getCached("bvInsights");
+    if (cached !== null)
+        return cached;
     if (!(await detectBv(exec)))
         return null;
     const result = await resilientExec(exec, "bv", ["--robot-insights"], { timeout: 15000, cwd, maxRetries: 1, retryDelayMs: 300 });
     if (!result.ok)
         return null;
-    try {
-        return JSON.parse(result.value.stdout);
+    const parsed = parseBvInsights(result.value.stdout);
+    if (parsed.ok) {
+        setCache("bvInsights", parsed.data);
+        return parsed.data;
     }
-    catch {
-        console.warn(`[beads] bv --robot-insights returned unparseable JSON`);
+    else {
+        log.warn("bv --robot-insights parse failed", { error: parsed.error });
         return null;
     }
 }
@@ -118,6 +151,9 @@ export async function bvInsights(exec, cwd) {
  * Returns null if bv is unavailable or output can't be parsed.
  */
 export async function bvTriage(exec, cwd) {
+    const cached = getCached("bvTriage");
+    if (cached !== null)
+        return cached;
     if (!(await detectBv(exec)))
         return null;
     const result = await resilientExec(exec, "bv", ["--robot-triage", "--json"], { timeout: 15000, cwd, maxRetries: 1, retryDelayMs: 300 });
@@ -126,19 +162,21 @@ export async function bvTriage(exec, cwd) {
     const stdout = result.value.stdout.trim();
     if (!stdout)
         return null;
-    try {
-        const data = JSON.parse(stdout);
-        // --robot-triage may return an array or a single object
-        if (Array.isArray(data))
-            return data;
-        if (data && data.id)
-            return [data];
-        return null;
+    // --robot-triage may return an array or a single object; normalize to array
+    const arrayResult = parseBvNextPicks(stdout);
+    if (arrayResult.ok) {
+        setCache("bvTriage", arrayResult.data);
+        return arrayResult.data;
     }
-    catch {
-        console.warn(`[beads] bv --robot-triage returned unparseable JSON`);
-        return null;
+    // Fallback: try parsing as a single pick and wrap in array
+    const singleResult = parseBvNextPick(stdout);
+    if (singleResult.ok && singleResult.data) {
+        const picks = [singleResult.data];
+        setCache("bvTriage", picks);
+        return picks;
     }
+    log.warn("bv --robot-triage parse failed", { error: arrayResult.error });
+    return null;
 }
 /**
  * Runs `bv --robot-next` and returns the highest-priority next bead.
@@ -153,14 +191,12 @@ export async function bvNext(exec, cwd) {
     const stdout = result.value.stdout.trim();
     if (!stdout)
         return null;
-    try {
-        const data = JSON.parse(stdout);
-        if (!data || !data.id)
-            return null;
-        return data;
+    const parsed = parseBvNextPick(stdout);
+    if (parsed.ok) {
+        return parsed.data;
     }
-    catch {
-        console.warn(`[beads] bv --robot-next returned unparseable JSON`);
+    else {
+        log.warn("bv --robot-next parse failed", { error: parsed.error });
         return null;
     }
 }
@@ -180,10 +216,39 @@ export async function bvPlan(exec, cwd) {
     return stdout;
 }
 // ─── Beads Integration ────────────────────────────────────────
+function validateBeadStatus(s) {
+    if (s === "open" || s === "in_progress" || s === "closed" || s === "deferred")
+        return s;
+    return null;
+}
+function parseBead(raw) {
+    if (typeof raw !== "object" || raw === null)
+        return null;
+    const obj = raw;
+    if (typeof obj.id !== "string" || typeof obj.title !== "string")
+        return null;
+    return {
+        id: obj.id,
+        title: obj.title,
+        description: typeof obj.description === "string" ? obj.description : "",
+        status: validateBeadStatus(obj.status) ?? "open",
+        priority: typeof obj.priority === "number" ? obj.priority : 0,
+        type: typeof obj.type === "string" ? obj.type : "task",
+        labels: Array.isArray(obj.labels) ? obj.labels.filter((l) => typeof l === "string") : [],
+        estimate: typeof obj.estimate === "number" ? obj.estimate : undefined,
+        parent: typeof obj.parent === "string" ? obj.parent : undefined,
+        created_at: typeof obj.created_at === "string" ? obj.created_at : undefined,
+        updated_at: typeof obj.updated_at === "string" ? obj.updated_at : undefined,
+        closed_at: typeof obj.closed_at === "string" ? obj.closed_at : undefined,
+    };
+}
 /**
  * Reads all beads via `br list --json`.
  */
 export async function readBeads(exec, cwd) {
+    const cached = getCached("readBeads");
+    if (cached)
+        return cached;
     const result = await brExecJson(exec, [
         "list",
         "--json",
@@ -193,7 +258,10 @@ export async function readBeads(exec, cwd) {
     if (!result.ok)
         return [];
     const data = result.value;
-    return (Array.isArray(data) ? data : data?.issues ?? []);
+    const raw = Array.isArray(data) ? data : data?.issues ?? [];
+    const beads = raw.map(parseBead).filter((b) => b !== null);
+    setCache("readBeads", beads);
+    return beads;
 }
 /**
  * Reads ready beads (unblocked) via `br ready --json`.
@@ -204,7 +272,34 @@ export async function readyBeads(exec, cwd) {
         return [];
     const data = result.value;
     // br ready --json returns a bare array, br list --json returns {issues: [...]}
-    return (Array.isArray(data) ? data : data?.issues ?? []);
+    const raw = Array.isArray(data) ? data : data?.issues ?? [];
+    return raw.map(parseBead).filter((b) => b !== null);
+}
+/**
+ * Normalize the shape of `br show --json` output across br versions.
+ *
+ * br has returned the bead in several shapes historically:
+ *   - `{...}`              (object)                — older br
+ *   - `[{...}]`            (single-element array)  — current br v0.1.x
+ *   - `{ bead: {...} }`    (wrapped)               — observed in some forks
+ *   - `{ issues: [{...}] }` (plural wrapper)       — older parser adapters
+ *
+ * This helper unwraps any of the above to a single bead object. Returns the
+ * input unchanged if no known wrapper matches, letting `parseBead` make the
+ * final call on shape validity.
+ */
+export function unwrapBrShowValue(raw) {
+    if (Array.isArray(raw)) {
+        return raw.length > 0 ? raw[0] : raw;
+    }
+    if (raw && typeof raw === "object") {
+        const obj = raw;
+        if (obj.bead && typeof obj.bead === "object")
+            return obj.bead;
+        if (Array.isArray(obj.issues) && obj.issues.length > 0)
+            return obj.issues[0];
+    }
+    return raw;
 }
 /**
  * Gets a single bead by ID via `br show <id> --json`.
@@ -213,7 +308,8 @@ export async function getBeadById(exec, cwd, id) {
     const result = await brExecJson(exec, ["show", id, "--json"], { timeout: 10000, cwd });
     if (!result.ok)
         return null;
-    return result.value ?? null;
+    const unwrapped = unwrapBrShowValue(result.value);
+    return parseBead(unwrapped);
 }
 /**
  * Lists dependency IDs for a bead via `br dep list <id>`.
@@ -356,8 +452,11 @@ export async function validateBeads(exec, cwd) {
                 }
             }
         }
-        catch {
-            // Non-fatal
+        catch (err) {
+            log.warn('dependency detection failed', {
+                code: 'parse_failure',
+                cause: errMsg(err),
+            });
         }
     }
     // Warn about non-standard bead IDs (may break Agent Mail thread_id conventions)
@@ -430,8 +529,11 @@ export async function validateBeads(exec, cwd) {
             }
         }
     }
-    catch {
-        // Non-fatal
+    catch (err) {
+        log.warn('template hygiene detection failed', {
+            code: 'parse_failure',
+            cause: errMsg(err),
+        });
     }
     return { ok: !cycles && orphaned.length === 0 && templateIssues.length === 0, orphaned, cycles, warnings, shallowBeads, templateIssues };
 }
@@ -546,5 +648,37 @@ export function getBeadsSummary(beads) {
     if (deferred > 0)
         parts.push(`${deferred} deferred`);
     return parts.join(", ") || "unknown";
+}
+/**
+ * Verify a list of beads are closed. Returns each bead classified as
+ * closed / straggler / errored. Bypasses the read cache so reconciliation
+ * sees freshly-updated state.
+ */
+export async function verifyBeadsClosed(exec, cwd, beadIds) {
+    const closed = [];
+    const stragglers = [];
+    const errors = {};
+    for (const id of beadIds) {
+        const result = await brExecJson(exec, ["show", id, "--json"], { timeout: 10000, cwd });
+        if (!result.ok) {
+            errors[id] = result.error.brError?.message ?? result.error.stderr ?? `exit ${result.error.exitCode ?? "?"}`;
+            continue;
+        }
+        // br show --json returns [{...}] (single-element array) in current br versions.
+        // Unwrap before parsing. Also handle { bead: {...} } / { issues: [{...}] } wrappers defensively.
+        const unwrapped = unwrapBrShowValue(result.value);
+        const bead = parseBead(unwrapped);
+        if (!bead) {
+            errors[id] = "parse_failure: br show output did not match Bead shape";
+            continue;
+        }
+        if (bead.status === "closed") {
+            closed.push(id);
+        }
+        else {
+            stragglers.push({ id, status: bead.status });
+        }
+    }
+    return { closed, stragglers, errors };
 }
 //# sourceMappingURL=beads.js.map

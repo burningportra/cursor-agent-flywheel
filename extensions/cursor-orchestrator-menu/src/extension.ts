@@ -1,7 +1,7 @@
 import * as path from "node:path";
 import * as vscode from "vscode";
 import { deleteCheckpoint, readCheckpoint } from "./checkpoint";
-import { buildOrchestratePrompt, buildSetupPrompt, buildStatusPrompt } from "./prompts";
+import { buildOrchestratePrompt, buildRecoverGatesPrompt, buildSetupPrompt, buildStatusPrompt } from "./prompts";
 import { OrchestratorSidebar } from "./tree/sidebarTree";
 
 const OUT = "Cursor Orchestrator";
@@ -14,6 +14,7 @@ type MenuId =
   | "book"
   | "setup"
   | "status"
+  | "recover"
   | "checkpoint";
 
 interface MenuItem extends vscode.QuickPickItem {
@@ -137,8 +138,13 @@ async function openMainMenu(
         orchId: "status",
       },
       {
+        label: "$(debug-restart) Copy prompt: recover-gates",
+        description: "Wave review + wrap-up MCP menus (/recover-gates)",
+        orchId: "recover",
+      },
+      {
         label: "$(info) Show checkpoint summary",
-        description: "Reads .pi-orchestrator/checkpoint.json",
+        description: "Reads .pi-flywheel/checkpoint.json",
         orchId: "checkpoint",
       },
     ],
@@ -175,6 +181,9 @@ async function openMainMenu(
       break;
     case "status":
       await copyPrompt(buildStatusPrompt(r), "orchestrate-status prompt");
+      break;
+    case "recover":
+      await copyPrompt(buildRecoverGatesPrompt(r), "recover-gates prompt");
       break;
     case "checkpoint": {
       const cp = readCheckpoint(r);
@@ -218,7 +227,7 @@ async function orchestrateWizard(
       },
       {
         label: "$(trash) Start fresh",
-        description: "Delete .pi-orchestrator/checkpoint.json (if present)",
+        description: "Delete .pi-flywheel/checkpoint.json (if present)",
         fresh: true,
       },
     ],

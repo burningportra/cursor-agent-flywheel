@@ -1,36 +1,50 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { tmpdir } from 'node:os';
-import type { ToolContext, McpToolResult, CandidateIdea } from '../types.js';
+import { homedir } from 'node:os';
+import type { ToolContext, McpToolResult, CandidateIdea, DiscoverArgs } from '../types.js';
+import { makeNextToolStep, makeToolError, makeToolResult } from './shared.js';
 
-interface DiscoverArgs {
-  cwd: string;
-  ideas: CandidateIdea[];
+/**
+ * R-010 (agent-ergonomics audit pass 3) — resolve the discovery-artifact
+ * directory using XDG conventions instead of /tmp.
+ *
+ * Precedence:
+ *   1. $XDG_STATE_HOME/agent-flywheel/discovery
+ *   2. ~/.local/state/agent-flywheel/discovery (XDG default)
+ *
+ * Why: /tmp/agent-flywheel-discovery collided across cycles and
+ * disappeared on reboot. The XDG state path survives reboots and
+ * gives agents a stable place to look across sessions.
+ */
+export function resolveDiscoveryArtifactDir(): string {
+  const xdgState = process.env.XDG_STATE_HOME?.trim();
+  const root = xdgState && xdgState.length > 0
+    ? xdgState
+    : join(homedir(), '.local', 'state');
+  return join(root, 'agent-flywheel', 'discovery');
 }
 
 /**
- * orch_discover — Accept LLM-generated ideas and store them in state.
+ * flywheel_discover — Accept LLM-generated ideas and store them in state.
  *
  * The calling Claude agent generates 5-15 ideas based on the repo profile
- * from orch_profile, then calls this tool with the structured list.
- * After storing, it instructs the agent to call orch_select.
+ * from flywheel_profile, then calls this tool with the structured list.
+ * After storing, it instructs the agent to call flywheel_select.
  */
 export async function runDiscover(ctx: ToolContext, args: DiscoverArgs): Promise<McpToolResult> {
   const { state, saveState } = ctx;
 
   if (!state.repoProfile) {
-    return {
-      content: [{ type: 'text', text: 'Error: No repo profile found. Call orch_profile first.' }],
-      isError: true,
-    };
+    return makeToolError('flywheel_discover', state.phase, 'missing_prerequisite', 'Error: No repo profile found. Call flywheel_profile first.', {
+      hint: 'Call flywheel_profile to generate a repo profile before calling flywheel_discover.',
+    });
   }
 
   const ideas = (args.ideas || []) as CandidateIdea[];
   if (ideas.length === 0) {
-    return {
-      content: [{ type: 'text', text: 'Error: No ideas provided. Pass at least 3 ideas in the ideas array.' }],
-      isError: true,
-    };
+    return makeToolError('flywheel_discover', state.phase, 'invalid_input', 'Error: No ideas provided. Pass at least 3 ideas in the ideas array.', {
+      hint: 'Generate 5-15 ideas from the repo profile and pass them in the ideas array.',
+    });
   }
 
   state.candidateIdeas = ideas;
@@ -40,6 +54,8 @@ export async function runDiscover(ctx: ToolContext, args: DiscoverArgs): Promise
   // Write artifact for reference
   const topIdeas = ideas.filter(i => i.tier === 'top');
   const honorableIdeas = ideas.filter(i => i.tier === 'honorable' || !i.tier);
+  const duelIdeas = ideas.filter(i => i.provenance?.source === 'duel' || i.provenance?.source === 'reality-check-duel');
+  const contestedIdeas = duelIdeas.filter(i => i.provenance?.contested === true);
   const artifactLines: string[] = [
     `# Discovery Ideas — ${new Date().toISOString().slice(0, 10)}`,
     '',
@@ -75,32 +91,77 @@ export async function runDiscover(ctx: ToolContext, args: DiscoverArgs): Promise
     }
   }
   try {
-    const artifactDir = join(tmpdir(), 'claude-orchestrator-discovery');
+    // R-010 — was /tmp/agent-flywheel-discovery (collided across cycles,
+    // wiped on reboot). Now XDG state path; content-addressed by
+    // cycleStartSha when present, else timestamp.
+    const cycleSha = (state as { cycleStartSha?: string }).cycleStartSha;
+    const subdir = cycleSha && cycleSha.length >= 7 ? cycleSha.slice(0, 12) : `unattached-${Date.now()}`;
+    const artifactDir = join(resolveDiscoveryArtifactDir(), subdir);
     mkdirSync(artifactDir, { recursive: true });
-    writeFileSync(join(artifactDir, `ideas-${Date.now()}.md`), artifactLines.join('\n'), 'utf8');
+    writeFileSync(join(artifactDir, 'ideas.md'), artifactLines.join('\n'), 'utf8');
   } catch { /* best-effort */ }
 
   // Format idea list for the agent
   const ideaList = ideas.map((idea, i) => {
     let line = `${i + 1}. **[${idea.category}] ${idea.title}** (effort: ${idea.effort}, impact: ${idea.impact})`;
     if (idea.tier === 'honorable') line += ' _(honorable mention)_';
+    if (idea.provenance?.contested) line += ' ⚔️ _contested_';
     line += `\n   ${idea.description}`;
     if (idea.scores) {
       const s = idea.scores;
       const weighted = s.useful * 2 + s.pragmatic * 2 + s.accretive * 1.5 + s.robust + s.ergonomic;
       line += `\n   Score: ${weighted.toFixed(1)}/37.5`;
     }
+    if (idea.provenance?.agentScores) {
+      const parts = Object.entries(idea.provenance.agentScores).map(([k, v]) => `${k}=${v}`);
+      line += `\n   Cross-scores (0-1000): ${parts.join(', ')}`;
+    }
+    if (idea.provenance?.survivingCritique) {
+      line += `\n   ⚠ Surviving critique: ${idea.provenance.survivingCritique}`;
+    }
     if (idea.rationale) line += `\n   _${idea.rationale}_`;
     return line;
   }).join('\n\n');
 
-  const text = `**NEXT: Call \`orch_select\` with the user's chosen goal.**
+  const provenanceHint = duelIdeas.length > 0
+    ? `\n\nThis discovery batch came out of a /dueling-idea-wizards run (${duelIdeas.length} adversarially cross-scored idea${duelIdeas.length === 1 ? '' : 's'}, ${contestedIdeas.length} contested). When you present these to the user, group them as **Consensus winners** (provenance.contested=false) and **Contested** (provenance.contested=true) so the user sees where the agents disagreed. Carry the surviving critique into the bead body's Provenance block at bead-creation time.`
+    : '';
 
-Present these ${ideas.length} ideas to the user (${topIdeas.length} top, ${honorableIdeas.length} honorable) and ask them to choose one. Then call \`orch_select\` with their chosen goal.
+  const text = `**NEXT: Call \`flywheel_select\` with the user's chosen goal.**
+
+Present these ${ideas.length} ideas to the user (${topIdeas.length} top, ${honorableIdeas.length} honorable) and ask them to choose one. Then call \`flywheel_select\` with their chosen goal.${provenanceHint}
 
 ---
 
 ${ideaList}`;
 
-  return { content: [{ type: 'text', text }] };
+  return makeToolResult(text, {
+    tool: 'flywheel_discover',
+    version: 1 as const,
+    status: 'ok' as const,
+    phase: state.phase,
+    nextStep: makeNextToolStep('call_tool', 'Present the ideas to the user, then call flywheel_select with the chosen goal.', {
+      tool: 'flywheel_select',
+      argsSchemaHint: { goal: 'string' },
+    }),
+    data: {
+      kind: 'ideas_registered' as const,
+      totalIdeas: ideas.length,
+      topIdeas: topIdeas.length,
+      honorableIdeas: honorableIdeas.length,
+      ideaIds: ideas.map(idea => idea.id),
+      ideas: ideas.map(idea => ({
+        id: idea.id,
+        title: idea.title,
+        category: idea.category,
+        effort: idea.effort,
+        impact: idea.impact,
+        tier: idea.tier,
+        rationale: idea.rationale,
+        provenance: idea.provenance,
+      })),
+      duelIdeas: duelIdeas.length,
+      contestedIdeas: contestedIdeas.length,
+    },
+  });
 }

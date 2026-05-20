@@ -1,0 +1,33 @@
+---
+description: Flywheel context budget — avoid loading 60k+ skill bodies and duplicate gate JSON
+alwaysApply: true
+---
+
+# Context budget (Cursor)
+
+## Gate tools (wave review, wrap-up, duel model gate)
+
+- MCP returns **compact** payload: `gateMeta`, `askQuestion`, `actions` — **not** full `userGate.options` or `coordinatorAction` strings.
+- **Do not** paste or summarize the whole tool JSON in chat.
+- Call **`AskQuestion`** once with `data.askQuestion`; map the clicked id via `data.actions` (e.g. `looks-good-all`, `fresh-eyes`).
+- Phase docs: `start_review` / `start_wrapup` / etc. — one phase per turn.
+- `/start` boot: `flywheel_observe` (compact) → `flywheel_start_menu` or `start_ceremony` (~9k) → `start_discover` (~2–3k) only when Step 0 routes past the menu.
+- **Never** load ceremony + discover + a phase skill in one turn.
+
+## flywheel_get_skill
+
+- Default: text is a **pointer**; body is in `structuredContent.data.skill.body` only.
+- Do **not** call `includeBodyInText: true` unless the user explicitly needs a markdown dump in chat.
+- Do **not** load multiple phase skills in one turn (pick one: `start_review`, `start_implement`, `start_wrapup`, `start_planning`).
+
+## Recovery (`/recover-gates`)
+
+- `flywheel_wave_review_gate` → AskQuestion → execute action → optional `flywheel_wrap_up_gate`.
+- Skip `br list` if bead ids are already in `gateMeta.beadIds`.
+- Skip reading `.pi-flywheel/checkpoint.json` unless phase/beads are unknown.
+
+## Avoid unless necessary
+
+- `flywheel_capabilities` / `flywheel_robot_docs` (large contract dumps)
+- `start_ceremony` / `start_discover` or multiple phase skills in recover/review-only sessions
+- Re-reading the same command `.md` file after MCP already returned the gate

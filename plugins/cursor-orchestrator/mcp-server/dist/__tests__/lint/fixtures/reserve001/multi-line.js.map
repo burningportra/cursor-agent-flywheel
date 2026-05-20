@@ -1,0 +1,1 @@
+{"version":3,"file":"multi-line.js","sourceRoot":"","sources":["../../../../../src/__tests__/lint/fixtures/reserve001/multi-line.ts"],"names":[],"mappings":"AAEA,MAAM,CAAC,KAAK,UAAU,SAAS,CAAC,IAAa;IAC3C,OAAO,YAAY,CACjB,IAAI;IACJ,uBAAuB;IACvB,wBAAwB,EACxB;QACE,WAAW,EAAE,MAAM;QACnB,UAAU,EAAE,GAAG;QACf,KAAK,EAAE,CAAC,YAAY,CAAC;KACtB,CACF,CAAC;AACJ,CAAC"}

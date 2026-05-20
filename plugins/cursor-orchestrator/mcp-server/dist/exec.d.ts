@@ -1,7 +1,11 @@
-export type ExecFn = (cmd: string, args: string[], opts?: {
+export type ExecOptions = {
     timeout?: number;
     cwd?: string;
-}) => Promise<{
+    signal?: AbortSignal;
+    /** When set, written to subprocess stdin (required for `claude --print` on CC 2.1.145+). */
+    input?: string;
+};
+export type ExecFn = (cmd: string, args: string[], opts?: ExecOptions) => Promise<{
     code: number;
     stdout: string;
     stderr: string;

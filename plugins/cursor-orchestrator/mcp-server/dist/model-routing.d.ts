@@ -24,6 +24,7 @@ export interface ModelRoute {
 export interface ModelTier {
     implementation: string;
     review: string;
+    fallbacks?: string[];
 }
 /**
  * Classify a bead's complexity based on heuristics.

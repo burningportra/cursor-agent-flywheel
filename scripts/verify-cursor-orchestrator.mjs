@@ -12,6 +12,19 @@ const repoRoot = process.cwd();
 const pluginRoot = path.join(repoRoot, "plugins", "cursor-orchestrator");
 const commandsDir = path.join(pluginRoot, "commands");
 
+/** Upstream flywheel command set (plugin); workspace adds flywheel.md + orchestrate-* aliases. */
+const REQUIRED_PLUGIN_COMMANDS = [
+  "start",
+  "flywheel-setup",
+  "flywheel-doctor",
+  "flywheel-status",
+  "flywheel-swarm",
+  "flywheel-recover-gates",
+  "recover-gates",
+  "flywheel-stop",
+  "memory",
+];
+
 async function assertFile(absPath, label) {
   try {
     const st = await fs.stat(absPath);
@@ -51,8 +64,13 @@ async function listCommandStems(dir) {
 
 /**
  * Repo-root `.cursor/commands` must mirror `plugins/cursor-orchestrator/commands`
- * (same basenames; each pair should resolve to the same real path — symlinks OK).
+ * (same basenames; symlink to same inode OR byte-identical copy).
  */
+async function fileContentMatches(pluginFile, workspaceFile) {
+  const [a, b] = await Promise.all([fs.readFile(pluginFile), fs.readFile(workspaceFile)]);
+  return a.equals(b);
+}
+
 async function assertWorkspaceSlashCommandsParity(pluginStems) {
   const workspaceCommandsDir = path.join(repoRoot, ".cursor", "commands");
   let wsStems;
@@ -60,24 +78,18 @@ async function assertWorkspaceSlashCommandsParity(pluginStems) {
     wsStems = await listCommandStems(workspaceCommandsDir);
   } catch {
     console.error(`Missing or unreadable workspace commands directory: ${workspaceCommandsDir}`);
-    console.error("Add symlinks from .cursor/commands/<name>.md → plugins/cursor-orchestrator/commands/<name>.md");
+    console.error("Run: node scripts/link-cursor-commands.mjs");
     process.exit(1);
   }
 
   const pSet = new Set(pluginStems);
   const wSet = new Set(wsStems);
   const onlyPlugin = pluginStems.filter((n) => !wSet.has(n));
-  const onlyWorkspace = wsStems.filter((n) => !pSet.has(n));
 
-  if (onlyPlugin.length > 0 || onlyWorkspace.length > 0) {
-    if (onlyPlugin.length > 0) {
-      console.error("Slash command parity: present under plugins/cursor-orchestrator/commands but missing in .cursor/commands:");
-      console.error(`  ${onlyPlugin.join(", ")}`);
-    }
-    if (onlyWorkspace.length > 0) {
-      console.error("Slash command parity: present under .cursor/commands but missing in plugins/cursor-orchestrator/commands:");
-      console.error(`  ${onlyWorkspace.join(", ")}`);
-    }
+  if (onlyPlugin.length > 0) {
+    console.error("Slash command parity: present under plugins/cursor-orchestrator/commands but missing in .cursor/commands:");
+    console.error(`  ${onlyPlugin.join(", ")}`);
+    console.error("Run: node scripts/link-cursor-commands.mjs");
     process.exit(1);
   }
 
@@ -94,12 +106,15 @@ async function assertWorkspaceSlashCommandsParity(pluginStems) {
       process.exit(1);
     }
     if (rpPlugin !== rpWorkspace) {
-      console.error(
-        `Slash command parity: ${name}.md — workspace file resolves to:\n  ${rpWorkspace}\n` +
-          `but plugin file resolves to:\n  ${rpPlugin}\n` +
-          "Expected the same real path (use symlinks from .cursor/commands to the plugin commands).",
-      );
-      process.exit(1);
+      const same = await fileContentMatches(pluginFile, workspaceFile);
+      if (!same) {
+        console.error(
+          `Slash command parity: ${name}.md — workspace file is out of date.\n` +
+            `  workspace: ${rpWorkspace}\n  plugin:    ${rpPlugin}\n` +
+            "Run: node scripts/link-cursor-commands.mjs",
+        );
+        process.exit(1);
+      }
     }
   }
 }
@@ -161,8 +176,30 @@ async function main() {
     console.error("hooks/hooks.json: expected non-empty sessionStart and postToolUse");
     process.exit(1);
   }
+  if (!hooksFile.hooks?.preToolUse?.length) {
+    console.error("hooks/hooks.json: expected non-empty preToolUse (agent-mail guard)");
+    process.exit(1);
+  }
+  const endHooks = hooksFile.hooks?.sessionEnd?.length || hooksFile.hooks?.stop?.length;
+  if (!endHooks) {
+    console.error("hooks/hooks.json: expected sessionEnd or stop for agent-mail reservation release");
+    process.exit(1);
+  }
+
+  await assertFile(path.join(pluginRoot, "SYNC_MANIFEST.json"), "SYNC_MANIFEST.json");
+  await assertFile(
+    path.join(pluginRoot, "mcp-server", "dist", "skills.bundle.json"),
+    "skills.bundle.json",
+  );
+  await assertFile(path.join(pluginRoot, "flywheel.config.yaml"), "flywheel.config.yaml");
 
   const md = await listCommandStems(commandsDir);
+  for (const stem of REQUIRED_PLUGIN_COMMANDS) {
+    if (!md.includes(stem)) {
+      console.error(`Missing required plugin command: ${stem}.md`);
+      process.exit(1);
+    }
+  }
 
   if (md.length === 0) {
     console.error(`No .md command files under ${commandsDir}`);
@@ -179,8 +216,16 @@ async function main() {
     process.exit(validate.status ?? 1);
   }
 
+  const serverJs = path.join(pluginRoot, "mcp-server", "dist", "server.js");
+  const serverSrc = await fs.readFile(serverJs, "utf8");
+  const flywheelTools = (serverSrc.match(/name: 'flywheel_/g) ?? []).length;
+  if (flywheelTools < 15) {
+    console.error(`Expected >= 15 flywheel_* tool definitions in dist/server.js, got ${flywheelTools}`);
+    process.exit(1);
+  }
+
   console.log(
-    `cursor-orchestrator: lockfile + dist + launcher + mcp.json (url+stdio) + hooks + ${md.length} commands + .cursor/commands parity + validate-template OK`,
+    `cursor-orchestrator: lockfile + dist + bundle + SYNC_MANIFEST + hooks (incl. preToolUse) + ${md.length} commands + ${flywheelTools} flywheel_* tools + .cursor/commands parity + validate-template OK`,
   );
 }
 

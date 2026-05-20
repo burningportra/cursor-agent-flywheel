@@ -1,28 +1,84 @@
-import type { ToolContext, McpToolResult, OrchestratorState, RepoProfile, ScanResult } from '../types.js';
-import { formatRepoProfile } from './shared.js';
+import type { ToolContext, McpToolResult, FlywheelState, RepoProfile, ScanResult, ProfileArgs } from '../types.js';
+import { formatRepoProfile, makeNextToolStep, makeToolResult } from './shared.js';
+import { profileRepo, loadCachedProfile, saveCachedProfile } from '../profiler.js';
+import { parseBrList } from '../parsers.js';
+import { createLogger } from '../logger.js';
+import { runOpeningCeremony } from '../opening-ceremony.js';
+import { VERSION } from '../version.js';
+import { errMsg, makeFlywheelErrorResult } from '../errors.js';
 
-interface ProfileArgs {
-  cwd: string;
-  goal?: string;
-}
+const log = createLogger('profile');
 
 /**
- * orch_profile — Scan the current repo and build a profile.
+ * flywheel_profile — Scan the current repo and build a profile.
  *
  * Runs git log, finds key files, detects language/framework/CI/test tooling.
  * Detects the br CLI (beads) for coordination backend.
  * Returns a structured profile and discovery instructions.
+ *
+ * Uses a git-HEAD-keyed cache to skip redundant scans. Pass force=true to bypass.
  */
 export async function runProfile(ctx: ToolContext, args: ProfileArgs): Promise<McpToolResult> {
-  const { exec, cwd, state, saveState } = ctx;
+  const { exec, cwd, state, saveState, signal } = ctx;
 
   state.phase = 'profiling';
 
-  // ── Collect repo signals ──────────────────────────────────────
-  const profile = await buildRepoProfile(exec, cwd);
+  // ── Opening ceremony (shows version banner) ──────────────────
+  const ceremonyWriter = { write: async (text: string) => { log.info(text); } };
+  const ceremonyResult = await runOpeningCeremony(ceremonyWriter, { interactive: false });
+  const ceremonyBanner = `░▒▓ CLAUDE // AGENT-FLYWHEEL v${VERSION} ▓▒░`;
+
+  // ── Try cache first (unless forced) ──────────────────────────
+  let profile: RepoProfile;
+  let fromCache = false;
+
+  if (!args.force) {
+    let cached: RepoProfile | null;
+    try {
+      cached = await loadCachedProfile(exec, cwd);
+    } catch (err: unknown) {
+      return makeFlywheelErrorResult('flywheel_profile', state.phase, {
+        code: 'parse_failure',
+        message: 'Failed to load cached profile.',
+        retryable: true,
+        hint: 'Pass force:true to bypass cache',
+        cause: errMsg(err),
+      });
+    }
+
+    if (cached) {
+      profile = cached;
+      fromCache = true;
+    } else {
+      try {
+        profile = await profileRepo(exec, cwd);
+      } catch (err: unknown) {
+        return makeFlywheelErrorResult('flywheel_profile', state.phase, {
+          code: 'cli_failure',
+          message: 'Failed to profile repository.',
+          hint: 'Verify required CLIs (`git`, `find`, `grep`, `head`) are available, then retry.',
+          cause: errMsg(err),
+        });
+      }
+      // Fire-and-forget: don't block return on cache write
+      saveCachedProfile(exec, cwd, profile).catch(() => {});
+    }
+  } else {
+    try {
+      profile = await profileRepo(exec, cwd);
+    } catch (err: unknown) {
+      return makeFlywheelErrorResult('flywheel_profile', state.phase, {
+        code: 'cli_failure',
+        message: 'Failed to profile repository.',
+        hint: 'Verify required CLIs (`git`, `find`, `grep`, `head`) are available, then retry.',
+        cause: errMsg(err),
+      });
+    }
+    saveCachedProfile(exec, cwd, profile).catch(() => {});
+  }
 
   // ── Detect coordination backends ──────────────────────────────
-  const brResult = await exec('br', ['--version'], { cwd, timeout: 5000 });
+  const brResult = await exec('br', ['--version'], { cwd, timeout: 5000, signal });
   const hasBeads = brResult.code === 0;
 
   const coordinationBackend = {
@@ -34,7 +90,7 @@ export async function runProfile(ctx: ToolContext, args: ProfileArgs): Promise<M
 
   state.repoProfile = profile;
   state.coordinationBackend = coordinationBackend;
-  state.coordinationStrategy = coordinationStrategy as OrchestratorState['coordinationStrategy'];
+  state.coordinationStrategy = coordinationStrategy as FlywheelState['coordinationStrategy'];
   state.coordinationMode ??= 'worktree';
   if (args.goal) state.selectedGoal = args.goal;
   state.phase = 'discovering';
@@ -53,20 +109,26 @@ export async function runProfile(ctx: ToolContext, args: ProfileArgs): Promise<M
 
   // ── Beads status ──────────────────────────────────────────────
   let beadStatus = '';
+  let openBeadCount = 0;
+  let deferredBeadCount = 0;
   if (hasBeads) {
-    const brListResult = await exec('br', ['list', '--json'], { cwd, timeout: 10000 });
+    const brListResult = await exec('br', ['list', '--json'], { cwd, timeout: 10000, signal });
     if (brListResult.code === 0) {
-      try {
-        const beads: any[] = JSON.parse(brListResult.stdout);
-        const open = beads.filter((b: any) => b.status === 'open' || b.status === 'in_progress');
-        const deferred = beads.filter((b: any) => b.status === 'deferred');
+      const parsed = parseBrList(brListResult.stdout);
+      if (parsed.ok) {
+        const open = parsed.data.filter(b => b.status === 'open' || b.status === 'in_progress');
+        const deferred = parsed.data.filter(b => b.status === 'deferred');
+        openBeadCount = open.length;
+        deferredBeadCount = deferred.length;
         if (open.length > 0 || deferred.length > 0) {
           beadStatus = `\n\n### Existing Beads\n- ${open.length} open/in-progress\n- ${deferred.length} deferred`;
           if (open.length > 0) {
-            beadStatus += `\n\nTo work on existing beads, call \`orch_approve_beads\` with action="start".`;
+            beadStatus += `\n\nTo work on existing beads, call \`flywheel_approve_beads\` with action="start".`;
           }
         }
-      } catch { /* parse failure ok */ }
+      } else {
+        log.warn('Failed to parse br list output', { error: parsed.error });
+      }
     }
   }
 
@@ -77,157 +139,71 @@ export async function runProfile(ctx: ToolContext, args: ProfileArgs): Promise<M
   const roadmap = `**Workflow:** profile → discover → select → plan → approve_beads → implement → review`;
 
   const goalSection = args.goal
-    ? `\n\n### Goal\n${args.goal}\n\nSince a goal was provided, you can skip discovery and call \`orch_select\` directly with this goal, or call \`orch_discover\` to generate alternatives.`
-    : `\n\n### Next Step\nCall \`orch_discover\` with 5-15 project ideas based on this profile.`;
+    ? `\n\n### Goal\n${args.goal}\n\nSince a goal was provided, you can skip discovery and call \`flywheel_select\` directly with this goal, or call \`flywheel_discover\` to generate alternatives.`
+    : `\n\n### Next Step\nCall \`flywheel_discover\` with 5-15 project ideas based on this profile.`;
 
   const formatted = formatRepoProfile(profile);
 
-  const text = `${roadmap}\n\n${coordLine}${foundationWarning}${beadStatus}${goalSection}\n\n---\n\n${formatted}`;
+  const cacheNote = fromCache
+    ? `\n\n> Profile loaded from cache (git HEAD unchanged). Pass \`force: true\` to re-scan.`
+    : '';
 
-  return { content: [{ type: 'text', text }] };
-}
+  const text = `${ceremonyBanner}\n\n${roadmap}\n\n${coordLine}${cacheNote}${foundationWarning}${beadStatus}${goalSection}\n\n---\n\n${formatted}`;
 
-// ─── Repo scanning ────────────────────────────────────────────
+  const nextStep = args.goal
+    ? makeNextToolStep('present_choices', 'A goal was provided. Either proceed directly to flywheel_select or run flywheel_discover to generate alternatives.', {
+        options: [
+          {
+            id: 'select-provided-goal',
+            label: 'Use the provided goal',
+            description: 'Skip discovery and continue with flywheel_select using the supplied goal.',
+            tool: 'flywheel_select',
+            args: { goal: args.goal },
+          },
+          {
+            id: 'discover-alternatives',
+            label: 'Discover alternatives',
+            description: 'Generate alternative goals with flywheel_discover before selecting one.',
+            tool: 'flywheel_discover',
+            args: { ideas: 'CandidateIdea[]' },
+          },
+        ],
+      })
+    : makeNextToolStep('call_tool', 'Call flywheel_discover with candidate ideas based on the repo profile.', {
+        tool: 'flywheel_discover',
+        argsSchemaHint: { ideas: 'CandidateIdea[]' },
+      });
 
-async function buildRepoProfile(
-  exec: ToolContext['exec'],
-  cwd: string
-): Promise<RepoProfile> {
-  const profile: RepoProfile = {
-    name: '',
-    languages: [],
-    frameworks: [],
-    structure: '',
-    entrypoints: [],
-    recentCommits: [],
-    hasTests: false,
-    hasDocs: false,
-    hasCI: false,
-    todos: [],
-    keyFiles: {},
-  };
-
-  // Name from git remote or directory
-  const remoteResult = await exec('git', ['remote', 'get-url', 'origin'], { cwd, timeout: 5000 });
-  if (remoteResult.code === 0) {
-    const url = remoteResult.stdout.trim();
-    const match = url.match(/\/([^/]+?)(?:\.git)?$/);
-    if (match) profile.name = match[1];
-  }
-  if (!profile.name) {
-    const parts = cwd.split('/');
-    profile.name = parts[parts.length - 1] || 'project';
-  }
-
-  // Recent commits
-  const gitLogResult = await exec(
-    'git', ['log', '--oneline', '--format=%H|%s|%ai|%an', '-20'],
-    { cwd, timeout: 10000 }
-  );
-  if (gitLogResult.code === 0) {
-    for (const line of gitLogResult.stdout.trim().split('\n').filter(Boolean)) {
-      const [hash, message, date, author] = line.split('|');
-      if (hash && message) {
-        profile.recentCommits.push({ hash: hash.slice(0, 7), message, date: date || '', author: author || '' });
-      }
-    }
-  }
-
-  // File structure
-  const findResult = await exec(
-    'find', ['.', '-maxdepth', '3', '-not', '-path', './.git/*', '-not', '-path', './node_modules/*', '-not', '-path', './.claude-orchestrator/*'],
-    { cwd, timeout: 10000 }
-  );
-  if (findResult.code === 0) {
-    profile.structure = findResult.stdout.slice(0, 3000);
-  }
-
-  // Language detection from file extensions
-  const extensions: Record<string, number> = {};
-  for (const line of (findResult.stdout || '').split('\n')) {
-    const match = line.match(/\.([a-z]+)$/);
-    if (match) extensions[match[1]] = (extensions[match[1]] || 0) + 1;
-  }
-  const langMap: Record<string, string> = {
-    ts: 'TypeScript', js: 'JavaScript', py: 'Python', rs: 'Rust',
-    go: 'Go', java: 'Java', rb: 'Ruby', cs: 'C#', cpp: 'C++', c: 'C',
-    swift: 'Swift', kt: 'Kotlin', php: 'PHP',
-  };
-  profile.languages = Object.entries(extensions)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 5)
-    .map(([ext]) => langMap[ext])
-    .filter(Boolean) as string[];
-
-  // Framework detection from key files
-  const keyFileNames = [
-    'package.json', 'Cargo.toml', 'go.mod', 'requirements.txt', 'pyproject.toml',
-    'CLAUDE.md', 'AGENTS.md', 'README.md', 'README',
-    '.github/workflows', 'Makefile', 'Dockerfile', 'docker-compose.yml',
-  ];
-  for (const name of keyFileNames) {
-    const catResult = await exec('cat', [name], { cwd, timeout: 3000 });
-    if (catResult.code === 0 && catResult.stdout.trim()) {
-      profile.keyFiles[name] = catResult.stdout.slice(0, 500);
-    }
-  }
-
-  // Package manager detection
-  if (profile.keyFiles['package.json']) {
-    profile.packageManager = 'npm';
-    const pkg = tryParse(profile.keyFiles['package.json']);
-    if (pkg) {
-      const deps = { ...pkg.dependencies, ...pkg.devDependencies };
-      if (deps['next']) profile.frameworks.push('Next.js');
-      if (deps['react']) profile.frameworks.push('React');
-      if (deps['vue']) profile.frameworks.push('Vue');
-      if (deps['express']) profile.frameworks.push('Express');
-      if (deps['fastify']) profile.frameworks.push('Fastify');
-      if (deps['jest'] || deps['vitest'] || deps['mocha']) {
-        profile.hasTests = true;
-        profile.testFramework = deps['jest'] ? 'jest' : deps['vitest'] ? 'vitest' : 'mocha';
-      }
-    }
-  }
-
-  // CI detection
-  if (profile.keyFiles['.github/workflows']) {
-    profile.hasCI = true;
-    profile.ciPlatform = 'GitHub Actions';
-  }
-  const lsResult = await exec('ls', ['.github/workflows'], { cwd, timeout: 3000 });
-  if (lsResult.code === 0 && lsResult.stdout.trim()) {
-    profile.hasCI = true;
-    profile.ciPlatform = 'GitHub Actions';
-  }
-
-  // Docs detection
-  const docsResult = await exec('ls', ['docs'], { cwd, timeout: 3000 });
-  if (docsResult.code === 0) profile.hasDocs = true;
-
-  // TODOs
-  const todoResult = await exec(
-    'grep', ['-rn', '--include=*.ts', '--include=*.js', '--include=*.py', '--include=*.go', '--include=*.rs',
-              '-E', 'TODO|FIXME|HACK|XXX', '.', '--exclude-dir=node_modules', '--exclude-dir=.git'],
-    { cwd, timeout: 10000 }
-  );
-  if (todoResult.code === 0) {
-    for (const line of todoResult.stdout.split('\n').slice(0, 20)) {
-      const match = line.match(/^(.+):(\d+):.*(TODO|FIXME|HACK|XXX)[:\s]+(.+)$/);
-      if (match) {
-        profile.todos.push({
-          file: match[1],
-          line: parseInt(match[2], 10),
-          text: match[4].trim().slice(0, 100),
-          type: match[3] as 'TODO' | 'FIXME' | 'HACK' | 'XXX',
-        });
-      }
-    }
-  }
-
-  return profile;
-}
-
-function tryParse(json: string): any {
-  try { return JSON.parse(json); } catch { return null; }
+  return makeToolResult(text, {
+    tool: 'flywheel_profile',
+    version: 1 as const,
+    status: 'ok' as const,
+    phase: state.phase,
+    nextStep,
+    data: {
+      kind: 'profile_ready' as const,
+      fromCache,
+      selectedGoal: state.selectedGoal,
+      coordination: {
+        backend: coordinationStrategy,
+        beadsAvailable: hasBeads,
+      },
+      foundationGaps,
+      existingBeads: {
+        openCount: openBeadCount,
+        deferredCount: deferredBeadCount,
+      },
+      profileSummary: {
+        name: profile.name,
+        languages: profile.languages,
+        frameworks: profile.frameworks,
+        hasTests: profile.hasTests,
+        hasDocs: profile.hasDocs,
+        hasCI: profile.hasCI,
+        testFramework: profile.testFramework,
+        ciPlatform: profile.ciPlatform,
+        entrypoints: profile.entrypoints,
+      },
+    },
+  });
 }

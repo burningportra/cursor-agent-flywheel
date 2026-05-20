@@ -1,5 +1,7 @@
 import type { ExecFn } from "./exec.js";
 import type { Bead, BvInsights, BvNextPick } from "./types.js";
+/** Clear all session caches. Call after bead mutations (create/update/close). */
+export declare function invalidateBeadCache(): void;
 /**
  * Check if a bead ID matches the expected br-NNN pattern.
  * The br CLI generates IDs like "br-1", "br-42", "br-123".
@@ -71,6 +73,20 @@ export declare function readBeads(exec: ExecFn, cwd: string): Promise<Bead[]>;
  */
 export declare function readyBeads(exec: ExecFn, cwd: string): Promise<Bead[]>;
 /**
+ * Normalize the shape of `br show --json` output across br versions.
+ *
+ * br has returned the bead in several shapes historically:
+ *   - `{...}`              (object)                — older br
+ *   - `[{...}]`            (single-element array)  — current br v0.1.x
+ *   - `{ bead: {...} }`    (wrapped)               — observed in some forks
+ *   - `{ issues: [{...}] }` (plural wrapper)       — older parser adapters
+ *
+ * This helper unwraps any of the above to a single bead object. Returns the
+ * input unchanged if no known wrapper matches, letting `parseBead` make the
+ * final call on shape validity.
+ */
+export declare function unwrapBrShowValue(raw: unknown): unknown;
+/**
  * Gets a single bead by ID via `br show <id> --json`.
  */
 export declare function getBeadById(exec: ExecFn, cwd: string, id: string): Promise<Bead | null>;
@@ -135,4 +151,22 @@ export declare function qualityCheckBeads(exec: ExecFn, cwd: string): Promise<{
  * Returns a human-readable summary of bead states.
  */
 export declare function getBeadsSummary(beads: Bead[]): string;
+export interface BeadStraggler {
+    id: string;
+    status: Bead["status"];
+}
+export interface VerifyBeadsClosedReport {
+    /** Bead IDs whose `br show` returned status === "closed". */
+    closed: string[];
+    /** Bead IDs that are still open / in_progress / deferred. */
+    stragglers: BeadStraggler[];
+    /** Bead IDs whose `br show` failed, mapped to error message. */
+    errors: Record<string, string>;
+}
+/**
+ * Verify a list of beads are closed. Returns each bead classified as
+ * closed / straggler / errored. Bypasses the read cache so reconciliation
+ * sees freshly-updated state.
+ */
+export declare function verifyBeadsClosed(exec: ExecFn, cwd: string, beadIds: string[]): Promise<VerifyBeadsClosedReport>;
 //# sourceMappingURL=beads.d.ts.map

@@ -1,3 +1,81 @@
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { createLogger } from './logger.js';
+import { errMsg } from './errors.js';
+import { selectScanners, mergeAndDedup } from './todo-scanner.js';
+import { normalizeText } from './utils/text-normalize.js';
+const log = createLogger('profiler');
+const CACHE_DIR = ".pi-flywheel";
+const CACHE_FILE = "profile-cache.json";
+/**
+ * Load cached profile if the git HEAD matches.
+ * Returns the cached RepoProfile or null if stale/missing.
+ */
+export async function loadCachedProfile(exec, cwd) {
+    const cachePath = join(cwd, CACHE_DIR, CACHE_FILE);
+    if (!existsSync(cachePath))
+        return null;
+    try {
+        const raw = normalizeText(readFileSync(cachePath, "utf8"));
+        let cache;
+        try {
+            cache = JSON.parse(raw);
+        }
+        catch {
+            log.warn("Profile cache contains invalid JSON");
+            return null;
+        }
+        if (!cache || typeof cache !== "object" || typeof cache.gitHead !== "string") {
+            log.warn("Profile cache has unexpected shape");
+            return null;
+        }
+        // Check if HEAD matches
+        const headResult = await exec("git", ["rev-parse", "HEAD"], { cwd, timeout: 5000 });
+        if (headResult.code !== 0)
+            return null;
+        const currentHead = headResult.stdout.trim();
+        if (cache.gitHead !== currentHead) {
+            log.info("Profile cache stale", { cached: cache.gitHead.slice(0, 8), current: currentHead.slice(0, 8) });
+            return null;
+        }
+        log.info("Profile cache hit", { head: currentHead.slice(0, 8), cachedAt: cache.cachedAt });
+        return cache.profile;
+    }
+    catch (err) {
+        log.warn("Failed to read profile cache", { error: errMsg(err) });
+        return null;
+    }
+}
+/**
+ * Save a RepoProfile to the cache file with the current git HEAD.
+ */
+/**
+ * Save profile to cache. Accepts optional gitHead to avoid redundant git call.
+ * Designed to be called fire-and-forget (don't await if you don't need to).
+ */
+export async function saveCachedProfile(exec, cwd, profile, gitHead) {
+    try {
+        let head = gitHead;
+        if (!head) {
+            const headResult = await exec("git", ["rev-parse", "HEAD"], { cwd, timeout: 5000 });
+            if (headResult.code !== 0)
+                return;
+            head = headResult.stdout.trim();
+        }
+        const cacheDir = join(cwd, CACHE_DIR);
+        mkdirSync(cacheDir, { recursive: true });
+        const cache = {
+            gitHead: head,
+            cachedAt: new Date().toISOString(),
+            profile,
+        };
+        writeFileSync(join(cacheDir, CACHE_FILE), JSON.stringify(cache, null, 2), "utf8");
+        log.info("Profile cached", { head: head.slice(0, 8) });
+    }
+    catch (err) {
+        log.warn("Failed to write profile cache", { error: errMsg(err) });
+    }
+}
 /**
  * Collect raw repo signals using exec for shell commands.
  * Returns a RepoProfile with everything except LLM-generated fields.
@@ -15,7 +93,7 @@ export async function profileRepo(exec, cwd, signal) {
     const keyFiles = results[3].status === "fulfilled" ? results[3].value : {};
     for (const [i, label] of ["fileTree", "commits", "todos", "keyFiles"].entries()) {
         if (results[i].status === "rejected") {
-            process.stderr.write(`[profiler] ${label} collector failed: ${results[i].reason}\n`);
+            log.warn(`${label} collector failed`, { reason: String(results[i].reason) });
         }
     }
     let bestPracticesGuides = [];
@@ -67,11 +145,11 @@ async function collectFileTree(exec, cwd, signal) {
         "-not", "-path", "*/.venv/*",
         "-not", "-path", "*/vendor/*",
         "-not", "-path", "*/target/*",
-    ], { timeout: 10000, cwd });
+    ], { timeout: 10000, cwd, signal });
     return result.stdout.trim();
 }
 async function collectCommits(exec, cwd, signal) {
-    const result = await exec("git", ["log", "--oneline", "--no-decorate", "-n", "20", "--format=%H%x00%s%x00%ai%x00%an"], { timeout: 5000, cwd });
+    const result = await exec("git", ["log", "--oneline", "--no-decorate", "-n", "20", "--format=%H%x00%s%x00%ai%x00%an"], { timeout: 5000, cwd, signal });
     if (result.code !== 0)
         return [];
     return result.stdout
@@ -89,45 +167,14 @@ async function collectCommits(exec, cwd, signal) {
     });
 }
 async function collectTodos(exec, cwd, signal) {
-    const result = await exec("grep", [
-        "-rn",
-        "--include=*.ts", "--include=*.js", "--include=*.tsx", "--include=*.jsx",
-        "--include=*.py", "--include=*.rs", "--include=*.go", "--include=*.rb",
-        "--include=*.java", "--include=*.kt", "--include=*.swift",
-        "--exclude-dir=node_modules",
-        "--exclude-dir=.git",
-        "--exclude-dir=dist",
-        "--exclude-dir=build",
-        "--exclude-dir=vendor",
-        "--exclude-dir=target",
-        "--exclude-dir=__pycache__",
-        "--exclude-dir=.venv",
-        "--exclude-dir=.pi-orchestrator",
-        "-E", "(TODO|FIXME|HACK|XXX):",
-        ".",
-    ], { timeout: 10000, cwd });
-    if (result.code !== 0)
-        return [];
-    return result.stdout
-        .split("\n")
-        .filter(Boolean)
-        .slice(0, 50)
-        .map((line) => {
-        const match = line.match(/^\.\/(.+?):(\d+):\s*.*?(TODO|FIXME|HACK|XXX):\s*(.*)$/);
-        if (!match)
-            return null;
-        return {
-            file: match[1],
-            line: parseInt(match[2], 10),
-            type: match[3],
-            text: match[4].trim(),
-        };
-    })
-        .filter((t) => t !== null);
+    const scanners = selectScanners();
+    const results = await Promise.all(scanners.map((s) => s.scan(exec, cwd, signal)));
+    return mergeAndDedup(results.flat());
 }
 async function collectKeyFiles(exec, cwd, signal) {
     const paths = [
         "README.md", "README",
+        "CLAUDE.md", "AGENTS.md",
         "package.json", "Cargo.toml", "pyproject.toml", "go.mod",
         "Gemfile", "Makefile", "Dockerfile", "docker-compose.yml",
         ".github/workflows/ci.yml", ".github/workflows/ci.yaml",
@@ -142,6 +189,7 @@ async function collectKeyFiles(exec, cwd, signal) {
             const r = await exec("head", ["-c", "4096", p], {
                 timeout: 2000,
                 cwd,
+                signal,
             });
             if (r.code === 0 && r.stdout.trim()) {
                 files[p] = r.stdout.trim();
@@ -177,7 +225,7 @@ async function collectBestPracticesGuides(exec, cwd, fileTree, signal) {
     const guides = [];
     await Promise.all(allPaths.map(async (p) => {
         try {
-            const r = await exec("head", ["-c", "3000", p], { timeout: 2000, cwd });
+            const r = await exec("head", ["-c", "3000", p], { timeout: 2000, cwd, signal });
             if (r.code === 0 && r.stdout.trim()) {
                 guides.push({ name: p, content: r.stdout.trim() });
             }

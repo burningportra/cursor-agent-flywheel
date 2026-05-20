@@ -47,7 +47,7 @@ export declare function listWorktrees(exec: ExecFn, cwd: string): Promise<Worktr
  */
 export declare function autoCommitWorktree(exec: ExecFn, worktreePath: string, message: string): Promise<WorktreeResult<boolean>>;
 /**
- * Find worktrees in `.pi-orchestrator/worktrees/` that aren't in the tracked list.
+ * Find worktrees in `.pi-flywheel/worktrees/` that aren't in the tracked list.
  * Returns info about each orphan including dirty status and branch name (if detectable).
  */
 export declare function findOrphanedWorktrees(exec: ExecFn, repoRoot: string, tracked: WorktreeInfo[]): Promise<OrphanedWorktreeInfo[]>;

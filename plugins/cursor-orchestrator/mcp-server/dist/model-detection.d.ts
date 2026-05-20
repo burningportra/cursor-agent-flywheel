@@ -1,5 +1,5 @@
 /**
- * Model detection and selection for orchestrator planning.
+ * Model detection and selection for agent-flywheel planning.
  *
  * In the MCP context, we don't have access to a model registry like the pi
  * extension context provides. Instead, we use hardcoded fallback model lists
@@ -56,4 +56,13 @@ export declare function getRefinementModel(round: number, availableModelIds?: st
  * Format detected models for display.
  */
 export declare function formatDetectedModels(detected: DetectedModels): string;
+export declare const GEMINI_MODEL_ALLOWLIST: readonly string[];
+export declare function isGeminiModelAllowed(model: string): boolean;
+/**
+ * Extract the first `gemini-…` model identifier from a CLI output blob
+ * (e.g. `gemini --version` stdout). Returns null when no match is found.
+ * The match is case-insensitive but the returned identifier is lowercased
+ * so callers can compare it to {@link GEMINI_MODEL_ALLOWLIST} directly.
+ */
+export declare function parseGeminiModelFromOutput(output: string): string | null;
 //# sourceMappingURL=model-detection.d.ts.map

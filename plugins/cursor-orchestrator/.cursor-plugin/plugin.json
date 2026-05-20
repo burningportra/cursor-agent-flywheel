@@ -1,7 +1,7 @@
 {
   "name": "cursor-orchestrator",
   "displayName": "Cursor Orchestrator",
-  "version": "2.2.0",
+  "version": "3.18.1",
   "description": "Multi-agent coding orchestrator — deep planning, parallel execution, guided review gates (Agentic Coding Flywheel). Ported from claude-orchestrator for Cursor.",
   "author": {
     "name": "burningportra",
@@ -18,5 +18,10 @@
     "mcp",
     "flywheel"
   ],
-  "logo": "assets/logo.svg"
+  "logo": "assets/logo.svg",
+  "commands": "commands",
+  "rules": "rules",
+  "skills": "skills",
+  "hooks": "hooks/hooks.json",
+  "mcpServers": "mcp.json"
 }

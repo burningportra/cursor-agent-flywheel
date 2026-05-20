@@ -1,0 +1,45 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://agent-flywheel.dev/schemas/inputs/flywheel_bead_approval_gate.json",
+  "title": "flywheel: flywheel_bead_approval_gate input",
+  "description": "MANDATORY after creating beads (Step 5.5–6): returns askQuestion for review, score, polish, coverage, dedup, and launch menus. Call AskQuestion with askQuestion — do not use AskUserQuestion prose. step=review first; on Start pick step=launch before flywheel_approve_beads action=start.",
+  "type": "object",
+  "properties": {
+    "cwd": {
+      "type": "string",
+      "description": "Project working directory (absolute path)"
+    },
+    "step": {
+      "type": "string",
+      "enum": [
+        "review",
+        "launch",
+        "coverage",
+        "dedup"
+      ],
+      "description": "Which gate to show (default: review)"
+    },
+    "coveredSections": {
+      "type": "number",
+      "description": "For step=coverage: sections with at least one bead"
+    },
+    "totalSections": {
+      "type": "number",
+      "description": "For step=coverage: total plan sections checked"
+    },
+    "missingSections": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "For step=coverage: section titles still without beads"
+    },
+    "overlapPairs": {
+      "type": "number",
+      "description": "For step=dedup: count of duplicate pairs found"
+    }
+  },
+  "required": [
+    "cwd"
+  ]
+}

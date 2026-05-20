@@ -1,0 +1,10 @@
+---
+description: Do not corrupt orchestrator MCP stdio or checkpoint files.
+globs:
+  - "mcp-server/**/*.ts"
+  - ".pi-orchestrator/**/*"
+---
+
+- Never add `console.log` to MCP server code on stdout; use `process.stderr` for diagnostics.
+- Do not edit `mcp-server/dist/` by hand; edit `src/` and run `npm run build`.
+- Do not write directly to `.pi-orchestrator/checkpoint.json`; use `orch_*` MCP tools.

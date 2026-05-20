@@ -1,5 +1,5 @@
 /**
- * Model detection and selection for orchestrator planning.
+ * Model detection and selection for agent-flywheel planning.
  *
  * In the MCP context, we don't have access to a model registry like the pi
  * extension context provides. Instead, we use hardcoded fallback model lists
@@ -41,7 +41,7 @@ export interface DetectedModels {
  */
 const PROVIDER_BEST_MODELS: Record<string, string[]> = {
   anthropic: [
-    "claude-opus-4-6",
+    "claude-opus-4-7",
     "claude-opus-4-5",
     "claude-opus-4-1",
     "claude-sonnet-4-6",
@@ -63,11 +63,11 @@ const PROVIDER_BEST_MODELS: Record<string, string[]> = {
   opencode: [
     "gpt-5.4",
     "gpt-5.3-codex",
-    "claude-opus-4-6",
+    "claude-opus-4-7",
     "claude-sonnet-4-6",
   ],
   openrouter: [
-    "anthropic/claude-opus-4-6",
+    "anthropic/claude-opus-4-7",
     "anthropic/claude-sonnet-4-6",
   ],
   groq: [], // Groq models are typically smaller/faster, not for planning
@@ -94,7 +94,7 @@ function buildRefinementRotation(providerMap: Map<string, Set<string>>): string[
 
   // Fallback if we don't have enough diversity
   if (rotation.length === 0) {
-    rotation.push("anthropic/claude-opus-4-6");
+    rotation.push("anthropic/claude-opus-4-7");
   }
   if (rotation.length === 1) {
     rotation.push("codex");
@@ -169,10 +169,10 @@ export function detectAvailableModels(availableModelIds?: string[]): DetectedMod
   // Select best models for each planning role
   const correctnessModel = selectBestModel(providerMap, ["openai-codex", "opencode", "openai"], PROVIDER_BEST_MODELS)
     ?? selectBestModel(providerMap, ["anthropic"], PROVIDER_BEST_MODELS)
-    ?? "anthropic/claude-opus-4-6";
+    ?? "anthropic/claude-opus-4-7";
 
   const robustnessModel = selectBestModel(providerMap, ["anthropic"], PROVIDER_BEST_MODELS)
-    ?? "anthropic/claude-opus-4-6";
+    ?? "anthropic/claude-opus-4-7";
 
   // Ergonomics prefers openai-codex (Codex 5.4) for a different architectural lens
   const ergonomicsModel = selectBestModel(providerMap, ["openai-codex", "opencode"], PROVIDER_BEST_MODELS)
@@ -181,7 +181,7 @@ export function detectAvailableModels(availableModelIds?: string[]): DetectedMod
 
   const synthesisModel = selectBestModel(providerMap, ["openai-codex", "opencode", "openai"], PROVIDER_BEST_MODELS)
     ?? selectBestModel(providerMap, ["anthropic"], PROVIDER_BEST_MODELS)
-    ?? "anthropic/claude-opus-4-6";
+    ?? "anthropic/claude-opus-4-7";
 
   // Fresh perspective uses Google/Gemini when available; null otherwise (4th optional planner)
   const googleBestModel = selectBestModel(providerMap, ["google-antigravity", "google"], PROVIDER_BEST_MODELS);
@@ -232,10 +232,10 @@ export function getDeepPlanModels(availableModelIds?: string[]): {
   } catch {
     // Fallback to hardcoded defaults
     return {
-      correctness: "anthropic/claude-opus-4-6",
-      robustness: "anthropic/claude-opus-4-6",
+      correctness: "anthropic/claude-opus-4-7",
+      robustness: "anthropic/claude-opus-4-7",
       ergonomics: "anthropic/claude-sonnet-4-6",
-      synthesis: "anthropic/claude-opus-4-6",
+      synthesis: "anthropic/claude-opus-4-7",
       freshPerspective: null,
     };
   }
@@ -248,13 +248,13 @@ export function getRefinementModel(round: number, availableModelIds?: string[]):
   try {
     const detected = detectAvailableModels(availableModelIds);
     const models = detected.refinementModels;
-    return models[round % models.length] ?? "anthropic/claude-opus-4-6";
+    return models[round % models.length] ?? "anthropic/claude-opus-4-7";
   } catch {
     // Fallback to hardcoded rotation
     const fallbacks = [
-      "anthropic/claude-opus-4-6",
+      "anthropic/claude-opus-4-7",
       "anthropic/claude-sonnet-4-6",
-      "anthropic/claude-opus-4-6",
+      "anthropic/claude-opus-4-7",
     ];
     return fallbacks[round % fallbacks.length];
   }
@@ -299,4 +299,32 @@ export function formatDetectedModels(detected: DetectedModels): string {
   }
 
   return lines.join("\n");
+}
+
+// ─── Gemini CLI model allowlist (v3.17.0) ─────────────────────────────────
+//
+// The gemini CLI rejects spawn requests when its configured model is outside
+// a tight allowlist (the 2026-05-15 reality-check captured a spawn failure
+// driven by an unsupported model identifier). Used by the doctor's
+// `gemini_model_compat` check (bead claude-orchestrator-37n6) so the
+// pre-flight gate (bead claude-orchestrator-2wcd) can skip `--gmi` lanes
+// before they ever reach `ntm spawn`.
+
+export const GEMINI_MODEL_ALLOWLIST: readonly string[] = Object.freeze([
+  "gemini-3.1-flash-preview",
+]);
+
+export function isGeminiModelAllowed(model: string): boolean {
+  return GEMINI_MODEL_ALLOWLIST.includes(model.trim().toLowerCase());
+}
+
+/**
+ * Extract the first `gemini-…` model identifier from a CLI output blob
+ * (e.g. `gemini --version` stdout). Returns null when no match is found.
+ * The match is case-insensitive but the returned identifier is lowercased
+ * so callers can compare it to {@link GEMINI_MODEL_ALLOWLIST} directly.
+ */
+export function parseGeminiModelFromOutput(output: string): string | null {
+  const match = output.match(/gemini-[0-9][0-9a-z.-]*/i);
+  return match ? match[0].toLowerCase() : null;
 }

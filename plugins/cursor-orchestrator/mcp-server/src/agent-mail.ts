@@ -1,11 +1,10 @@
-/**
- * Minimal exec function signature — avoids depending on the full ExtensionAPI.
- */
-export type ExecFn = (
-  cmd: string,
-  args: string[],
-  opts?: { timeout?: number; cwd?: string }
-) => Promise<{ code: number; stdout: string; stderr: string }>;
+import type { ExecFn } from "./exec.js";
+import type { AgentMailResult } from "./types.js";
+import { createLogger } from "./logger.js";
+import { errMsg } from "./errors.js";
+import { parseAgentMailResponse } from "./parsers.js";
+
+const log = createLogger("agent-mail");
 
 export const AGENT_MAIL_URL = "http://127.0.0.1:8765";
 
@@ -42,31 +41,100 @@ export interface BuildSlotInfo {
 
 /**
  * Call an agent-mail MCP tool via its JSON-RPC HTTP endpoint.
- * Used by the orchestrator itself (not sub-agents) to manage projects/reservations.
+ * Used by the agent-flywheel itself (not sub-agents) to manage projects/reservations.
+ *
+ * Returns a discriminated union: `{ ok: true, data }` on success,
+ * `{ ok: false, error }` with a classified error kind on failure.
  */
-export async function agentMailRPC(
+export async function agentMailRPC<T = any>(
   exec: ExecFn,
   toolName: string,
   args: Record<string, unknown>
-): Promise<any> {
+): Promise<AgentMailResult<T>> {
   const body = JSON.stringify({
     jsonrpc: "2.0",
     id: Date.now(),
     method: "tools/call",
     params: { name: toolName, arguments: args },
   });
-  const result = await exec("curl", [
-    "-s", "-X", "POST", `${AGENT_MAIL_URL}/api`,
-    "-H", "Content-Type: application/json",
-    "-d", body,
-    "--max-time", "5",
-  ], { timeout: 8000 });
+
+  let result: { code: number; stdout: string; stderr: string };
   try {
-    const parsed = JSON.parse(result.stdout);
-    return parsed?.result?.structuredContent ?? parsed?.result ?? null;
-  } catch {
+    result = await exec("curl", [
+      "-s", "-X", "POST", `${AGENT_MAIL_URL}/api`,
+      "-H", "Content-Type: application/json",
+      "-d", body,
+      "--max-time", "5",
+    ], { timeout: 8000 });
+  } catch (err: any) {
+    return {
+      ok: false,
+      error: {
+        kind: "timeout",
+        message: err?.message ?? "exec timed out",
+      },
+    };
+  }
+
+  // curl exit non-zero → network error
+  if (result.code !== 0) {
+    return {
+      ok: false,
+      error: {
+        kind: "network",
+        message: `curl exited with code ${result.code}`,
+        code: result.code,
+        stderr: result.stderr || undefined,
+      },
+    };
+  }
+
+  // Parse and validate JSON-RPC response
+  const parsed = parseAgentMailResponse<any>(result.stdout);
+  if (!parsed.ok) {
+    // Determine error kind from the parser error message
+    const isRpcError = parsed.error.startsWith("RPC error:");
+    return {
+      ok: false,
+      error: {
+        kind: isRpcError ? "rpc_error" : "parse",
+        message: parsed.error,
+        stderr: isRpcError ? undefined : result.stdout.slice(0, 200) || undefined,
+      },
+    };
+  }
+
+  // Extract data — agent-mail wraps actual payload in structuredContent
+  const rpcResult = parsed.data as Record<string, unknown> | null;
+  const data = (
+    rpcResult != null && typeof rpcResult === "object" && "structuredContent" in rpcResult
+      ? rpcResult.structuredContent
+      : rpcResult
+  ) as T | null;
+
+  if (data == null) {
+    return {
+      ok: false,
+      error: {
+        kind: "empty_response",
+        message: `No data in response for ${toolName}`,
+      },
+    };
+  }
+
+  return { ok: true, data };
+}
+
+/**
+ * Backward-compatible unwrapper: extracts data from AgentMailResult
+ * or returns null on error (matching the old agentMailRPC return contract).
+ */
+export function unwrapRPC<T>(result: AgentMailResult<T>): T | null {
+  if (!result.ok) {
+    log.warn("agent-mail RPC failed", { kind: result.error.kind, message: result.error.message });
     return null;
   }
+  return result.data;
 }
 
 /**
@@ -86,32 +154,44 @@ export async function agentMailReadResource(exec: ExecFn, uri: string): Promise<
     "--max-time", "5",
   ], { timeout: 8000 });
 
+  // Parse outer JSON-RPC envelope
+  const outer = parseAgentMailResponse<any>(result.stdout);
+  if (!outer.ok) {
+    log.warn("agent-mail resource read parse failed", { error: outer.error });
+    return null;
+  }
+
   try {
-    const parsed = JSON.parse(result.stdout);
-    const content = parsed?.result?.contents?.[0]?.text;
+    const rpcResult = outer.data;
+    const content = rpcResult?.contents?.[0]?.text;
     if (typeof content === "string") {
-      return JSON.parse(content);
+      // Inner content may be a JSON string — attempt to parse it
+      try {
+        return JSON.parse(content);
+      } catch {
+        return content;
+      }
     }
-    return parsed?.result?.contents ?? parsed?.result ?? null;
+    return rpcResult?.contents ?? rpcResult ?? null;
   } catch {
     return null;
   }
 }
 
 /**
- * Ensure project exists in agent-mail. Called once during orch_profile.
+ * Ensure project exists in agent-mail. Called once during flywheel_profile.
  */
 export async function ensureAgentMailProject(exec: ExecFn, cwd: string): Promise<void> {
-  await agentMailRPC(exec, "ensure_project", { human_key: cwd });
+  await agentMailRPC(exec, "ensure_project", { human_key: cwd }).then(unwrapRPC);
 }
 
 async function getAgentMailProjectSlug(exec: ExecFn, cwd: string): Promise<string | null> {
-  const project = await agentMailRPC(exec, "ensure_project", { human_key: cwd });
+  const project = unwrapRPC(await agentMailRPC(exec, "ensure_project", { human_key: cwd }));
   const slug = project?.project?.slug ?? project?.slug;
   return typeof slug === "string" && slug.length > 0 ? slug : null;
 }
 
-function matchesReservationPath(file: string, reservation: AgentMailReservation): boolean {
+export function matchesReservationPath(file: string, reservation: AgentMailReservation): boolean {
   const rawPattern = reservation.path_pattern ?? reservation.path;
   if (typeof rawPattern !== "string" || rawPattern.length === 0) return false;
   const normalized = rawPattern.replace(/^\.\//, "");
@@ -129,7 +209,7 @@ function matchesReservationPath(file: string, reservation: AgentMailReservation)
   return file === normalized;
 }
 
-function normalizeReservations(payload: any): AgentMailReservation[] {
+export function normalizeReservations(payload: any): AgentMailReservation[] {
   if (Array.isArray(payload)) return payload;
   if (Array.isArray(payload?.reservations)) return payload.reservations;
   if (Array.isArray(payload?.items)) return payload.items;
@@ -146,14 +226,14 @@ export async function reserveFileReservations(
   files: string[],
   reason?: string
 ): Promise<any> {
-  return agentMailRPC(exec, "file_reservation_paths", {
+  return unwrapRPC(await agentMailRPC(exec, "file_reservation_paths", {
     project_key: cwd,
     agent_name: agentName,
     paths: files,
     ttl_seconds: 3600,
     exclusive: true,
     ...(reason ? { reason } : {}),
-  });
+  }));
 }
 
 /**
@@ -165,11 +245,11 @@ export async function releaseFileReservations(
   agentName: string,
   files?: string[]
 ): Promise<any> {
-  return agentMailRPC(exec, "release_file_reservations", {
+  return unwrapRPC(await agentMailRPC(exec, "release_file_reservations", {
     project_key: cwd,
     agent_name: agentName,
     ...(files && files.length > 0 ? { paths: files } : {}),
-  });
+  }));
 }
 
 /**
@@ -206,11 +286,11 @@ export async function prepareThread(
   agentName: string,
   threadId: string
 ): Promise<any> {
-  return agentMailRPC(exec, "macro_prepare_thread", {
+  return unwrapRPC(await agentMailRPC(exec, "macro_prepare_thread", {
     human_key: cwd,
     agent_name: agentName,
     thread_id: threadId,
-  });
+  }));
 }
 
 /**
@@ -224,14 +304,14 @@ export async function fileReservationCycle(
   files: string[],
   reason?: string
 ): Promise<any> {
-  return agentMailRPC(exec, "macro_file_reservation_cycle", {
+  return unwrapRPC(await agentMailRPC(exec, "macro_file_reservation_cycle", {
     human_key: cwd,
     agent_name: agentName,
     paths: files,
     ttl_seconds: 3600,
     exclusive: true,
     ...(reason ? { reason } : {}),
-  });
+  }));
 }
 
 /**
@@ -243,11 +323,11 @@ export async function contactHandshake(
   fromAgent: string,
   toAgent: string
 ): Promise<any> {
-  return agentMailRPC(exec, "macro_contact_handshake", {
+  return unwrapRPC(await agentMailRPC(exec, "macro_contact_handshake", {
     human_key: cwd,
     from_agent: fromAgent,
     to_agent: toAgent,
-  });
+  }));
 }
 
 // ─── Reservation Lifecycle ─────────────────────────────────────
@@ -262,11 +342,11 @@ export async function renewFileReservations(
   agentName: string,
   extendSeconds: number = 1800
 ): Promise<any> {
-  return agentMailRPC(exec, "renew_file_reservations", {
+  return unwrapRPC(await agentMailRPC(exec, "renew_file_reservations", {
     project_key: cwd,
     agent_name: agentName,
     extend_seconds: extendSeconds,
-  });
+  }));
 }
 
 /**
@@ -281,13 +361,13 @@ export async function forceReleaseFileReservation(
   note?: string,
   notifyPrevious: boolean = true
 ): Promise<any> {
-  return agentMailRPC(exec, "force_release_file_reservation", {
+  return unwrapRPC(await agentMailRPC(exec, "force_release_file_reservation", {
     project_key: cwd,
     agent_name: agentName,
     file_reservation_id: reservationId,
     ...(note ? { note } : {}),
     notify_previous: notifyPrevious,
-  });
+  }));
 }
 
 // ─── Messaging ─────────────────────────────────────────────────
@@ -309,7 +389,7 @@ export async function sendMessage(
     cc?: string[];
   }
 ): Promise<any> {
-  return agentMailRPC(exec, "send_message", {
+  return unwrapRPC(await agentMailRPC(exec, "send_message", {
     project_key: cwd,
     sender_name: senderName,
     to,
@@ -319,7 +399,7 @@ export async function sendMessage(
     ...(options?.importance ? { importance: options.importance } : {}),
     ...(options?.ackRequired !== undefined ? { ack_required: options.ackRequired } : {}),
     ...(options?.cc ? { cc: options.cc } : {}),
-  });
+  }));
 }
 
 /**
@@ -332,12 +412,12 @@ export async function replyMessage(
   senderName: string,
   body: string
 ): Promise<any> {
-  return agentMailRPC(exec, "reply_message", {
+  return unwrapRPC(await agentMailRPC(exec, "reply_message", {
     project_key: cwd,
     message_id: messageId,
     sender_name: senderName,
     body_md: body,
-  });
+  }));
 }
 
 /**
@@ -349,11 +429,11 @@ export async function acknowledgeMessage(
   agentName: string,
   messageId: number
 ): Promise<any> {
-  return agentMailRPC(exec, "acknowledge_message", {
+  return unwrapRPC(await agentMailRPC(exec, "acknowledge_message", {
     project_key: cwd,
     agent_name: agentName,
     message_id: messageId,
-  });
+  }));
 }
 
 /**
@@ -365,13 +445,13 @@ export async function fetchInbox(
   agentName: string,
   options?: { limit?: number; urgentOnly?: boolean; includeBodies?: boolean }
 ): Promise<AgentMailMessage[]> {
-  const result = await agentMailRPC(exec, "fetch_inbox", {
+  const result = unwrapRPC(await agentMailRPC(exec, "fetch_inbox", {
     project_key: cwd,
     agent_name: agentName,
     limit: options?.limit ?? 20,
     ...(options?.urgentOnly ? { urgent_only: true } : {}),
     ...(options?.includeBodies !== false ? { include_bodies: true } : {}),
-  });
+  }));
   return result?.messages ?? result?.inbox ?? [];
 }
 
@@ -384,11 +464,11 @@ export async function searchMessages(
   query: string,
   limit: number = 20
 ): Promise<AgentMailMessage[]> {
-  const result = await agentMailRPC(exec, "search_messages", {
+  const result = unwrapRPC(await agentMailRPC(exec, "search_messages", {
     project_key: cwd,
     query,
     limit,
-  });
+  }));
   return result?.messages ?? result?.results ?? [];
 }
 
@@ -401,12 +481,12 @@ export async function summarizeThread(
   cwd: string,
   threadId: string
 ): Promise<any> {
-  return agentMailRPC(exec, "summarize_thread", {
+  return unwrapRPC(await agentMailRPC(exec, "summarize_thread", {
     project_key: cwd,
     thread_id: threadId,
     include_examples: true,
     llm_mode: true,
-  });
+  }));
 }
 
 /**
@@ -417,12 +497,12 @@ export async function whoisAgent(
   cwd: string,
   agentName: string
 ): Promise<any> {
-  return agentMailRPC(exec, "whois", {
+  return unwrapRPC(await agentMailRPC(exec, "whois", {
     project_key: cwd,
     agent_name: agentName,
     include_recent_commits: true,
     commit_limit: 5,
-  });
+  }));
 }
 
 // ─── Build Slots ───────────────────────────────────────────────
@@ -439,13 +519,13 @@ export async function acquireBuildSlot(
   ttlSeconds: number = 3600,
   exclusive: boolean = true
 ): Promise<any> {
-  return agentMailRPC(exec, "acquire_build_slot", {
+  return unwrapRPC(await agentMailRPC(exec, "acquire_build_slot", {
     project_key: cwd,
     agent_name: agentName,
     slot,
     ttl_seconds: ttlSeconds,
     exclusive,
-  });
+  }));
 }
 
 /**
@@ -458,12 +538,12 @@ export async function renewBuildSlot(
   slot: string,
   extendSeconds: number = 1800
 ): Promise<any> {
-  return agentMailRPC(exec, "renew_build_slot", {
+  return unwrapRPC(await agentMailRPC(exec, "renew_build_slot", {
     project_key: cwd,
     agent_name: agentName,
     slot,
     extend_seconds: extendSeconds,
-  });
+  }));
 }
 
 /**
@@ -475,11 +555,11 @@ export async function releaseBuildSlot(
   agentName: string,
   slot: string
 ): Promise<any> {
-  return agentMailRPC(exec, "release_build_slot", {
+  return unwrapRPC(await agentMailRPC(exec, "release_build_slot", {
     project_key: cwd,
     agent_name: agentName,
     slot,
-  });
+  }));
 }
 
 // ─── Health ────────────────────────────────────────────────────
@@ -489,7 +569,7 @@ export async function releaseBuildSlot(
  * Returns { status: "healthy" } on success, null on failure.
  */
 export async function healthCheck(exec: ExecFn): Promise<{ status: string } | null> {
-  const result = await agentMailRPC(exec, "health_check", {});
+  const result = unwrapRPC(await agentMailRPC(exec, "health_check", {}));
   return result?.status ? result : null;
 }
 
@@ -500,10 +580,10 @@ export async function installPreCommitGuardViaMCP(
   exec: ExecFn,
   cwd: string
 ): Promise<any> {
-  return agentMailRPC(exec, "install_precommit_guard", {
+  return unwrapRPC(await agentMailRPC(exec, "install_precommit_guard", {
     project_key: cwd,
     code_repo_path: cwd,
-  });
+  }));
 }
 
 /**
@@ -519,19 +599,31 @@ export function amRpcCmd(tool: string, args: Record<string, unknown>): string {
 }
 
 /**
+ * Safely wrap a string in bash single quotes.
+ * Single-quoted strings in bash are literal — no variable expansion, no command
+ * substitution, no backtick evaluation. The only character that cannot appear
+ * inside a single-quoted string is the single-quote itself, which we handle by
+ * ending the quote, inserting a literal escaped single-quote, then reopening.
+ *
+ * Example: /path/it's/here  →  '/path/it'"'"'s/here'
+ */
+export function shellSingleQuote(s: string): string {
+  return "'" + s.replace(/'/g, "'\\''") + "'";
+}
+
+/**
  * Build a bash helper script that wraps agent-mail calls.
  * Sub-agents source this to get am_send, am_inbox, am_release functions
  * with their agent name and project key baked in — no manual substitution needed.
  */
-function amHelperScript(cwd: string, threadId: string): string {
-  // Escape double-quotes to prevent shell injection (e.g. paths with spaces/quotes)
-  const safeCwd = cwd.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
-  const safeThread = threadId.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+export function amHelperScript(cwd: string, threadId: string): string {
+  const safeCwd = shellSingleQuote(cwd);
+  const safeThread = shellSingleQuote(threadId);
   return `
 # ── Agent Mail helper functions (source these) ──────────────
 AM_URL="${AGENT_MAIL_URL}"
-AM_PROJECT="${safeCwd}"
-AM_THREAD="${safeThread}"
+AM_PROJECT=${safeCwd}
+AM_THREAD=${safeThread}
 
 am_rpc() {
   local tool="$1" args="$2"
@@ -637,7 +729,7 @@ You are working directly on the shared branch in the main checkout.
   - \`git push\`
 - If \`git pull --rebase\`, \`git rebase --continue\`, or \`git push\` reports conflicts or a non-fast-forward error, STOP immediately.
 - Do not force-push, do not merge, and do not try to untangle another agent's changes unless explicitly instructed.
-- Report the conflict in your summary / agent-mail update so the orchestrator can decide the next step.
+- Report the conflict in your summary / agent-mail update so the agent-flywheel can decide the next step.
 `
     : "";
 
@@ -716,37 +808,37 @@ am_release
 `;
 }
 
-// ─── New helper functions (claude-orchestrator additions) ─────
+// ─── New helper functions (agent-flywheel additions) ─────
 
 /**
- * Register the orchestrator as a named agent in agent-mail.
- * Call this once during orch_profile before any sub-agent spawning.
+ * Register the agent-flywheel as a named agent in agent-mail.
+ * Call this once during flywheel_profile before any sub-agent spawning.
  */
-export async function registerOrchestratorAgent(exec: ExecFn, cwd: string, agentName: string = 'Orchestrator'): Promise<any> {
-  return agentMailRPC(exec, 'register_agent', { project_key: cwd, agent_name: agentName });
+export async function registerFlywheelAgent(exec: ExecFn, cwd: string, agentName: string = 'FlywheelAgent'): Promise<any> {
+  return unwrapRPC(await agentMailRPC(exec, 'register_agent', { project_key: cwd, agent_name: agentName }));
 }
 
 /**
  * Start a full agent-mail session (register, bootstrap, set up file reservations).
- * Replaces bare ensureAgentMailProject() in orch_profile.
+ * Replaces bare ensureAgentMailProject() in flywheel_profile.
  */
-export async function agentMailStartSession(exec: ExecFn, cwd: string, agentName: string = 'Orchestrator'): Promise<any> {
-  return agentMailRPC(exec, 'macro_start_session', {
+export async function agentMailStartSession(exec: ExecFn, cwd: string, agentName: string = 'FlywheelAgent'): Promise<any> {
+  return unwrapRPC(await agentMailRPC(exec, 'macro_start_session', {
     human_key: cwd,
-    program: 'claude-orchestrator',
+    program: 'agent-flywheel',
     model: 'auto',
     task_description: 'Orchestrating agentic coding flywheel',
     inbox_limit: 10,
     agent_name: agentName,
-  });
+  }));
 }
 
 /**
  * Send a bead completion message to the bead's thread.
- * Call in orch_approve_beads when a bead result = success.
+ * Call in flywheel_approve_beads when a bead result = success.
  */
 export async function sendBeadCompletionMessage(exec: ExecFn, cwd: string, beadId: string, senderName: string, summary: string): Promise<any> {
-  return agentMailRPC(exec, 'send_message', {
+  return unwrapRPC(await agentMailRPC(exec, 'send_message', {
     project_key: cwd,
     sender_name: senderName,
     to: [],
@@ -754,19 +846,163 @@ export async function sendBeadCompletionMessage(exec: ExecFn, cwd: string, beadI
     body_md: summary,
     thread_id: beadId,
     importance: 'normal',
-  });
+  }));
 }
 
 /**
- * Acknowledge a batch of message IDs. Called in /orchestrate-status after inbox read.
+ * Acknowledge a batch of message IDs. Called in /flywheel-status after inbox read.
  */
 export async function acknowledgeMessages(exec: ExecFn, cwd: string, agentName: string, messageIds: number[]): Promise<void> {
   await Promise.all(messageIds.map(id => acknowledgeMessage(exec, cwd, agentName, id)));
 }
 
 /**
- * Fetch inbox messages for the orchestrator agent.
+ * Fetch inbox messages for the flywheel agent.
  */
-export async function fetchInboxMessages(exec: ExecFn, cwd: string, agentName: string = 'Orchestrator'): Promise<AgentMailMessage[]> {
+export async function fetchInboxMessages(exec: ExecFn, cwd: string, agentName: string = 'FlywheelAgent'): Promise<AgentMailMessage[]> {
   return fetchInbox(exec, cwd, agentName, { limit: 20, includeBodies: true });
+}
+
+// ─── Coordinator Bootstrap ───────────────────────────────────
+
+export type AgentMailRole = 'coordinator' | 'implementer' | 'reviewer' | 'generic';
+
+export interface BootstrapCoordinatorOptions {
+  /**
+   * Program name passed to `macro_start_session`. Contact-policy hardening is
+   * only applied for `claude-code` coordinators (where the planner's
+   * first-contact path was previously blocked by default `contacts_only`).
+   */
+  program?: string;
+  /** Role hint — `coordinator` triggers contact-policy hardening. */
+  role?: AgentMailRole;
+  /** Model identifier forwarded to `macro_start_session`. */
+  model?: string;
+  /** Human-readable task description. */
+  taskDescription?: string;
+}
+
+export interface BootstrapCoordinatorResult {
+  /** Raw session payload from `macro_start_session`, or null on failure. */
+  session: any | null;
+  /** True when `set_contact_policy` was invoked and succeeded. */
+  contactPolicyApplied: boolean;
+  /** Non-fatal warnings (e.g. contact-policy set failed). */
+  warnings: string[];
+}
+
+/**
+ * Bootstrap a coordinator agent-mail session. After successful registration,
+ * opportunistically sets `contact_policy=auto` when the program is
+ * `claude-code` AND the role is `coordinator` so planners can DM the
+ * coordinator without a contacts-only block.
+ *
+ * Never throws: contact-policy set failures are logged at warn level with
+ * structured `code: 'agent_mail_unreachable'` and returned as a warning.
+ * The caller's session continues.
+ */
+/**
+ * P1-4 (v3.4.1): In-process dedupe map for concurrent bootstrap calls.
+ *
+ * Prior behavior: two callers with the same (cwd, agentName, program) would
+ * both fire `macro_start_session` + `set_contact_policy` racing each other —
+ * harmless in the happy path but wasteful and prone to duplicate-identity
+ * warnings on the server.
+ *
+ * New behavior: the first caller for a given key wins and takes the RPC
+ * round-trip; subsequent callers await the same in-flight Promise. The slot
+ * is cleared in `.finally()` so the next *serial* caller still goes through
+ * the full bootstrap path (we dedupe concurrency, not results).
+ *
+ * Only the in-flight slot is cached; we do NOT memoize results, because the
+ * underlying server state (sessions, contact policy) is mutable across time.
+ */
+const _bootstrapInFlight = new Map<string, Promise<BootstrapCoordinatorResult>>();
+
+function bootstrapDedupeKey(cwd: string, agentName: string, program: string): string {
+  return `${cwd}\u0000${agentName}\u0000${program}`;
+}
+
+/**
+ * Test-only: reset the in-flight dedupe map. Production callers must never
+ * invoke this; the map is a process-lifetime singleton by design.
+ */
+export function _resetBootstrapDedupeForTest(): void {
+  _bootstrapInFlight.clear();
+}
+
+export async function bootstrapCoordinator(
+  exec: ExecFn,
+  cwd: string,
+  agentName: string = 'FlywheelAgent',
+  options: BootstrapCoordinatorOptions = {}
+): Promise<BootstrapCoordinatorResult> {
+  const program = options.program ?? 'agent-flywheel';
+  const role: AgentMailRole = options.role ?? 'coordinator';
+  const model = options.model ?? 'auto';
+  const taskDescription = options.taskDescription ?? 'Orchestrating agentic coding flywheel';
+
+  const key = bootstrapDedupeKey(cwd, agentName, program);
+  const existing = _bootstrapInFlight.get(key);
+  if (existing) {
+    return existing;
+  }
+
+  const pending = (async (): Promise<BootstrapCoordinatorResult> => {
+    const warnings: string[] = [];
+
+    const session = unwrapRPC(await agentMailRPC(exec, 'macro_start_session', {
+      human_key: cwd,
+      program,
+      model,
+      task_description: taskDescription,
+      inbox_limit: 10,
+      agent_name: agentName,
+    }));
+
+    // Opportunistic contact-policy hardening: only for claude-code coordinators.
+    // Prior-session learning: without this, planner first-send_message calls
+    // are blocked by the default `contacts_only` policy.
+    let contactPolicyApplied = false;
+    if (program === 'claude-code' && role === 'coordinator') {
+      try {
+        const applied = unwrapRPC(await agentMailRPC(exec, 'set_contact_policy', {
+          project_key: cwd,
+          agent_name: agentName,
+          policy: 'auto',
+        }));
+        if (applied !== null) {
+          contactPolicyApplied = true;
+        } else {
+          const msg = 'set_contact_policy returned null — session continues with default policy';
+          log.warn(msg, { code: 'agent_mail_unreachable', agent: agentName });
+          warnings.push(msg);
+        }
+      } catch (err) {
+        // Defensive: unwrapRPC itself should not throw, but any unexpected
+        // failure must not kill the coordinator session.
+        const msg = errMsg(err);
+        log.warn('set_contact_policy failed', { code: 'agent_mail_unreachable', agent: agentName, cause: msg });
+        warnings.push(`set_contact_policy failed: ${msg}`);
+      }
+    }
+
+    return { session, contactPolicyApplied, warnings };
+  })();
+
+  _bootstrapInFlight.set(key, pending);
+  // Clear the slot once settled, but only if our Promise is still the current
+  // occupant — another call that somehow landed during settlement shouldn't
+  // have its slot wiped.
+  pending.finally(() => {
+    if (_bootstrapInFlight.get(key) === pending) {
+      _bootstrapInFlight.delete(key);
+    }
+  }).catch(() => {
+    // Swallow: the original pending Promise's rejection propagates to the
+    // caller via the returned value; this .catch only guards the .finally
+    // chain itself.
+  });
+
+  return pending;
 }

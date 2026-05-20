@@ -1,7 +1,8 @@
 import { join } from "path";
 import { existsSync, readdirSync } from "fs";
+import { errMsg } from "./errors.js";
 // ─── Constants ─────────────────────────────────────────────────
-const WORKTREE_DIR = ".pi-orchestrator/worktrees";
+const WORKTREE_DIR = ".pi-flywheel/worktrees";
 function worktreePath(repoRoot, stepIndex) {
     return join(repoRoot, WORKTREE_DIR, `step-${stepIndex}`);
 }
@@ -22,7 +23,7 @@ export async function createWorktree(exec, cwd, branch, path) {
     catch (err) {
         return {
             ok: false,
-            error: `worktree create failed: ${err instanceof Error ? err.message : String(err)}`,
+            error: `worktree create failed: ${errMsg(err)}`,
         };
     }
 }
@@ -51,7 +52,7 @@ export async function removeWorktree(exec, cwd, path) {
     catch (err) {
         return {
             ok: false,
-            error: `worktree remove failed: ${err instanceof Error ? err.message : String(err)}`,
+            error: `worktree remove failed: ${errMsg(err)}`,
         };
     }
 }
@@ -106,13 +107,13 @@ export async function autoCommitWorktree(exec, worktreePath, message) {
     catch (err) {
         return {
             ok: false,
-            error: `autoCommitWorktree failed: ${err instanceof Error ? err.message : String(err)}`,
+            error: `autoCommitWorktree failed: ${errMsg(err)}`,
         };
     }
 }
 // ─── Orphan Detection & Cleanup ────────────────────────────────
 /**
- * Find worktrees in `.pi-orchestrator/worktrees/` that aren't in the tracked list.
+ * Find worktrees in `.pi-flywheel/worktrees/` that aren't in the tracked list.
  * Returns info about each orphan including dirty status and branch name (if detectable).
  */
 export async function findOrphanedWorktrees(exec, repoRoot, tracked) {
@@ -184,7 +185,7 @@ export async function cleanupOrphanedWorktrees(exec, repoRoot, orphans) {
     for (const orphan of orphans) {
         // Auto-commit dirty worktrees to preserve work
         if (orphan.isDirty) {
-            const commitResult = await autoCommitWorktree(exec, orphan.path, `[claude-orchestrator] auto-commit: recovery of orphaned worktree`);
+            const commitResult = await autoCommitWorktree(exec, orphan.path, `[agent-flywheel] auto-commit: recovery of orphaned worktree`);
             if (commitResult.ok && commitResult.data) {
                 summary.autoCommitted++;
             }
@@ -313,7 +314,7 @@ export class WorktreePool {
                 continue;
             // Try auto-commit before removal
             try {
-                const commitResult = await autoCommitWorktree(this.exec, info.path, `[claude-orchestrator] auto-commit: safe cleanup of worktree step-${idx}`);
+                const commitResult = await autoCommitWorktree(this.exec, info.path, `[agent-flywheel] auto-commit: safe cleanup of worktree step-${idx}`);
                 if (commitResult.ok && commitResult.data) {
                     summary.autoCommitted++;
                 }

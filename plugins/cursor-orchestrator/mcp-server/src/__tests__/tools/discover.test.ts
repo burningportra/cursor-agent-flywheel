@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { runDiscover } from '../../tools/discover.js';
 import { createMockExec, makeState } from '../helpers/mocks.js';
-import type { OrchestratorState, CandidateIdea, RepoProfile } from '../../types.js';
+import type { FlywheelState, CandidateIdea, RepoProfile } from '../../types.js';
 
 // ─── Helpers ──────────────────────────────────────────────────
 
@@ -36,15 +36,15 @@ function makeIdea(overrides: Partial<CandidateIdea> = {}): CandidateIdea {
   };
 }
 
-function makeCtx(stateOverrides: Partial<OrchestratorState> = {}) {
+function makeCtx(stateOverrides: Partial<FlywheelState> = {}) {
   const exec = createMockExec();
   const state = makeState({ repoProfile: makeRepoProfile(), ...stateOverrides });
-  const saved: OrchestratorState[] = [];
+  const saved: FlywheelState[] = [];
   const ctx = {
     exec,
     cwd: '/fake/cwd',
     state,
-    saveState: (s: OrchestratorState) => { saved.push(structuredClone(s)); },
+    saveState: (s: FlywheelState) => { saved.push(structuredClone(s)); },
     clearState: () => {},
   };
   return { ctx, state, saved };
@@ -94,7 +94,7 @@ describe('runDiscover', () => {
     const text = result.content[0].text;
     expect(text).toContain('Rate limiting');
     expect(text).toContain('Better logging');
-    expect(text).toContain('orch_select');
+    expect(text).toContain('flywheel_select');
   });
 
   it('includes idea count summary in output', async () => {
@@ -163,5 +163,80 @@ describe('runDiscover', () => {
 
     expect(state.phase).toBe(originalPhase);
     expect(state.candidateIdeas).toBeUndefined();
+  });
+
+  it('returns structuredContent for successful idea registration', async () => {
+    const { ctx } = makeCtx();
+    const ideas = [
+      makeIdea({ id: 'idea-1', tier: 'top' }),
+      makeIdea({ id: 'idea-2', title: 'Better logging', tier: 'honorable' }),
+    ];
+
+    const result = await runDiscover(ctx, { cwd: '/fake/cwd', ideas });
+
+    expect(result.structuredContent).toEqual({
+      tool: 'flywheel_discover',
+      version: 1,
+      status: 'ok',
+      phase: 'awaiting_selection',
+      nextStep: {
+        type: 'call_tool',
+        message: 'Present the ideas to the user, then call flywheel_select with the chosen goal.',
+        tool: 'flywheel_select',
+        argsSchemaHint: { goal: 'string' },
+      },
+      data: {
+        kind: 'ideas_registered',
+        totalIdeas: 2,
+        topIdeas: 1,
+        honorableIdeas: 1,
+        duelIdeas: 0,
+        contestedIdeas: 0,
+        ideaIds: ['idea-1', 'idea-2'],
+        ideas: [
+          {
+            id: 'idea-1',
+            title: 'Add rate limiting',
+            category: 'feature',
+            effort: 'medium',
+            impact: 'high',
+            tier: 'top',
+            rationale: 'High traffic endpoints need protection',
+            provenance: undefined,
+          },
+          {
+            id: 'idea-2',
+            title: 'Better logging',
+            category: 'feature',
+            effort: 'medium',
+            impact: 'high',
+            tier: 'honorable',
+            rationale: 'High traffic endpoints need protection',
+            provenance: undefined,
+          },
+        ],
+      },
+    });
+  });
+
+  it('returns structuredContent for discover prerequisite errors', async () => {
+    const { ctx } = makeCtx({ repoProfile: undefined } as any);
+    ctx.state.repoProfile = undefined;
+
+    const result = await runDiscover(ctx, { cwd: '/fake/cwd', ideas: [makeIdea()] });
+
+    expect(result.structuredContent).toMatchObject({
+      tool: 'flywheel_discover',
+      version: 1,
+      status: 'error',
+      phase: 'idle',
+      data: {
+        kind: 'error',
+        error: {
+          code: 'missing_prerequisite',
+          message: 'Error: No repo profile found. Call flywheel_profile first.',
+        },
+      },
+    });
   });
 });

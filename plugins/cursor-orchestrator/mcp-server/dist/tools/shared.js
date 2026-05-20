@@ -1,5 +1,40 @@
+import { readdirSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+import { makeFlywheelErrorResult } from '../errors.js';
 export function formatModelRef(model) {
     return model.provider ? `${model.provider}/${model.id}` : model.id;
+}
+export function makeChoiceOption(id, label, options = {}) {
+    return {
+        id,
+        label,
+        ...options,
+    };
+}
+export function makeNextToolStep(type, message, options = {}) {
+    return {
+        type,
+        message,
+        ...options,
+    };
+}
+export function makeToolResult(text, structuredContent) {
+    return {
+        content: [{ type: 'text', text }],
+        structuredContent,
+    };
+}
+export function makeOkToolResult(tool, phase, text, data) {
+    return makeToolResult(text, {
+        tool,
+        version: 1,
+        status: 'ok',
+        phase,
+        data,
+    });
+}
+export function makeToolError(tool, phase, code, message, options = {}) {
+    return makeFlywheelErrorResult(tool, phase, { code, message, ...options });
 }
 /**
  * Pick execution mode: single-branch (shared checkout) or worktree (isolated checkouts).
@@ -43,20 +78,57 @@ export function computeConvergenceScore(polishChanges, outputSizes) {
 }
 /** Model rotation list for refinement rounds (prevents taste convergence). */
 const REFINEMENT_MODELS = [
-    'claude-opus-4-6',
+    'claude-opus-4-7',
     'claude-sonnet-4-6',
-    'claude-opus-4-6',
+    'claude-opus-4-7',
     'claude-sonnet-4-6',
 ];
 export function pickRefinementModel(round) {
     return REFINEMENT_MODELS[round % REFINEMENT_MODELS.length];
 }
+/**
+ * Walk a directory and return the newest mtime (ms) across matching files.
+ * Skips node_modules and dot-directories. Returns null if nothing matched.
+ */
+export function newestMtime(root, filter = () => true) {
+    let max = null;
+    const stack = [root];
+    while (stack.length > 0) {
+        const dir = stack.pop();
+        let entries;
+        try {
+            entries = readdirSync(dir, { withFileTypes: true });
+        }
+        catch {
+            continue;
+        }
+        for (const e of entries) {
+            const full = join(dir, e.name);
+            if (e.isDirectory()) {
+                if (e.name === 'node_modules' || e.name.startsWith('.'))
+                    continue;
+                stack.push(full);
+            }
+            else if (e.isFile() && filter(e.name)) {
+                try {
+                    const m = statSync(full).mtimeMs;
+                    if (max === null || m > max)
+                        max = m;
+                }
+                catch {
+                    // ignore unreadable files
+                }
+            }
+        }
+    }
+    return max;
+}
 /** Default deep plan model assignments. */
 export const DEEP_PLAN_MODELS = {
-    correctness: 'claude-opus-4-6',
+    correctness: 'claude-opus-4-7',
     robustness: 'claude-sonnet-4-6',
     ergonomics: 'claude-sonnet-4-6',
-    synthesis: 'claude-opus-4-6',
+    synthesis: 'claude-opus-4-7',
 };
 export const SWARM_STAGGER_DELAY_MS = 30_000;
 /**
@@ -134,7 +206,7 @@ Create a set of implementation beads using the \`br\` CLI. Each bead represents 
 6. Use descriptive titles (verb phrases work well: "Add rate limiting to /api/submit")
 
 ### After creating beads
-Call \`orch_approve_beads\` to review and approve the bead graph before implementation begins.`;
+Call \`flywheel_approve_beads\` to review and approve the bead graph before implementation begins.`;
 }
 const VERB_PREFIXES = [
     'add', 'create', 'fix', 'update', 'remove', 'implement', 'refactor',
@@ -234,7 +306,7 @@ ${prevSummary}${memSection}${episodicSection}
 3. Run tests if applicable
 4. Do a fresh-eyes review of your changes
 5. Commit: \`git add <files> && git commit -m "bead ${bead.id}: ${bead.title.slice(0, 60)}"\`
-6. Call \`orch_review\` with beadId="${bead.id}" and your summary`;
+6. Call \`flywheel_review\` with beadId="${bead.id}" and your summary`;
 }
 function cwd_from_profile(profile) {
     return profile.name || 'project';

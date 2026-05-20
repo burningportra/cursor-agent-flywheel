@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://agent-flywheel.dev/schemas/inputs/flywheel_impl_tick.json",
+  "title": "flywheel: flywheel_impl_tick input",
+  "description": "Cursor implementation supervision tick (~4 min cadence): snapshot beads/commits, trigger commit-batch fresh-eyes (Task + verdict file), advance waves when closedBeadIds provided, and return impl Task specs. Re-call on interval until queue drains. Set state.commitBatchThreshold at impl pre-flight (or FW_COMMIT_BATCH_THRESHOLD).",
+  "type": "object",
+  "properties": {
+    "cwd": {
+      "type": "string",
+      "description": "Project working directory (absolute path)"
+    },
+    "closedBeadIds": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Beads closed since the previous tick — runs flywheel_advance_wave when non-empty"
+    },
+    "coordinatorAgent": {
+      "type": "string",
+      "description": "Optional Agent Mail name for inbox probes"
+    }
+  },
+  "required": [
+    "cwd"
+  ]
+}

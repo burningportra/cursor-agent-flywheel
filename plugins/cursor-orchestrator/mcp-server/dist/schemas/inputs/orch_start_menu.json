@@ -1,0 +1,44 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://agent-flywheel.dev/schemas/inputs/orch_start_menu.json",
+  "title": "flywheel: orch_start_menu input",
+  "description": "[DEPRECATED — use flywheel_start_menu instead; removed in v4.0] Step 0d start menu for Cursor: returns askQuestion payload, routeHints, and primary entry points for the detected variant. Call after flywheel_observe.",
+  "type": "object",
+  "properties": {
+    "cwd": {
+      "type": "string",
+      "description": "Project working directory (absolute path)"
+    },
+    "variant": {
+      "type": "string",
+      "enum": [
+        "previous-session-exists",
+        "open-beads-exist",
+        "fresh-start"
+      ],
+      "description": "Menu variant (auto-inferred from phase/beads if omitted)"
+    },
+    "recentPlanPaths": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Top docs/plans/*.md paths from glob"
+    },
+    "isFirstRun": {
+      "type": "boolean"
+    },
+    "goal": {
+      "type": "string"
+    },
+    "phase": {
+      "type": "string"
+    },
+    "openBeadCount": {
+      "type": "number"
+    }
+  },
+  "required": [
+    "cwd"
+  ]
+}

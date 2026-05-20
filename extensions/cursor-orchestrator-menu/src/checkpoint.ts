@@ -9,12 +9,26 @@ export interface CheckpointSummary {
   writtenAt?: string;
 }
 
+function checkpointCandidates(root: string): string[] {
+  return [
+    path.join(root, ".pi-flywheel", "checkpoint.json"),
+    path.join(root, ".pi-orchestrator", "checkpoint.json"),
+  ];
+}
+
+function firstExisting(paths: string[]): string | undefined {
+  for (const p of paths) {
+    if (fs.existsSync(p)) return p;
+  }
+  return undefined;
+}
+
 export function readCheckpoint(root: string): CheckpointSummary {
-  const p = path.join(root, ".pi-orchestrator", "checkpoint.json");
+  const p = firstExisting(checkpointCandidates(root));
+  if (!p) {
+    return { exists: false };
+  }
   try {
-    if (!fs.existsSync(p)) {
-      return { exists: false };
-    }
     const raw = fs.readFileSync(p, "utf8");
     const j = JSON.parse(raw) as {
       writtenAt?: string;
@@ -33,14 +47,16 @@ export function readCheckpoint(root: string): CheckpointSummary {
 }
 
 export function deleteCheckpoint(root: string): boolean {
-  const p = path.join(root, ".pi-orchestrator", "checkpoint.json");
-  try {
-    if (fs.existsSync(p)) {
-      fs.unlinkSync(p);
-      return true;
+  let removed = false;
+  for (const p of checkpointCandidates(root)) {
+    try {
+      if (fs.existsSync(p)) {
+        fs.unlinkSync(p);
+        removed = true;
+      }
+    } catch {
+      /* continue */
     }
-  } catch {
-    return false;
   }
-  return false;
+  return removed;
 }

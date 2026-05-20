@@ -1,6 +1,7 @@
 import { existsSync, readFileSync, writeFileSync, appendFileSync } from "fs";
 import { join } from "path";
 import { onboardMemory } from "./memory.js";
+import { normalizeText } from "./utils/text-normalize.js";
 // ─── Core Rules ─────────────────────────────────────────────
 // Mandatory behavioral constraints for multi-agent coordination.
 const CORE_RULES_SECTION = `
@@ -172,11 +173,22 @@ const DEFAULT_HEADER = `# AGENTS.md
 This file provides guidance for AI coding agents working in this repository.
 
 `;
+// Session-level memoization for scoreAgentsMd
+let _scoreCacheKey = null;
+let _scoreCacheValue = null;
+/** Clear the scoreAgentsMd cache (call after modifying AGENTS.md). */
+export function resetAgentsMdScoreCache() {
+    _scoreCacheKey = null;
+    _scoreCacheValue = null;
+}
 /**
  * Score an AGENTS.md file on completeness.
  * Returns a health assessment with 0-100 score and list of missing sections.
+ * Results are memoized per cwd for the session.
  */
 export function scoreAgentsMd(cwd) {
+    if (_scoreCacheKey === cwd && _scoreCacheValue)
+        return _scoreCacheValue;
     const agentsMdPath = join(cwd, "AGENTS.md");
     if (!existsSync(agentsMdPath)) {
         return {
@@ -190,7 +202,7 @@ export function scoreAgentsMd(cwd) {
             missing: ["AGENTS.md file", "Core Rules", "Agent Mail coordination", "CASS Memory", "Beads CLI (br) docs", "Beads Viewer (bv) docs"],
         };
     }
-    const content = readFileSync(agentsMdPath, "utf-8").toLowerCase();
+    const content = normalizeText(readFileSync(agentsMdPath, "utf-8")).toLowerCase();
     const missing = [];
     // Check core rules (50% of score)
     let coreRuleCount = 0;
@@ -222,7 +234,10 @@ export function scoreAgentsMd(cwd) {
         (hasMemory ? 15 : 0) +
         (hasBr ? 10 : 0) +
         (hasBv ? 10 : 0));
-    return { score, hasCoreRules, coreRuleCount, hasCoordination, hasMemory, hasBr, hasBv, missing };
+    const result = { score, hasCoreRules, coreRuleCount, hasCoordination, hasMemory, hasBr, hasBv, missing };
+    _scoreCacheKey = cwd;
+    _scoreCacheValue = result;
+    return result;
 }
 /**
  * Ensure the Core Rules section is present in AGENTS.md.
@@ -236,7 +251,7 @@ export async function ensureCoreRules(cwd) {
         writeFileSync(agentsMdPath, DEFAULT_HEADER + CORE_RULES_SECTION.trimStart(), "utf-8");
         return;
     }
-    const content = readFileSync(agentsMdPath, "utf-8");
+    const content = normalizeText(readFileSync(agentsMdPath, "utf-8"));
     if (!content.includes(CORE_RULES_MARKER)) {
         // Insert core rules after the header (before other sections) for visibility
         appendFileSync(agentsMdPath, "\n" + CORE_RULES_SECTION.trimStart(), "utf-8");
@@ -255,7 +270,7 @@ export async function ensureAgentMailSection(cwd) {
         onboardMemory(cwd);
         return;
     }
-    let content = readFileSync(agentsMdPath, "utf-8");
+    let content = normalizeText(readFileSync(agentsMdPath, "utf-8"));
     // Ensure core rules are present
     if (!content.includes(CORE_RULES_MARKER)) {
         appendFileSync(agentsMdPath, "\n" + CORE_RULES_SECTION.trimStart(), "utf-8");

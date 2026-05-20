@@ -6,7 +6,9 @@
     "orchestrator": {
       "type": "stdio",
       "command": "node",
-      "args": ["./scripts/start-orchestrator-mcp.cjs"]
+      "args": [
+        "/Volumes/1tb/Projects/cursor-agent-flywheel/plugins/cursor-orchestrator/scripts/start-orchestrator-mcp.cjs"
+      ]
     }
   }
 }

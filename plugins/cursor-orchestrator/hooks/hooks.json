@@ -3,13 +3,32 @@
   "hooks": {
     "sessionStart": [
       {
+        "command": "./hooks/startup.js"
+      },
+      {
         "command": "./scripts/session-start-orchestrator-notice.cjs"
+      }
+    ],
+    "preToolUse": [
+      {
+        "command": "./hooks/agent-mail-guard.js",
+        "matcher": "Shell|Bash|run_terminal_cmd"
       }
     ],
     "postToolUse": [
       {
         "command": "./scripts/post-tool-orch-approve-hint.sh",
-        "matcher": ".*(orch_approve_beads|mcp.*orch_approve).*"
+        "matcher": ".*(flywheel_approve_beads|orch_approve_beads|mcp.*flywheel_approve|mcp.*orch_approve).*"
+      }
+    ],
+    "sessionEnd": [
+      {
+        "command": "node ./hooks/agent-mail-guard.js --release-reservations"
+      }
+    ],
+    "stop": [
+      {
+        "command": "node ./hooks/agent-mail-guard.js --release-reservations"
       }
     ]
   }

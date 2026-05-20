@@ -1,0 +1,25 @@
+# Flywheel project config. Read by the MCP server at runtime.
+# Schema is hand-edited — keys are flat and additive; unknown keys are ignored.
+
+convergence:
+  gate_advance_wave: true
+
+# Cursor deep-plan: one model per parallel planner (Task tool `model` arg).
+deep_plan:
+  correctness: opus-4.6
+  ergonomics: composer-2.5
+  robustness: gpt-5.5-xhigh
+  synthesis: opus-4.6
+
+# Cursor implement swarm: Task model per bead complexity (simple/medium/complex).
+implement:
+  simple: composer-2.5
+  medium: composer-2.5
+  complex: opus-4.6
+
+# Cursor dueling idea wizards: one model per wizard + synthesis Task.
+duel:
+  wizard_a: opus-4.6
+  wizard_b: gpt-5.5-xhigh
+  wizard_c: composer-2.5
+  synthesis: opus-4.6

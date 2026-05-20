@@ -1,0 +1,8 @@
+---
+description: MCP server and repo constraints for editing cursor-orchestrator under plugins/.
+globs:
+  - "plugins/cursor-orchestrator/mcp-server/**/*.ts"
+alwaysApply: false
+---
+
+For **TypeScript** in `mcp-server/src/`, follow the full **[AGENTS.md](../AGENTS.md)** in this plugin (stdio discipline, no `console.log` on stdout, strict TS, ESM imports with `.js`). Rules here do not replace that file—read **AGENTS.md** before changing the MCP server.

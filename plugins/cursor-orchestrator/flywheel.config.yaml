@@ -1,0 +1,30 @@
+# Plugin-default flywheel config (copied to target repos on setup).
+# Project repos override via their own flywheel.config.yaml at the root.
+
+convergence:
+  gate_advance_wave: true
+
+deep_plan:
+  correctness: opus-4.6
+  ergonomics: composer-2.5
+  robustness: gpt-5.5-xhigh
+  synthesis: opus-4.6
+
+implement:
+  simple: composer-2.5
+  medium: composer-2.5
+  complex: opus-4.6
+
+duel:
+  wizard_a: opus-4.6
+  wizard_b: gpt-5.5-xhigh
+  wizard_c: composer-2.5
+  synthesis: opus-4.6
+
+grader:
+  model: opus-4.6
+
+impl_tick:
+  interval_seconds: 240
+  review_model: opus-4.6
+  max_parallel_impl: 3

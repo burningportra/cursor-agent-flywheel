@@ -1,0 +1,1 @@
+{"version":3,"file":"gemini-prompt.d.ts","sourceRoot":"","sources":["../../src/adapters/gemini-prompt.ts"],"names":[],"mappings":"AAAA;;;;;;;;;;;;GAYG;AAEH,OAAO,KAAK,EACV,aAAa,EACb,mBAAmB,EACpB,MAAM,mBAAmB,CAAC;AAE3B,YAAY,EAAE,aAAa,EAAE,mBAAmB,EAAE,CAAC;AAEnD,wBAAgB,oBAAoB,CAClC,IAAI,EAAE,mBAAmB,GACxB,aAAa,CA4Ff"}

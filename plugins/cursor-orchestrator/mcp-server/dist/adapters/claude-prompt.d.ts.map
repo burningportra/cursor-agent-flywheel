@@ -1,0 +1,1 @@
+{"version":3,"file":"claude-prompt.d.ts","sourceRoot":"","sources":["../../src/adapters/claude-prompt.ts"],"names":[],"mappings":"AAAA;;;;;;;GAOG;AAEH,OAAO,KAAK,EACV,aAAa,EACb,mBAAmB,EACpB,MAAM,mBAAmB,CAAC;AAE3B,YAAY,EAAE,aAAa,EAAE,mBAAmB,EAAE,CAAC;AAEnD,wBAAgB,oBAAoB,CAClC,IAAI,EAAE,mBAAmB,GACxB,aAAa,CA2Ef"}

@@ -63,7 +63,9 @@ export declare function appendMemory(cwd: string, entry: string, category?: stri
  */
 export declare function listMemoryEntries(cwd?: string): MemoryEntry[];
 /**
- * Search memory entries by query using CASS similar command.
+ * Search memory entries by query using CASS context command.
+ * Uses `cm context` (task-aware semantic matching) instead of `cm similar`
+ * (keyword mode) which returns empty for most queries.
  */
 export declare function searchMemory(cwd: string, query: string): MemoryEntry[];
 /**
@@ -72,7 +74,7 @@ export declare function searchMemory(cwd: string, query: string): MemoryEntry[];
 export declare function markRule(bulletId: string, helpful: boolean, reason?: string, cwd?: string): boolean;
 /**
  * Run `cm onboard` to bootstrap memory for a new project.
- * Should be called once when starting orchestration on a project that has no
+ * Should be called once when starting flywheel on a project that has no
  * existing CASS memory. Best-effort — returns true if successful.
  */
 export declare function onboardMemory(cwd?: string): boolean;

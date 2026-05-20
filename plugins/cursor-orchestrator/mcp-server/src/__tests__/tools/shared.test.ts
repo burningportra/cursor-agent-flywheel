@@ -7,6 +7,10 @@ import {
   resolveExecutionMode,
   pickRefinementModel,
   formatModelRef,
+  makeChoiceOption,
+  makeNextToolStep,
+  makeToolError,
+  makeToolResult,
 } from '../../tools/shared.js';
 import type { Bead } from '../../types.js';
 
@@ -234,5 +238,92 @@ describe('formatModelRef', () => {
 
   it('returns just id when no provider', () => {
     expect(formatModelRef({ id: 'sonnet' })).toBe('sonnet');
+  });
+});
+
+// ─── shared structured tool result helpers ─────────────────────
+
+describe('makeChoiceOption', () => {
+  it('builds a choice option with optional metadata', () => {
+    expect(makeChoiceOption('plan-first', 'Plan first', {
+      description: 'Generate a standard plan',
+      tool: 'flywheel_plan',
+      args: { mode: 'standard' },
+    })).toEqual({
+      id: 'plan-first',
+      label: 'Plan first',
+      description: 'Generate a standard plan',
+      tool: 'flywheel_plan',
+      args: { mode: 'standard' },
+    });
+  });
+});
+
+describe('makeNextToolStep', () => {
+  it('creates a structured next-step payload', () => {
+    expect(makeNextToolStep('call_tool', 'Call flywheel_select next', {
+      tool: 'flywheel_select',
+      argsSchemaHint: { goal: 'string' },
+      options: [
+        makeChoiceOption('select-goal', 'Select a goal', { tool: 'flywheel_select' }),
+      ],
+    })).toEqual({
+      type: 'call_tool',
+      message: 'Call flywheel_select next',
+      tool: 'flywheel_select',
+      argsSchemaHint: { goal: 'string' },
+      options: [
+        {
+          id: 'select-goal',
+          label: 'Select a goal',
+          tool: 'flywheel_select',
+        },
+      ],
+    });
+  });
+});
+
+describe('makeToolResult', () => {
+  it('returns text content with structuredContent', () => {
+    const structured = {
+      tool: 'flywheel_profile',
+      version: 1,
+      status: 'ok',
+      phase: 'discovering',
+      data: { kind: 'profile_ready' },
+    };
+
+    expect(makeToolResult('Profile complete', structured)).toEqual({
+      content: [{ type: 'text', text: 'Profile complete' }],
+      structuredContent: structured,
+    });
+  });
+});
+
+describe('makeToolError', () => {
+  it('returns a standard structured error result with isError set', () => {
+    const result = makeToolError('flywheel_select', 'planning', 'invalid_input', 'Goal is required', {
+      retryable: false,
+      details: { field: 'goal' },
+    });
+
+    expect(result.content).toEqual([{ type: 'text', text: 'Goal is required' }]);
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toMatchObject({
+      tool: 'flywheel_select',
+      version: 1,
+      status: 'error',
+      phase: 'planning',
+      data: {
+        kind: 'error',
+        error: {
+          code: 'invalid_input',
+          message: 'Goal is required',
+          retryable: false,
+          details: { field: 'goal' },
+        },
+      },
+    });
+    expect(result.structuredContent!.data.error.timestamp).toBeDefined();
   });
 });

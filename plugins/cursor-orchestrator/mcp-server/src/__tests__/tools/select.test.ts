@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { runSelect } from '../../tools/select.js';
 import { createMockExec, makeState } from '../helpers/mocks.js';
-import type { OrchestratorState, RepoProfile } from '../../types.js';
+import type { FlywheelState, RepoProfile } from '../../types.js';
 
 // ─── Helpers ──────────────────────────────────────────────────
 
@@ -22,15 +22,15 @@ function makeRepoProfile(overrides: Partial<RepoProfile> = {}): RepoProfile {
   };
 }
 
-function makeCtx(stateOverrides: Partial<OrchestratorState> = {}) {
+function makeCtx(stateOverrides: Partial<FlywheelState> = {}) {
   const exec = createMockExec();
   const state = makeState({ repoProfile: makeRepoProfile(), ...stateOverrides });
-  const saved: OrchestratorState[] = [];
+  const saved: FlywheelState[] = [];
   const ctx = {
     exec,
     cwd: '/fake/cwd',
     state,
-    saveState: (s: OrchestratorState) => { saved.push(structuredClone(s)); },
+    saveState: (s: FlywheelState) => { saved.push(structuredClone(s)); },
     clearState: () => {},
   };
   return { ctx, state, saved };
@@ -100,7 +100,7 @@ describe('runSelect', () => {
     expect(text).toContain('Option A');
     expect(text).toContain('Option B');
     expect(text).toContain('Option C');
-    expect(text).toContain('orch_plan');
+    expect(text).toContain('flywheel_plan');
   });
 
   it('includes the goal in the response text', async () => {
@@ -177,5 +177,118 @@ describe('runSelect', () => {
     expect(result.isError).toBeUndefined();
     expect(result.content[0].text).toContain('Quick fix');
     expect(ctx.state.phase).toBe('planning');
+  });
+
+  it('returns structuredContent for successful goal selection', async () => {
+    const { ctx } = makeCtx({ constraints: ['must be backward compatible'] });
+
+    const result = await runSelect(ctx, { cwd: '/fake/cwd', goal: 'Add tests' });
+
+    expect(result.structuredContent).toEqual({
+      tool: 'flywheel_select',
+      version: 1,
+      status: 'ok',
+      phase: 'planning',
+      goal: 'Add tests',
+      nextStep: {
+        type: 'present_choices',
+        message: 'Choose a workflow for the selected goal.',
+        options: [
+          {
+            id: 'plan-first',
+            label: 'Plan first',
+            description: 'Generate a single plan document with flywheel_plan mode="standard".',
+            tool: 'flywheel_plan',
+            args: { mode: 'standard' },
+          },
+          {
+            id: 'deep-plan',
+            label: 'Deep plan',
+            description: 'Generate parallel planning perspectives with flywheel_plan mode="deep".',
+            tool: 'flywheel_plan',
+            args: { mode: 'deep' },
+          },
+          {
+            id: 'direct-to-beads',
+            label: 'Direct to beads',
+            description: 'Skip planning and create beads directly with br create / br dep add.',
+          },
+        ],
+      },
+      data: {
+        kind: 'goal_selected',
+        goal: 'Add tests',
+        constraints: ['must be backward compatible'],
+        workflowOptions: ['plan-first', 'deep-plan', 'direct-to-beads'],
+        hasRepoProfile: true,
+      },
+    });
+  });
+
+  // ─── v3.13.0 outcome-grading cycle-boundary tests (T13) ───
+
+  describe('outcome-grading cycle-boundary', () => {
+    it('captures cycleStartSha from git rev-parse HEAD', async () => {
+      const exec = createMockExec([
+        { cmd: 'git', args: ['rev-parse', 'HEAD'], result: { code: 0, stdout: 'abc123def456\n', stderr: '' } },
+      ]);
+      const state = makeState({ repoProfile: makeRepoProfile() });
+      const ctx = {
+        exec,
+        cwd: '/fake/cwd',
+        state,
+        saveState: () => {},
+        clearState: () => {},
+      };
+
+      await runSelect(ctx, { cwd: '/fake/cwd', goal: 'New cycle' });
+
+      expect(state.cycleStartSha).toBe('abc123def456');
+    });
+
+    it('leaves cycleStartSha undefined when git rev-parse fails', async () => {
+      const { ctx, state } = makeCtx();
+
+      await runSelect(ctx, { cwd: '/fake/cwd', goal: 'Detached HEAD' });
+
+      expect(state.cycleStartSha).toBeUndefined();
+    });
+
+    it('resets per-cycle outcome-grading fields', async () => {
+      const { ctx, state } = makeCtx();
+      state.outcomeRubricPath = '.pi-flywheel/plans/old-slug/rubric.md';
+      state.outcomeGradingSkipped = true;
+      state.outcomeGradingHistory = [
+        { iteration: 1, timestamp: '2026-05-01T00:00:00Z', verdict: {} as never },
+      ];
+      state.cycleEndTestOutput = 'old test output';
+
+      await runSelect(ctx, { cwd: '/fake/cwd', goal: 'Fresh cycle' });
+
+      expect(state.outcomeRubricPath).toBeUndefined();
+      expect(state.outcomeGradingSkipped).toBeUndefined();
+      expect(state.outcomeGradingHistory).toBeUndefined();
+      expect(state.cycleEndTestOutput).toBeUndefined();
+    });
+  });
+
+  it('returns structuredContent for invalid goal errors', async () => {
+    const { ctx } = makeCtx();
+
+    const result = await runSelect(ctx, { cwd: '/fake/cwd', goal: '   ' });
+
+    expect(result.structuredContent).toMatchObject({
+      tool: 'flywheel_select',
+      version: 1,
+      status: 'error',
+      phase: 'idle',
+      data: {
+        kind: 'error',
+        error: {
+          code: 'invalid_input',
+          message: 'Error: goal parameter is required and must be non-empty.',
+        },
+      },
+    });
   });
 });

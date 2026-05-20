@@ -1,0 +1,1 @@
+{"version":3,"file":"raw-call.js","sourceRoot":"","sources":["../../../../../src/__tests__/lint/fixtures/reserve001/raw-call.ts"],"names":[],"mappings":"AAEA,MAAM,CAAC,KAAK,UAAU,GAAG,CAAC,IAAa;IACrC,OAAO,YAAY,CAAC,IAAI,EAAE,wBAAwB,EAAE;QAClD,WAAW,EAAE,MAAM;QACnB,UAAU,EAAE,GAAG;QACf,KAAK,EAAE,CAAC,YAAY,CAAC;KACtB,CAAC,CAAC;AACL,CAAC"}
