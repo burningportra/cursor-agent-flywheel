@@ -15,3 +15,10 @@ temp/
 
 # Local orchestrator state (cursor-orchestrator MCP)
 .pi-orchestrator/
+.pi-flywheel/
+
+# Visual prototype sessions (flywheel planning companion)
+.research/
+
+# Local pi-agent suggester state (not flywheel checkpoint)
+.pi/

@@ -120,6 +120,10 @@ ask"; otherwise list them under "Explicit non-goals" so they don't leak in.
 
    ⚠ **Anti-pattern**: writing the artifact, saying "Written to `<path>`. Ready to plan?", and ending the turn. That "Ready to plan?" is a prose question, not an `AskUserQuestion` — it kicks the user out of the flywheel UX and forces them to free-text the next step. Always invoke Step 5's `AskUserQuestion` instead.
 
+### 4.55 — Visual prototype server (optional; planning only)
+
+When the next planning questions are **visual** (mockups, layouts, flow diagrams — not scope/tradeoff text), offer the local browser companion before Step 5. **Cursor:** see `skills/start/_planning.cursor.md` § Step 4.55. **Skill:** `agent-flywheel:visual_prototype` (`flywheel_get_skill`). Artifacts live under `.pi-flywheel/visual/<session>/` (gitignored). Stop the server before Step 5 plan mode or bead creation. Do **not** use during implement/review — MCP **AskQuestion** gates only there.
+
 ### 4.5d — Phase 0.6: Codex-rescue handoff on planner stall
 
 > **Why this exists.** A planner agent that hits its retry budget (e.g. `flywheel_plan` errors twice with the same `FlywheelErrorCode`, or a deep-plan synthesizer scores below 0.5 after two revisions) is almost always wrestling with framing-or-tooling friction that a different model (GPT-5 / Codex) can untangle in one pass. Rather than burn a third Claude retry, offer the user a structured Codex handoff. Source: bead `agent-flywheel-plugin-1qn`.

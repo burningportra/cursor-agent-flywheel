@@ -2,13 +2,31 @@
 
 ## [Unreleased]
 
+_No plugin-only changes beyond monorepo root._
+
+---
+
+## [3.18.1+visual] — 2026-05-20
+
+### Added
+
+- **`visual_prototype`** skill — planning-only browser companion (superpowers Visual Companion port); `skills/visual-prototype/`, Step 4.55 in `_planning.cursor.md` / `_planning.md`.
+- WS protocol tests under `tests/visual-prototype/`.
+- Skills bundle entry for `agent-flywheel:visual_prototype`.
+
+---
+
+## [3.18.1+gates] — 2026-05-20
+
 ### Added
 
 - **`flywheel_bead_approval_gate`** — Cursor AskQuestion menus for bead review, quality score, polish, coverage, dedup, and launch (`step`: `review` → `launch`).
 - **`flywheel_impl_tick`** — Implement-phase supervision (~240s): commit-batch review dispatch, wave advance on closed beads.
-- Slash commands: **`/flywheel-beads-review`**, **`/flywheel-impl-tick`**; `/flywheel` menu item **26** (bead gates).
+- **`flywheel_wave_review_gate`**, **`flywheel_wrap_up_gate`** — post-wave and wrap-up AskQuestion gates.
+- Slash commands: **`/flywheel-beads-review`**, **`/flywheel-impl-tick`**, **`/flywheel-recover-gates`**; full `flywheel-*` parity in monorepo `.cursor/commands/`.
 - Playbooks: `skills/start/_beads.cursor.md`, `_implement.cursor.md` updates for native gates + impl tick polling.
-- `scripts/install-flywheel-cursor.sh` — global copy of `flywheel-beads-review` to `~/.cursor/commands/`.
+- `scripts/install-flywheel-cursor.sh` — rsync to `~/.cursor/plugins/local/`, MCP rebuild, global command copies.
+- Large upstream skills sync via `scripts/sync-agent-flywheel-upstream.mjs` (see monorepo commit [`3e1ebbe`](https://github.com/burningportra/cursor-agent-flywheel/commit/3e1ebbe)).
 
 ### Fixed
 

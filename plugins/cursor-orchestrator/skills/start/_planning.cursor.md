@@ -9,6 +9,17 @@ description: "Cursor Steps 4.5–5.6: deep plan Task trinity, duel gate, standar
 
 Skip when discover confidence ≥ 0.8 or detailed `USER_INPUT` (>100 chars). Else three **AskQuestion** rounds (smallest / 10x / adjacents) → write `docs/brainstorms/<slug>-<date>.md`.
 
+## Step 4.55 — Visual prototype server (optional)
+
+When the next planning questions are **visual** (mockups, layouts, diagrams — not scope/tradeoff text):
+
+1. Offer the browser companion in **its own message** (consent; token note). Wait for yes/no.
+2. `flywheel_get_skill({ name: "agent-flywheel:visual_prototype" })` — follow `visual-companion.md`.
+3. Start: `plugins/cursor-orchestrator/skills/visual-prototype/scripts/start-server.sh --project-dir <cwd>` (Cursor: prefer `--foreground` + background shell; read `state/server-info` next turn).
+4. **Write** HTML to `screen_dir`; read `state/events` after user replies; stop server when entering Step 5 plan mode or beads.
+
+Do **not** use during implement/review — **AskQuestion** gates only there.
+
 ## Step 5 — Plan mode
 
 **AskQuestion** plan shape: Standard / Deep / Duel / Skip to beads.
