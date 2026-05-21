@@ -315,6 +315,35 @@ export interface IdeaProvenance {
 export type IdeaCategory = "feature" | "refactor" | "docs" | "dx" | "performance" | "reliability" | "security" | "testing";
 export type FlywheelPhase = "idle" | "profiling" | "discovering" | "awaiting_selection" | "planning" | "researching" | "awaiting_plan_approval" | "creating_beads" | "refining_beads" | "awaiting_bead_approval" | "implementing" | "reviewing" | "iterating" | "complete" | "doctor" | "observe";
 export type CoordinationMode = "worktree" | "single-branch";
+/** Known coordinator tools referenced by hints — closed enum prevents typo primaryTool. */
+export type CoordinatorPrimaryTool = "flywheel_wave_review_gate" | "flywheel_impl_tick" | "flywheel_wrap_up_gate" | "flywheel_review" | "flywheel_advance_wave";
+export interface CoordinatorNextActionHint {
+    /** Single line, ≤120 chars in v1 templates. */
+    text: string;
+    primaryTool: CoordinatorPrimaryTool;
+    beadIds?: string[];
+    /** Must equal enclosing response epoch at emission time. */
+    generationEpoch: number;
+}
+export type SteeringEventSource = "wave_review" | "wrap_up" | "bead_launch";
+export interface SteeringEvent {
+    at: string;
+    source: SteeringEventSource;
+    /** Gate action id, e.g. fresh-eyes, looks-good-all */
+    actionId: string;
+    beadIds?: string[];
+    /** sha256(actionId + sorted beadIds joined) — dedup key */
+    normalizedKey: string;
+}
+export interface ProfileWatchEntry {
+    /** Repo-relative POSIX path (normalized, no `..`). */
+    path: string;
+    sha256: string;
+}
+export interface ProfileWatchState {
+    registeredAt: string;
+    files: ProfileWatchEntry[];
+}
 export interface FlywheelState {
     phase: FlywheelPhase;
     repoProfile?: RepoProfile;
@@ -521,6 +550,15 @@ export interface FlywheelState {
     pendingBatchReviewRange?: string;
     /** ISO timestamp of the last flywheel_impl_tick (coordinator cadence). */
     lastImplTickAt?: string;
+    /** Monotonic generation counter bumped on user steering events. */
+    coordinatorEpoch?: number;
+    /** Recent gate resolutions for hint deduplication (FIFO-capped elsewhere). */
+    steeringEvents?: SteeringEvent[];
+    /** Baseline file hashes registered at plan/profile bind time. */
+    profileWatch?: ProfileWatchState;
+    profileStale?: boolean;
+    profileStaleReason?: string;
+    lastProfileRefreshAt?: string;
 }
 /** On-disk checkpoint envelope — wraps FlywheelState with crash-recovery metadata. */
 export interface CheckpointEnvelope {
