@@ -9,8 +9,9 @@ import { clearPendingBatchReview, countCommitsSinceLastBatchReview, markBatchRev
 import { adaptPromptForCursor, buildCursorImplSpawnInstructions, getCursorImplModels, modelForComplexity, } from './cursor-implement-swarm.js';
 import { buildAskQuestionFromGate, buildBatchReviewSynthesizedGate } from './cursor-user-gates.js';
 import { classifyBeadComplexity } from './model-routing.js';
-import { getCoordinatorEpoch } from './coordinator-epoch.js';
+import { getCoordinatorEpoch, persistCoordinatorEpochBump } from './coordinator-epoch.js';
 import { areEpochGuardsEnabled, loadFlywheelConfigWithWarnings } from './flywheel-config.js';
+import { probeProfileStale } from './profile-staleness.js';
 import { runAdvanceWave } from './tools/advance-wave.js';
 import { runReview } from './tools/review.js';
 const DEFAULT_TICK_INTERVAL_SEC = 240;
@@ -134,6 +135,7 @@ export async function runImplTickCore(ctx, args) {
     const epochAtTickStart = getCoordinatorEpoch(state);
     const epochGuards = areEpochGuardsEnabled(cwd);
     const cfg = resolveImplTickConfig(cwd);
+    const { config } = loadFlywheelConfigWithWarnings(cwd);
     const tickAt = new Date().toISOString();
     state.lastImplTickAt = tickAt;
     await saveState(state);
@@ -153,12 +155,14 @@ export async function runImplTickCore(ctx, args) {
         beads = [];
     }
     const counts = beadCounts(beads);
+    const profileStale = probeProfileStale(cwd, state, config.profile).stale;
     const baseSnapshot = {
         headSha,
         commitsSinceBaseline,
         commitBatchThreshold: threshold,
         pendingBatchReviewRange: state.pendingBatchReviewRange,
         ...counts,
+        profileStale,
     };
     const playbook = buildImplTickCoordinatorPlaybook(cfg);
     // ── In-flight batch review ──
@@ -233,6 +237,8 @@ export async function runImplTickCore(ctx, args) {
     // ── Wave advance when beads closed ──
     const closed = args.closedBeadIds?.filter(Boolean) ?? [];
     if (closed.length > 0) {
+        // E1: closed wave on impl_tick — bump before advance_wave (E2 may bump again)
+        await persistCoordinatorEpochBump(ctx);
         const waveResult = await runAdvanceWave(ctx, {
             cwd,
             closedBeadIds: closed,

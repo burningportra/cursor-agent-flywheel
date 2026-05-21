@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { bumpCoordinatorEpoch, getCoordinatorEpoch, } from "../coordinator-epoch.js";
+import { bumpCoordinatorEpoch, getCoordinatorEpoch, persistCoordinatorEpochBump, } from "../coordinator-epoch.js";
 import { createInitialState } from "../types.js";
 import { loadState, saveState } from "../state.js";
 let testDir;
@@ -52,6 +52,23 @@ describe("bumpCoordinatorEpoch", () => {
         const before = createInitialState();
         bumpCoordinatorEpoch(before);
         expect(before.coordinatorEpoch).toBeUndefined();
+    });
+});
+describe("persistCoordinatorEpochBump", () => {
+    it("increments epoch on ctx.state and invokes saveState", async () => {
+        const state = createInitialState();
+        const saved = [];
+        const sink = {
+            state,
+            saveState: (s) => {
+                saved.push(structuredClone(s));
+            },
+        };
+        const epoch = await persistCoordinatorEpochBump(sink);
+        expect(epoch).toBe(1);
+        expect(getCoordinatorEpoch(state)).toBe(1);
+        expect(saved).toHaveLength(1);
+        expect(getCoordinatorEpoch(saved[0])).toBe(1);
     });
 });
 describe("checkpoint round-trip", () => {

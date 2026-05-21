@@ -975,4 +975,53 @@ describe('runReview', () => {
       expect(vi.mocked(synthesizeBeadsFromFindings)).not.toHaveBeenCalled();
     });
   });
+
+  describe('coordinator epoch bumps (E3–E6)', () => {
+    it('E3: looks-good bumps coordinatorEpoch', async () => {
+      const bead = makeBead();
+      const { ctx, state } = makeCtx({}, [
+        brShowCall(bead),
+        brUpdateCall('test-bead-1', 'closed'),
+        brReadyCall([]),
+      ]);
+
+      await runReview(ctx, { cwd: '/fake/cwd', beadId: 'test-bead-1', action: 'looks-good' });
+
+      expect(state.coordinatorEpoch).toBe(1);
+    });
+
+    it('E4: hit-me bumps coordinatorEpoch', async () => {
+      const bead = makeBead();
+      const { ctx, state } = makeCtx({}, [brShowCall(bead)]);
+
+      await runReview(ctx, { cwd: '/fake/cwd', beadId: 'test-bead-1', action: 'hit-me' });
+
+      expect(state.coordinatorEpoch).toBe(1);
+    });
+
+    it('E5: skip bumps coordinatorEpoch', async () => {
+      const bead = makeBead();
+      const { ctx, state } = makeCtx({}, [
+        brShowCall(bead),
+        brUpdateCall('test-bead-1', 'deferred'),
+        brReadyCall([]),
+      ]);
+
+      await runReview(ctx, { cwd: '/fake/cwd', beadId: 'test-bead-1', action: 'skip' });
+
+      expect(state.coordinatorEpoch).toBe(1);
+    });
+
+    it('E6: __regress_to_plan__ bumps coordinatorEpoch', async () => {
+      const { ctx, state } = makeCtx({ phase: 'reviewing' });
+
+      await runReview(ctx, {
+        cwd: '/fake/cwd',
+        beadId: '__regress_to_plan__',
+        action: 'looks-good',
+      });
+
+      expect(state.coordinatorEpoch).toBe(1);
+    });
+  });
 });

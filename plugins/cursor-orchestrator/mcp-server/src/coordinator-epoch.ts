@@ -28,3 +28,18 @@ export function bumpCoordinatorEpoch(state: FlywheelState): FlywheelState {
   const next = getCoordinatorEpoch(state) + 1;
   return { ...state, coordinatorEpoch: next };
 }
+
+/** Minimal sink for persisting a steering bump to checkpoint. */
+export type CoordinatorEpochSink = {
+  state: FlywheelState;
+  saveState: (state: FlywheelState) => Promise<boolean> | void;
+};
+
+/** Bump coordinatorEpoch, merge into ctx.state, and persist. Returns new epoch. */
+export async function persistCoordinatorEpochBump(
+  sink: CoordinatorEpochSink,
+): Promise<number> {
+  Object.assign(sink.state, bumpCoordinatorEpoch(sink.state));
+  await sink.saveState(sink.state);
+  return getCoordinatorEpoch(sink.state);
+}

@@ -110,6 +110,20 @@ describe('runAdvanceWave', () => {
             data: { error: { code: 'invalid_input' } },
         });
     });
+    it('E2: bumps coordinatorEpoch on handler entry and persists', async () => {
+        const saved = [];
+        const { ctx, state } = makeCtx({ coordinatorEpoch: 2 }, [
+            brShowClosed('done-1'),
+            gitGrepFound('done-1', 'abc1234'),
+            brReadyCall([]),
+        ]);
+        ctx.saveState = (s) => {
+            saved.push(structuredClone(s));
+        };
+        await runAdvanceWave(ctx, { cwd: '/fake/project', closedBeadIds: ['done-1'] });
+        expect(state.coordinatorEpoch).toBe(3);
+        expect(saved.some((s) => s.coordinatorEpoch === 3)).toBe(true);
+    });
     it('returns waveComplete=false when stragglers have no matching commit', async () => {
         const { ctx } = makeCtx({}, [
             brShowOpen('strag-1'),

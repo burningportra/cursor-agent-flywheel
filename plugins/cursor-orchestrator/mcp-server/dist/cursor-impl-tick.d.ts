@@ -37,6 +37,7 @@ export interface ImplTickStructured {
             readyCount: number;
             inProgressCount: number;
             closedCount: number;
+            profileStale: boolean;
         };
         coordinatorPlaybook: string;
         batchReviewTask?: {

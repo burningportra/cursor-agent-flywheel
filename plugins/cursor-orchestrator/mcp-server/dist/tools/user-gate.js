@@ -1,3 +1,4 @@
+import { persistCoordinatorEpochBump } from "../coordinator-epoch.js";
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
 import { readBeads } from "../beads.js";
@@ -51,6 +52,16 @@ function resolveBeadsFromIds(all, beadIds) {
 }
 export async function runWaveReviewGate(ctx, args) {
     const { cwd, state, exec } = ctx;
+    // E8: record wave review gate action after AskQuestion maps actions id
+    if (args.confirmAction !== undefined) {
+        const epoch = await persistCoordinatorEpochBump(ctx);
+        return makeOkToolResult("flywheel_wave_review_gate", state.phase, `Wave review action recorded: ${args.confirmAction} (epoch ${epoch}).`, {
+            kind: "wave_review_confirmed",
+            confirmAction: args.confirmAction,
+            coordinatorEpoch: epoch,
+            beadIds: args.beadIds,
+        });
+    }
     if (!Array.isArray(args.beadIds) || args.beadIds.length === 0) {
         return makeToolError("flywheel_wave_review_gate", state.phase, "invalid_input", "beadIds must be a non-empty array of beads that finished in this wave.");
     }
@@ -173,6 +184,8 @@ export async function runWrapUpGate(ctx, args) {
         beadCommitCount,
     });
     if (args.confirmWrapUp !== undefined) {
+        // E7: wrap-up confirm is user steering
+        await persistCoordinatorEpochBump(ctx);
         state.wrapUpConfirmed = true;
         state.phase = state.phase === "complete" ? "complete" : "iterating";
         saveState(state);

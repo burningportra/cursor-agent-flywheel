@@ -143,4 +143,51 @@ describe('flywheel user gate tools', () => {
     expect(data.actions['1']).toBe('wrap-up-full');
     expect(data.askQuestion.questions[0].options[0].id).toBe('1');
   });
+
+  it('E7: flywheel_wrap_up_gate confirmWrapUp bumps coordinatorEpoch', async () => {
+    const saved: FlywheelState[] = [];
+    const { ctx } = {
+      ctx: {
+        exec: createMockExec([]),
+        cwd: process.cwd(),
+        state: makeState({ phase: 'iterating', coordinatorEpoch: 0 }),
+        saveState: (s: FlywheelState) => {
+          saved.push(structuredClone(s));
+        },
+        clearState: () => {},
+      },
+    };
+
+    await runWrapUpGate(ctx, { cwd: process.cwd(), confirmWrapUp: 'full' });
+
+    expect(ctx.state.coordinatorEpoch).toBe(1);
+    expect(saved.some((s) => s.coordinatorEpoch === 1)).toBe(true);
+  });
+
+  it('E8: flywheel_wave_review_gate confirmAction bumps coordinatorEpoch', async () => {
+    const saved: FlywheelState[] = [];
+    const { ctx } = {
+      ctx: {
+        exec: createMockExec([]),
+        cwd: '/fake/project',
+        state: makeState({ phase: 'implementing', coordinatorEpoch: 4 }),
+        saveState: (s: FlywheelState) => {
+          saved.push(structuredClone(s));
+        },
+        clearState: () => {},
+      },
+    };
+
+    const result = await runWaveReviewGate(ctx, {
+      cwd: '/fake/project',
+      beadIds: ['tb-9'],
+      confirmAction: 'looks-good-all',
+    });
+    const data = (result.structuredContent as { data: Record<string, unknown> }).data;
+
+    expect(data.kind).toBe('wave_review_confirmed');
+    expect(data.coordinatorEpoch).toBe(5);
+    expect(ctx.state.coordinatorEpoch).toBe(5);
+    expect(saved.some((s) => s.coordinatorEpoch === 5)).toBe(true);
+  });
 });

@@ -54,6 +54,7 @@ export declare const TOOLS: ({
             maxNextWave?: undefined;
             confirmImplModels?: undefined;
             skipImplModelsGate?: undefined;
+            confirmAction?: undefined;
             confirmWrapUp?: undefined;
             step?: undefined;
             coveredSections?: undefined;
@@ -202,6 +203,7 @@ export declare const TOOLS: ({
             maxNextWave?: undefined;
             confirmImplModels?: undefined;
             skipImplModelsGate?: undefined;
+            confirmAction?: undefined;
             confirmWrapUp?: undefined;
             step?: undefined;
             coveredSections?: undefined;
@@ -272,6 +274,7 @@ export declare const TOOLS: ({
             maxNextWave?: undefined;
             confirmImplModels?: undefined;
             skipImplModelsGate?: undefined;
+            confirmAction?: undefined;
             confirmWrapUp?: undefined;
             step?: undefined;
             coveredSections?: undefined;
@@ -354,6 +357,7 @@ export declare const TOOLS: ({
             maxNextWave?: undefined;
             confirmImplModels?: undefined;
             skipImplModelsGate?: undefined;
+            confirmAction?: undefined;
             confirmWrapUp?: undefined;
             step?: undefined;
             coveredSections?: undefined;
@@ -477,6 +481,7 @@ export declare const TOOLS: ({
             maxNextWave?: undefined;
             confirmImplModels?: undefined;
             skipImplModelsGate?: undefined;
+            confirmAction?: undefined;
             confirmWrapUp?: undefined;
             step?: undefined;
             coveredSections?: undefined;
@@ -561,6 +566,7 @@ export declare const TOOLS: ({
             maxNextWave?: undefined;
             confirmImplModels?: undefined;
             skipImplModelsGate?: undefined;
+            confirmAction?: undefined;
             confirmWrapUp?: undefined;
             step?: undefined;
             coveredSections?: undefined;
@@ -635,6 +641,7 @@ export declare const TOOLS: ({
             maxNextWave?: undefined;
             confirmImplModels?: undefined;
             skipImplModelsGate?: undefined;
+            confirmAction?: undefined;
             confirmWrapUp?: undefined;
             step?: undefined;
             coveredSections?: undefined;
@@ -723,6 +730,7 @@ export declare const TOOLS: ({
             maxNextWave?: undefined;
             confirmImplModels?: undefined;
             skipImplModelsGate?: undefined;
+            confirmAction?: undefined;
             confirmWrapUp?: undefined;
             step?: undefined;
             coveredSections?: undefined;
@@ -805,6 +813,85 @@ export declare const TOOLS: ({
             threshold?: undefined;
             parallelism?: undefined;
             skipEnv?: undefined;
+            confirmAction?: undefined;
+            confirmWrapUp?: undefined;
+            step?: undefined;
+            coveredSections?: undefined;
+            totalSections?: undefined;
+            missingSections?: undefined;
+            overlapPairs?: undefined;
+            focus?: undefined;
+            top?: undefined;
+            output?: undefined;
+            confirmDuelModels?: undefined;
+            skipDuelModelsGate?: undefined;
+            query?: undefined;
+            operation?: undefined;
+            content?: undefined;
+            entryId?: undefined;
+            refreshRoot?: undefined;
+            includeBodyInText?: undefined;
+            name?: undefined;
+            sinceDays?: undefined;
+            coordinatorAgent?: undefined;
+            variant?: undefined;
+            recentPlanPaths?: undefined;
+            isFirstRun?: undefined;
+            phase?: undefined;
+            openBeadCount?: undefined;
+            checkName?: undefined;
+            autoConfirm?: undefined;
+            planSlug?: undefined;
+            planPath?: undefined;
+            editIntent?: undefined;
+            graderStdout?: undefined;
+            section?: undefined;
+        };
+        required: string[];
+    };
+} | {
+    name: string;
+    description: string;
+    inputSchema: {
+        type: string;
+        properties: {
+            cwd: {
+                type: string;
+                description: string;
+            };
+            beadIds: {
+                type: string;
+                items: {
+                    type: string;
+                };
+                minItems: number;
+                description: string;
+            };
+            confirmAction: {
+                type: string;
+                description: string;
+            };
+            goal?: undefined;
+            force?: undefined;
+            ideas?: undefined;
+            mode?: undefined;
+            planFile?: undefined;
+            planContent?: undefined;
+            source?: undefined;
+            action?: undefined;
+            advancedAction?: undefined;
+            remediation?: undefined;
+            until_convergence_score?: undefined;
+            max_rounds?: undefined;
+            beadId?: undefined;
+            parallelSafe?: undefined;
+            threshold?: undefined;
+            parallelism?: undefined;
+            skipEnv?: undefined;
+            closedBeadIds?: undefined;
+            maxNextWave?: undefined;
+            confirmImplModels?: undefined;
+            skipImplModelsGate?: undefined;
             confirmWrapUp?: undefined;
             step?: undefined;
             coveredSections?: undefined;
@@ -880,6 +967,7 @@ export declare const TOOLS: ({
             maxNextWave?: undefined;
             confirmImplModels?: undefined;
             skipImplModelsGate?: undefined;
+            confirmAction?: undefined;
             step?: undefined;
             coveredSections?: undefined;
             totalSections?: undefined;
@@ -970,6 +1058,7 @@ export declare const TOOLS: ({
             maxNextWave?: undefined;
             confirmImplModels?: undefined;
             skipImplModelsGate?: undefined;
+            confirmAction?: undefined;
             confirmWrapUp?: undefined;
             focus?: undefined;
             top?: undefined;
@@ -1056,6 +1145,7 @@ export declare const TOOLS: ({
             maxNextWave?: undefined;
             confirmImplModels?: undefined;
             skipImplModelsGate?: undefined;
+            confirmAction?: undefined;
             confirmWrapUp?: undefined;
             step?: undefined;
             coveredSections?: undefined;
@@ -1120,6 +1210,7 @@ export declare const TOOLS: ({
             closedBeadIds?: undefined;
             maxNextWave?: undefined;
             skipImplModelsGate?: undefined;
+            confirmAction?: undefined;
             confirmWrapUp?: undefined;
             step?: undefined;
             coveredSections?: undefined;
@@ -1209,6 +1300,7 @@ export declare const TOOLS: ({
             maxNextWave?: undefined;
             confirmImplModels?: undefined;
             skipImplModelsGate?: undefined;
+            confirmAction?: undefined;
             confirmWrapUp?: undefined;
             step?: undefined;
             coveredSections?: undefined;
@@ -1271,6 +1363,7 @@ export declare const TOOLS: ({
             maxNextWave?: undefined;
             confirmImplModels?: undefined;
             skipImplModelsGate?: undefined;
+            confirmAction?: undefined;
             confirmWrapUp?: undefined;
             step?: undefined;
             coveredSections?: undefined;
@@ -1347,6 +1440,7 @@ export declare const TOOLS: ({
             maxNextWave?: undefined;
             confirmImplModels?: undefined;
             skipImplModelsGate?: undefined;
+            confirmAction?: undefined;
             confirmWrapUp?: undefined;
             step?: undefined;
             coveredSections?: undefined;
@@ -1419,6 +1513,7 @@ export declare const TOOLS: ({
             maxNextWave?: undefined;
             confirmImplModels?: undefined;
             skipImplModelsGate?: undefined;
+            confirmAction?: undefined;
             confirmWrapUp?: undefined;
             step?: undefined;
             coveredSections?: undefined;
@@ -1496,6 +1591,7 @@ export declare const TOOLS: ({
             maxNextWave?: undefined;
             confirmImplModels?: undefined;
             skipImplModelsGate?: undefined;
+            confirmAction?: undefined;
             confirmWrapUp?: undefined;
             step?: undefined;
             coveredSections?: undefined;
@@ -1586,6 +1682,7 @@ export declare const TOOLS: ({
             maxNextWave?: undefined;
             confirmImplModels?: undefined;
             skipImplModelsGate?: undefined;
+            confirmAction?: undefined;
             confirmWrapUp?: undefined;
             step?: undefined;
             coveredSections?: undefined;
@@ -1663,6 +1760,7 @@ export declare const TOOLS: ({
             maxNextWave?: undefined;
             confirmImplModels?: undefined;
             skipImplModelsGate?: undefined;
+            confirmAction?: undefined;
             confirmWrapUp?: undefined;
             step?: undefined;
             coveredSections?: undefined;
@@ -1732,6 +1830,7 @@ export declare const TOOLS: ({
             maxNextWave?: undefined;
             confirmImplModels?: undefined;
             skipImplModelsGate?: undefined;
+            confirmAction?: undefined;
             confirmWrapUp?: undefined;
             step?: undefined;
             coveredSections?: undefined;
@@ -1829,6 +1928,7 @@ export declare const TOOLS: ({
             maxNextWave?: undefined;
             confirmImplModels?: undefined;
             skipImplModelsGate?: undefined;
+            confirmAction?: undefined;
             confirmWrapUp?: undefined;
             step?: undefined;
             coveredSections?: undefined;
@@ -1904,6 +2004,7 @@ export declare const TOOLS: ({
             maxNextWave?: undefined;
             confirmImplModels?: undefined;
             skipImplModelsGate?: undefined;
+            confirmAction?: undefined;
             confirmWrapUp?: undefined;
             step?: undefined;
             coveredSections?: undefined;
@@ -1975,6 +2076,7 @@ export declare const TOOLS: ({
             maxNextWave?: undefined;
             confirmImplModels?: undefined;
             skipImplModelsGate?: undefined;
+            confirmAction?: undefined;
             confirmWrapUp?: undefined;
             step?: undefined;
             coveredSections?: undefined;

@@ -931,6 +931,8 @@ export interface WaveReviewGateArgs {
   cwd: string;
   /** Bead IDs that finished in the current wave (from Agent Mail / swarm). */
   beadIds: string[];
+  /** User's AskQuestion selection — records steering and bumps coordinator epoch (E8). */
+  confirmAction?: string;
 }
 export interface WrapUpGateArgs {
   cwd: string;

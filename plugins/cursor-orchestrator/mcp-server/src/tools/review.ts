@@ -4,6 +4,7 @@ import type { ToolContext, McpToolResult, Bead, ReviewArgs, FlywheelPhase, Revie
 import { BatchReviewVerdictSchema } from '../types.js';
 import type { FlywheelErrorCode } from '../errors.js';
 import { errMsg, makeFlywheelErrorResult } from '../errors.js';
+import { persistCoordinatorEpochBump } from '../coordinator-epoch.js';
 import { createLogger } from '../logger.js';
 import { makeOkToolResult } from './shared.js';
 import { buildFreshEyesPrompt } from '../gates.js';
@@ -177,13 +178,13 @@ export async function runReview(ctx: ToolContext, args: ReviewArgs): Promise<Mcp
     return runGates(ctx, args.action);
   }
   if (beadId === '__regress_to_plan__') {
-    return regressToPhase(ctx, 'planning', 'plan revision');
+    return await regressToPhase(ctx, 'planning', 'plan revision');
   }
   if (beadId === '__regress_to_beads__') {
-    return regressToPhase(ctx, 'creating_beads', 'bead creation');
+    return await regressToPhase(ctx, 'creating_beads', 'bead creation');
   }
   if (beadId === '__regress_to_implement__') {
-    return regressToPhase(ctx, 'implementing', 'implementation');
+    return await regressToPhase(ctx, 'implementing', 'implementation');
   }
 
   // ── Look up bead ──────────────────────────────────────────────
@@ -228,6 +229,8 @@ export async function runReview(ctx: ToolContext, args: ReviewArgs): Promise<Mcp
         };
         saveState(state);
       }
+      // E3: already-closed bead accepted at review gate
+      await persistCoordinatorEpochBump(ctx);
       return nextBeadOrGates(ctx, beadId, bead.title, 'Already closed by impl agent');
     }
     if (args.action === 'skip') {
@@ -265,6 +268,8 @@ export async function runReview(ctx: ToolContext, args: ReviewArgs): Promise<Mcp
       status: 'blocked',
       summary: 'Skipped by user',
     };
+    // E5: defer at review gate
+    await persistCoordinatorEpochBump(ctx);
     saveState(state);
 
     return nextBeadOrGates(ctx, beadId, bead.title, 'Skipped');
@@ -309,6 +314,8 @@ export async function runReview(ctx: ToolContext, args: ReviewArgs): Promise<Mcp
       }
     }
 
+    // E3: successful looks-good closes bead and advances
+    await persistCoordinatorEpochBump(ctx);
     saveState(state);
     return nextBeadOrGates(ctx, beadId, bead.title, 'Passed');
   }
@@ -326,6 +333,8 @@ export async function runReview(ctx: ToolContext, args: ReviewArgs): Promise<Mcp
     if (!state.beadHitMeCompleted) state.beadHitMeCompleted = {};
     state.beadHitMeTriggered[beadId] = true;
     state.beadHitMeCompleted[beadId] = false;
+    // E4: dispatching parallel reviewers after wave review gate
+    await persistCoordinatorEpochBump(ctx);
     saveState(state);
 
     // Extract file list from bead description (heuristic: lines containing paths)
@@ -966,12 +975,14 @@ After completing this gate check:
   );
 }
 
-function regressToPhase(
+async function regressToPhase(
   ctx: ToolContext,
   targetPhase: import('../types.js').FlywheelPhase,
   phaseName: string
-): McpToolResult {
+): Promise<McpToolResult> {
   const { state, saveState } = ctx;
+  // E6: phase regression is user steering
+  await persistCoordinatorEpochBump(ctx);
   state.phase = targetPhase;
   state.currentGateIndex = 0;
   state.iterationRound = 0;

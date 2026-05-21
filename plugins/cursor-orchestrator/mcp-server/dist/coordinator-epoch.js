@@ -23,4 +23,10 @@ export function bumpCoordinatorEpoch(state) {
     const next = getCoordinatorEpoch(state) + 1;
     return { ...state, coordinatorEpoch: next };
 }
+/** Bump coordinatorEpoch, merge into ctx.state, and persist. Returns new epoch. */
+export async function persistCoordinatorEpochBump(sink) {
+    Object.assign(sink.state, bumpCoordinatorEpoch(sink.state));
+    await sink.saveState(sink.state);
+    return getCoordinatorEpoch(sink.state);
+}
 //# sourceMappingURL=coordinator-epoch.js.map

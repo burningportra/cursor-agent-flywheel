@@ -313,6 +313,10 @@ const PRIMARY_TOOLS = [
                     minItems: 1,
                     description: 'Bead IDs that completed in this wave',
                 },
+                confirmAction: {
+                    type: 'string',
+                    description: 'User AskQuestion selection — records steering and bumps coordinator epoch (E8). Re-call after user picks.',
+                },
             },
             required: ['cwd', 'beadIds'],
         },

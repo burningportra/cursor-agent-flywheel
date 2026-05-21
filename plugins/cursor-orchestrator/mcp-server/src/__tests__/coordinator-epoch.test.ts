@@ -6,6 +6,7 @@ import { join } from "node:path";
 import {
   bumpCoordinatorEpoch,
   getCoordinatorEpoch,
+  persistCoordinatorEpochBump,
 } from "../coordinator-epoch.js";
 import { createInitialState } from "../types.js";
 import type { FlywheelState } from "../types.js";
@@ -65,6 +66,24 @@ describe("bumpCoordinatorEpoch", () => {
     const before = createInitialState();
     bumpCoordinatorEpoch(before);
     expect(before.coordinatorEpoch).toBeUndefined();
+  });
+});
+
+describe("persistCoordinatorEpochBump", () => {
+  it("increments epoch on ctx.state and invokes saveState", async () => {
+    const state = createInitialState();
+    const saved: FlywheelState[] = [];
+    const sink = {
+      state,
+      saveState: (s: FlywheelState) => {
+        saved.push(structuredClone(s));
+      },
+    };
+    const epoch = await persistCoordinatorEpochBump(sink);
+    expect(epoch).toBe(1);
+    expect(getCoordinatorEpoch(state)).toBe(1);
+    expect(saved).toHaveLength(1);
+    expect(getCoordinatorEpoch(saved[0]!)).toBe(1);
   });
 });
 

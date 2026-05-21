@@ -43,6 +43,7 @@ describe('finalizeTickPayload', () => {
             readyCount: 1,
             inProgressCount: 0,
             closedCount: 0,
+            profileStale: false,
         },
         coordinatorPlaybook: 'playbook',
         implTasks: [
@@ -168,6 +169,19 @@ describe('runImplTickCore epoch guards', () => {
         expect(structured.data.epoch).toBe(1);
         expect(structured.data.implTasks).toBeUndefined();
         expect(text).toContain('epoch mismatch');
+    });
+    it('E1: bumps coordinatorEpoch before advance_wave when closedBeadIds set', async () => {
+        vi.spyOn(await import('../tools/advance-wave.js'), 'runAdvanceWave').mockResolvedValue({
+            content: [{ type: 'text', text: 'wave ok' }],
+            structuredContent: { data: { waveComplete: true } },
+        });
+        const ctx = makeCtx(dir, baseState({
+            coordinatorEpoch: 1,
+            implModelsConfirmed: true,
+            commitBatchThreshold: 0,
+        }));
+        await runImplTickCore(ctx, { cwd: dir, closedBeadIds: ['bead-done'] });
+        expect(ctx.state.coordinatorEpoch).toBe(2);
     });
     it('does not drop implTasks when coordinator.epochGuards is false', async () => {
         await fs.promises.writeFile(path.join(dir, 'flywheel.config.yaml'), 'coordinator:\n  epochGuards: false\n');

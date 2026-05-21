@@ -8,6 +8,7 @@ import { adaptPromptForCodex } from '../adapters/codex-prompt.js';
 import { adaptPromptForGemini } from '../adapters/gemini-prompt.js';
 import { makeOkToolResult, makeToolError } from './shared.js';
 import { classifyExecError } from '../errors.js';
+import { persistCoordinatorEpochBump } from '../coordinator-epoch.js';
 import { createLogger } from '../logger.js';
 import * as path from 'node:path';
 import { execFile } from 'node:child_process';
@@ -116,6 +117,8 @@ export async function runAdvanceWave(ctx, args) {
     if (!Array.isArray(args.closedBeadIds) || args.closedBeadIds.length === 0) {
         return makeToolError('flywheel_advance_wave', state.phase, 'invalid_input', 'Error: closedBeadIds must be a non-empty array of bead IDs from the completed wave.', { hint: 'Pass closedBeadIds as a non-empty string array — the wave of beads to verify before advancing.' });
     }
+    // E2: user steering via advance_wave invalidates in-flight coordinator work
+    await persistCoordinatorEpochBump(ctx);
     // Step 1: verify the completed wave
     const verifyResult = await runVerifyBeads(ctx, { cwd, beadIds: args.closedBeadIds });
     const verification = verifyResult.structuredContent?.data;
