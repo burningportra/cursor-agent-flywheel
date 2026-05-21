@@ -1,4 +1,8 @@
-# Flywheel impl tick
+---
+name: flywheel-impl-tick
+description: Cursor-native implementation supervision loop — call repeatedly during Step 7 implement (~4 min default).
+argument-hint: "[closed-bead-ids...]"
+---
 
 Cursor-native implementation supervision loop. Call repeatedly during Step 7 implement (~4 min default).
 
