@@ -436,13 +436,26 @@ Log level is controlled by the `ORCH_LOG_LEVEL` env var (default: `"warn"`). Lev
 
 ## Testing
 
-Vitest is configured. Run tests with:
+The MCP server uses **Vitest** (`mcp-server/vitest.config.ts`, `include: src/**/*.test.ts`). CI runs `npm test` in `plugins/cursor-orchestrator/mcp-server` (`.github/workflows/orchestrator-mcp.yml`).
+
+From repo root:
+
+```bash
+cd plugins/cursor-orchestrator/mcp-server && npm test
+```
+
+From this plugin directory:
 
 ```bash
 cd mcp-server && npm test
 ```
 
-Test files live in `mcp-server/src/__tests__/`. Follow existing patterns — use `vi.mock` for external deps, `vi.spyOn(process.stderr, 'write')` to capture logger output, `vi.useFakeTimers()` for time-dependent tests. Always add a regression test when fixing a bug.
+After MCP `src/` changes, run **`npm test && npm run build`** and commit any resulting `dist/` updates in the same PR.
+
+- `npm test` — single run (`vitest run --passWithNoTests`)
+- `npm run test:watch` — watch mode during development
+
+Tests live under `mcp-server/src/__tests__/` (and other `src/**/*.test.ts` paths). Follow existing patterns — use `vi.mock` for external deps, `vi.spyOn(process.stderr, 'write')` to capture logger output, `vi.useFakeTimers()` for time-dependent tests. Always add a regression test when fixing a bug.
 
 ## Tool name deprecation
 
