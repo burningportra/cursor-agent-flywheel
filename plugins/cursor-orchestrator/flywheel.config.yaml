@@ -28,3 +28,6 @@ impl_tick:
   interval_seconds: 240
   review_model: opus-4.6
   max_parallel_impl: 3
+
+coordinator:
+  epochGuards: true

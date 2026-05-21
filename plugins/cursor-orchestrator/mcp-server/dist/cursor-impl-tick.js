@@ -9,7 +9,8 @@ import { clearPendingBatchReview, countCommitsSinceLastBatchReview, markBatchRev
 import { adaptPromptForCursor, buildCursorImplSpawnInstructions, getCursorImplModels, modelForComplexity, } from './cursor-implement-swarm.js';
 import { buildAskQuestionFromGate, buildBatchReviewSynthesizedGate } from './cursor-user-gates.js';
 import { classifyBeadComplexity } from './model-routing.js';
-import { loadFlywheelConfigWithWarnings } from './flywheel-config.js';
+import { getCoordinatorEpoch } from './coordinator-epoch.js';
+import { areEpochGuardsEnabled, loadFlywheelConfigWithWarnings } from './flywheel-config.js';
 import { runAdvanceWave } from './tools/advance-wave.js';
 import { runReview } from './tools/review.js';
 const DEFAULT_TICK_INTERVAL_SEC = 240;
@@ -52,10 +53,48 @@ export function buildImplTickCoordinatorPlaybook(cfg) {
         '   - `advance_wave` → spawn `data.implTasks` (stagger ~30s).',
         '   - `dispatch_impl_tasks` → first wave or idle capacity; spawn tasks.',
         '   - `wave_complete` → `flywheel_wave_review_gate` then wrap-up path.',
+        '   - `stale` → user steered mid-tick; re-call `flywheel_impl_tick` immediately (do not spawn).',
         '   - `monitor` → report snapshot; schedule next tick.',
         '',
         'Do not use codex/claude CLI for batch review in the Cursor port.',
     ].join('\n');
+}
+/**
+ * Apply epoch guard before returning task-bearing tick payloads.
+ * When epoch drifted mid-tick and guards are enabled, drop spawn specs.
+ */
+export function finalizeTickPayload(epochAtTickStart, state, payload, epochGuards) {
+    const hasSpawnSpecs = (payload.implTasks?.length ?? 0) > 0 || payload.batchReviewTask !== undefined;
+    const current = getCoordinatorEpoch(state);
+    if (epochGuards && current !== epochAtTickStart && hasSpawnSpecs) {
+        return {
+            kind: 'stale',
+            epoch: epochAtTickStart,
+            tickAt: payload.tickAt,
+            nextTickInSeconds: payload.nextTickInSeconds,
+            snapshot: payload.snapshot,
+            coordinatorPlaybook: payload.coordinatorPlaybook,
+        };
+    }
+    return { ...payload, epoch: epochAtTickStart };
+}
+function buildTickResult(epochAtTickStart, state, epochGuards, text, payload) {
+    const data = finalizeTickPayload(epochAtTickStart, state, payload, epochGuards);
+    const outText = data.kind === 'stale'
+        ? [
+            'User action invalidated this tick (epoch mismatch); re-call flywheel_impl_tick.',
+            `Started at epoch ${epochAtTickStart}, current epoch ${getCoordinatorEpoch(state)}.`,
+        ].join('\n')
+        : text;
+    return {
+        text: outText,
+        structured: {
+            tool: 'flywheel_impl_tick',
+            version: 1,
+            status: 'ok',
+            data,
+        },
+    };
 }
 function beadCounts(beads) {
     let readyCount = 0;
@@ -92,6 +131,8 @@ async function verdictFileExists(cwd, shaRange) {
 }
 export async function runImplTickCore(ctx, args) {
     const { cwd, state, saveState } = ctx;
+    const epochAtTickStart = getCoordinatorEpoch(state);
+    const epochGuards = areEpochGuardsEnabled(cwd);
     const cfg = resolveImplTickConfig(cwd);
     const tickAt = new Date().toISOString();
     state.lastImplTickAt = tickAt;
@@ -139,43 +180,27 @@ export async function runImplTickCore(ctx, args) {
             }
             const nextState = clearPendingBatchReview(state);
             await saveState(nextState);
-            return {
-                text: reviewResult.content[0]?.text ?? 'Batch review verdict collected.',
-                structured: {
-                    tool: 'flywheel_impl_tick',
-                    version: 1,
-                    status: 'ok',
-                    data: {
-                        kind: 'batch_review_verdict',
-                        tickAt,
-                        nextTickInSeconds: cfg.intervalSeconds,
-                        snapshot: { ...baseSnapshot, pendingBatchReviewRange: undefined },
-                        coordinatorPlaybook: playbook,
-                        reviewEnvelope: sc,
-                        askQuestion,
-                    },
-                },
-            };
+            return buildTickResult(epochAtTickStart, state, epochGuards, reviewResult.content[0]?.text ?? 'Batch review verdict collected.', {
+                kind: 'batch_review_verdict',
+                tickAt,
+                nextTickInSeconds: cfg.intervalSeconds,
+                snapshot: { ...baseSnapshot, pendingBatchReviewRange: undefined },
+                coordinatorPlaybook: playbook,
+                reviewEnvelope: sc,
+                askQuestion,
+            });
         }
-        return {
-            text: [
-                `Batch review in progress for ${pendingRange}.`,
-                `Waiting for verdict at ${batchReviewVerdictPath(cwd, pendingRange).replace(cwd + '/', '')}.`,
-                `Next tick in ~${cfg.intervalSeconds}s.`,
-            ].join('\n'),
-            structured: {
-                tool: 'flywheel_impl_tick',
-                version: 1,
-                status: 'ok',
-                data: {
-                    kind: 'batch_review_in_progress',
-                    tickAt,
-                    nextTickInSeconds: cfg.intervalSeconds,
-                    snapshot: baseSnapshot,
-                    coordinatorPlaybook: playbook,
-                },
-            },
-        };
+        return buildTickResult(epochAtTickStart, state, epochGuards, [
+            `Batch review in progress for ${pendingRange}.`,
+            `Waiting for verdict at ${batchReviewVerdictPath(cwd, pendingRange).replace(cwd + '/', '')}.`,
+            `Next tick in ~${cfg.intervalSeconds}s.`,
+        ].join('\n'), {
+            kind: 'batch_review_in_progress',
+            tickAt,
+            nextTickInSeconds: cfg.intervalSeconds,
+            snapshot: baseSnapshot,
+            coordinatorPlaybook: playbook,
+        });
     }
     // ── New batch review (commit threshold) ──
     if (threshold > 0 && shouldTriggerBatchReview(state, commitsSinceBaseline)) {
@@ -183,35 +208,27 @@ export async function runImplTickCore(ctx, args) {
         const dispatch = await prepareBatchReviewDispatch(ctx, shaRange, headSha);
         const nextState = markBatchReviewDispatched(state, headSha, shaRange);
         await saveState(nextState);
-        return {
-            text: [
-                `Commit-batch threshold crossed (${commitsSinceBaseline} ≥ ${threshold}).`,
-                `Dispatch fresh-eyes Task over ${shaRange}, then call flywheel_impl_tick again.`,
-            ].join('\n'),
-            structured: {
-                tool: 'flywheel_impl_tick',
-                version: 1,
-                status: 'ok',
-                data: {
-                    kind: 'batch_review_dispatch',
-                    tickAt,
-                    nextTickInSeconds: cfg.intervalSeconds,
-                    snapshot: {
-                        ...baseSnapshot,
-                        pendingBatchReviewRange: shaRange,
-                    },
-                    coordinatorPlaybook: playbook,
-                    batchReviewTask: {
-                        model: cfg.reviewModel,
-                        subagent_type: 'generalPurpose',
-                        description: `Fresh-eyes batch review ${shaRange}`,
-                        prompt: dispatch.prompt,
-                        shaRange,
-                        verdictRel: dispatch.verdictRel,
-                    },
-                },
+        return buildTickResult(epochAtTickStart, state, epochGuards, [
+            `Commit-batch threshold crossed (${commitsSinceBaseline} ≥ ${threshold}).`,
+            `Dispatch fresh-eyes Task over ${shaRange}, then call flywheel_impl_tick again.`,
+        ].join('\n'), {
+            kind: 'batch_review_dispatch',
+            tickAt,
+            nextTickInSeconds: cfg.intervalSeconds,
+            snapshot: {
+                ...baseSnapshot,
+                pendingBatchReviewRange: shaRange,
             },
-        };
+            coordinatorPlaybook: playbook,
+            batchReviewTask: {
+                model: cfg.reviewModel,
+                subagent_type: 'generalPurpose',
+                description: `Fresh-eyes batch review ${shaRange}`,
+                prompt: dispatch.prompt,
+                shaRange,
+                verdictRel: dispatch.verdictRel,
+            },
+        });
     }
     // ── Wave advance when beads closed ──
     const closed = args.closedBeadIds?.filter(Boolean) ?? [];
@@ -229,89 +246,57 @@ export async function runImplTickCore(ctx, args) {
             const dispatch = await prepareBatchReviewDispatch(ctx, shaRange, reviewSha);
             const nextState = markBatchReviewDispatched(state, reviewSha, shaRange);
             await saveState(nextState);
-            return {
-                text: waveResult.content[0]?.text ?? 'Batch review due after wave verify.',
-                structured: {
-                    tool: 'flywheel_impl_tick',
-                    version: 1,
-                    status: 'ok',
-                    data: {
-                        kind: 'batch_review_dispatch',
-                        tickAt,
-                        nextTickInSeconds: cfg.intervalSeconds,
-                        snapshot: { ...baseSnapshot, pendingBatchReviewRange: shaRange },
-                        coordinatorPlaybook: playbook,
-                        advanceWave: outcome,
-                        batchReviewTask: {
-                            model: cfg.reviewModel,
-                            subagent_type: 'generalPurpose',
-                            description: `Fresh-eyes batch review ${shaRange}`,
-                            prompt: dispatch.prompt,
-                            shaRange,
-                            verdictRel: dispatch.verdictRel,
-                        },
-                    },
+            return buildTickResult(epochAtTickStart, state, epochGuards, waveResult.content[0]?.text ?? 'Batch review due after wave verify.', {
+                kind: 'batch_review_dispatch',
+                tickAt,
+                nextTickInSeconds: cfg.intervalSeconds,
+                snapshot: { ...baseSnapshot, pendingBatchReviewRange: shaRange },
+                coordinatorPlaybook: playbook,
+                advanceWave: outcome,
+                batchReviewTask: {
+                    model: cfg.reviewModel,
+                    subagent_type: 'generalPurpose',
+                    description: `Fresh-eyes batch review ${shaRange}`,
+                    prompt: dispatch.prompt,
+                    shaRange,
+                    verdictRel: dispatch.verdictRel,
                 },
-            };
+            });
         }
         if (outcome?.waveComplete && outcome.nextStep?.kind === 'wave_review_gate') {
-            return {
-                text: waveResult.content[0]?.text ?? 'Queue drained — wave review gate.',
-                structured: {
-                    tool: 'flywheel_impl_tick',
-                    version: 1,
-                    status: 'ok',
-                    data: {
-                        kind: 'wave_complete',
-                        tickAt,
-                        nextTickInSeconds: cfg.intervalSeconds,
-                        snapshot: baseSnapshot,
-                        coordinatorPlaybook: playbook,
-                        advanceWave: outcome,
-                    },
-                },
-            };
+            return buildTickResult(epochAtTickStart, state, epochGuards, waveResult.content[0]?.text ?? 'Queue drained — wave review gate.', {
+                kind: 'wave_complete',
+                tickAt,
+                nextTickInSeconds: cfg.intervalSeconds,
+                snapshot: baseSnapshot,
+                coordinatorPlaybook: playbook,
+                advanceWave: outcome,
+            });
         }
         if (outcome?.nextWave?.prompts?.length) {
             const models = outcome.nextWave.implModels ?? getCursorImplModels(cwd);
             const implTasks = buildImplTasksFromPrompts(outcome.nextWave.prompts, cfg.maxParallelImpl);
-            return {
-                text: [
-                    waveResult.content[0]?.text ?? 'Next wave ready.',
-                    buildCursorImplSpawnInstructions(models),
-                ].join('\n\n'),
-                structured: {
-                    tool: 'flywheel_impl_tick',
-                    version: 1,
-                    status: 'ok',
-                    data: {
-                        kind: 'advance_wave',
-                        tickAt,
-                        nextTickInSeconds: cfg.intervalSeconds,
-                        snapshot: baseSnapshot,
-                        coordinatorPlaybook: playbook,
-                        advanceWave: outcome,
-                        implTasks,
-                    },
-                },
-            };
+            return buildTickResult(epochAtTickStart, state, epochGuards, [
+                waveResult.content[0]?.text ?? 'Next wave ready.',
+                buildCursorImplSpawnInstructions(models),
+            ].join('\n\n'), {
+                kind: 'advance_wave',
+                tickAt,
+                nextTickInSeconds: cfg.intervalSeconds,
+                snapshot: baseSnapshot,
+                coordinatorPlaybook: playbook,
+                advanceWave: outcome,
+                implTasks,
+            });
         }
-        return {
-            text: waveResult.content[0]?.text ?? 'Advance wave completed.',
-            structured: {
-                tool: 'flywheel_impl_tick',
-                version: 1,
-                status: 'ok',
-                data: {
-                    kind: 'advance_wave',
-                    tickAt,
-                    nextTickInSeconds: cfg.intervalSeconds,
-                    snapshot: baseSnapshot,
-                    coordinatorPlaybook: playbook,
-                    advanceWave: outcome,
-                },
-            },
-        };
+        return buildTickResult(epochAtTickStart, state, epochGuards, waveResult.content[0]?.text ?? 'Advance wave completed.', {
+            kind: 'advance_wave',
+            tickAt,
+            nextTickInSeconds: cfg.intervalSeconds,
+            snapshot: baseSnapshot,
+            coordinatorPlaybook: playbook,
+            advanceWave: outcome,
+        });
     }
     // ── Dispatch ready beads when idle capacity ──
     if (counts.inProgressCount === 0 && counts.readyCount > 0 && state.implModelsConfirmed) {
@@ -347,25 +332,17 @@ export async function runImplTickCore(ctx, args) {
             };
         });
         if (implTasks.length > 0) {
-            return {
-                text: [
-                    `${implTasks.length} ready bead(s); no in_progress — dispatch impl Tasks.`,
-                    buildCursorImplSpawnInstructions(models),
-                ].join('\n\n'),
-                structured: {
-                    tool: 'flywheel_impl_tick',
-                    version: 1,
-                    status: 'ok',
-                    data: {
-                        kind: 'dispatch_impl_tasks',
-                        tickAt,
-                        nextTickInSeconds: cfg.intervalSeconds,
-                        snapshot: baseSnapshot,
-                        coordinatorPlaybook: playbook,
-                        implTasks,
-                    },
-                },
-            };
+            return buildTickResult(epochAtTickStart, state, epochGuards, [
+                `${implTasks.length} ready bead(s); no in_progress — dispatch impl Tasks.`,
+                buildCursorImplSpawnInstructions(models),
+            ].join('\n\n'), {
+                kind: 'dispatch_impl_tasks',
+                tickAt,
+                nextTickInSeconds: cfg.intervalSeconds,
+                snapshot: baseSnapshot,
+                coordinatorPlaybook: playbook,
+                implTasks,
+            });
         }
     }
     // ── Monitor ──
@@ -384,20 +361,12 @@ export async function runImplTickCore(ctx, args) {
         lines.push(`Stuck (>30m): ${stuck.map((b) => b.id).join(', ')}`);
     }
     lines.push(`Next tick in ~${cfg.intervalSeconds}s.`);
-    return {
-        text: lines.join('\n'),
-        structured: {
-            tool: 'flywheel_impl_tick',
-            version: 1,
-            status: 'ok',
-            data: {
-                kind: 'monitor',
-                tickAt,
-                nextTickInSeconds: cfg.intervalSeconds,
-                snapshot: baseSnapshot,
-                coordinatorPlaybook: playbook,
-            },
-        },
-    };
+    return buildTickResult(epochAtTickStart, state, epochGuards, lines.join('\n'), {
+        kind: 'monitor',
+        tickAt,
+        nextTickInSeconds: cfg.intervalSeconds,
+        snapshot: baseSnapshot,
+        coordinatorPlaybook: playbook,
+    });
 }
 //# sourceMappingURL=cursor-impl-tick.js.map

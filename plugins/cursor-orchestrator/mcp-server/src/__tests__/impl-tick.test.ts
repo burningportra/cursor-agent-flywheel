@@ -83,9 +83,10 @@ describe('flywheel_impl_tick', () => {
     );
     const result = await runImplTick(ctx, { cwd: dir });
     expect(result.isError).toBeFalsy();
-    const sc = result.structuredContent as { data: { kind: string; nextTickInSeconds: number } };
+    const sc = result.structuredContent as { data: { kind: string; nextTickInSeconds: number; epoch: number } };
     expect(sc.data.kind).toBe('monitor');
     expect(sc.data.nextTickInSeconds).toBe(240);
+    expect(sc.data.epoch).toBe(0);
   });
 
 });

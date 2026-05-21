@@ -5,6 +5,7 @@
 import { buildAskQuestionFromGate } from './cursor-user-gates.js';
 import type { AdvanceWaveOutcome } from './tools/advance-wave.js';
 import type { ToolContext } from './types.js';
+import type { FlywheelState } from './types.js';
 export interface ImplTickConfig {
     intervalSeconds: number;
     reviewModel: string;
@@ -17,13 +18,15 @@ export interface ImplTickArgs {
     /** Agent Mail name for inbox probe (optional). */
     coordinatorAgent?: string;
 }
-export type ImplTickKind = 'monitor' | 'batch_review_in_progress' | 'batch_review_dispatch' | 'batch_review_collect_verdict' | 'batch_review_verdict' | 'advance_wave' | 'dispatch_impl_tasks' | 'wave_complete';
+export type ImplTickKind = 'monitor' | 'batch_review_in_progress' | 'batch_review_dispatch' | 'batch_review_collect_verdict' | 'batch_review_verdict' | 'advance_wave' | 'dispatch_impl_tasks' | 'wave_complete' | 'stale';
 export interface ImplTickStructured {
     tool: 'flywheel_impl_tick';
     version: 1;
     status: 'ok';
     data: {
         kind: ImplTickKind;
+        /** Coordinator generation epoch captured at tick start. */
+        epoch: number;
         tickAt: string;
         nextTickInSeconds: number;
         snapshot: {
@@ -58,8 +61,16 @@ export interface ImplTickStructured {
 }
 export declare function resolveImplTickConfig(cwd: string): ImplTickConfig;
 export declare function buildImplTickCoordinatorPlaybook(cfg: ImplTickConfig): string;
+type ImplTickData = ImplTickStructured['data'];
+type ImplTickDataInput = Omit<ImplTickData, 'epoch'>;
+/**
+ * Apply epoch guard before returning task-bearing tick payloads.
+ * When epoch drifted mid-tick and guards are enabled, drop spawn specs.
+ */
+export declare function finalizeTickPayload(epochAtTickStart: number, state: FlywheelState, payload: ImplTickDataInput, epochGuards: boolean): ImplTickData;
 export declare function runImplTickCore(ctx: ToolContext, args: ImplTickArgs): Promise<{
     text: string;
     structured: ImplTickStructured;
 }>;
+export {};
 //# sourceMappingURL=cursor-impl-tick.d.ts.map

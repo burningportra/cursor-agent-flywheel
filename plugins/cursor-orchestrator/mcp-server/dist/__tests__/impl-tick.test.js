@@ -73,6 +73,7 @@ describe('flywheel_impl_tick', () => {
         const sc = result.structuredContent;
         expect(sc.data.kind).toBe('monitor');
         expect(sc.data.nextTickInSeconds).toBe(240);
+        expect(sc.data.epoch).toBe(0);
     });
 });
 //# sourceMappingURL=impl-tick.test.js.map
