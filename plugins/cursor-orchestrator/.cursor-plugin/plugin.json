@@ -1,7 +1,7 @@
 {
   "name": "cursor-orchestrator",
   "displayName": "Cursor Orchestrator",
-  "version": "3.18.1",
+  "version": "3.19.0",
   "description": "Multi-agent coding orchestrator — deep planning, parallel execution, guided review gates (Agentic Coding Flywheel). Ported from claude-orchestrator for Cursor.",
   "author": {
     "name": "burningportra",
