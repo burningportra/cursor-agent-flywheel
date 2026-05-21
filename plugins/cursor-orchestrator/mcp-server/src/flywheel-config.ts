@@ -77,6 +77,8 @@ export interface FlywheelConfigImplTick {
 export interface FlywheelConfigCoordinator {
   /** When false, skip server-side stale tick drop (default true). */
   epochGuards?: boolean;
+  /** When false, omit template nextActionHint payloads (default true). */
+  nextActionHints?: boolean;
 }
 
 export type FlywheelConfigProfileStaleAction = 'nudge' | 'auto_refresh';
@@ -131,7 +133,7 @@ const KNOWN_KEYS: Record<string, readonly string[]> = {
   duel: ['wizard_a', 'wizard_b', 'wizard_c', 'synthesis'],
   grader: ['model'],
   impl_tick: ['interval_seconds', 'review_model', 'max_parallel_impl'],
-  coordinator: ['epochGuards'],
+  coordinator: ['epochGuards', 'nextActionHints'],
   profile: ['watchIntentFiles', 'staleAction', 'debounceSeconds'],
 };
 
@@ -445,8 +447,13 @@ export function loadFlywheelConfigWithWarnings(cwd: string): FlywheelConfigResul
     const c = coordinatorNode as Record<string, unknown>;
     const epochGuards =
       typeof c.epochGuards === 'boolean' ? c.epochGuards : undefined;
-    if (epochGuards !== undefined) {
-      coordinator = { epochGuards };
+    const nextActionHints =
+      typeof c.nextActionHints === 'boolean' ? c.nextActionHints : undefined;
+    if (epochGuards !== undefined || nextActionHints !== undefined) {
+      coordinator = {
+        ...(epochGuards !== undefined ? { epochGuards } : {}),
+        ...(nextActionHints !== undefined ? { nextActionHints } : {}),
+      };
     }
   }
 
@@ -503,4 +510,10 @@ export function loadFlywheelConfig(cwd: string): FlywheelConfig {
 export function areEpochGuardsEnabled(cwd: string): boolean {
   const { config } = loadFlywheelConfigWithWarnings(cwd);
   return config.coordinator?.epochGuards !== false;
+}
+
+/** True when coordinator.nextActionHints is absent or explicitly true (default on). */
+export function areNextActionHintsEnabled(cwd: string): boolean {
+  const { config } = loadFlywheelConfigWithWarnings(cwd);
+  return config.coordinator?.nextActionHints !== false;
 }

@@ -8,7 +8,7 @@ import { adaptPromptForCodex } from '../adapters/codex-prompt.js';
 import { adaptPromptForGemini } from '../adapters/gemini-prompt.js';
 import { makeOkToolResult, makeToolError } from './shared.js';
 import { classifyExecError } from '../errors.js';
-import { persistCoordinatorEpochBump } from '../coordinator-epoch.js';
+import { persistCoordinatorEpochBump, getCoordinatorEpoch } from '../coordinator-epoch.js';
 import { createLogger } from '../logger.js';
 import * as path from 'node:path';
 import { execFile } from 'node:child_process';
@@ -18,6 +18,8 @@ import { readConvergenceFromDisk, planSlugFromIdentifier, } from './convergence-
 import { loadFlywheelConfig } from '../flywheel-config.js';
 import { countCommitsSinceLastBatchReview, shouldTriggerBatchReview } from '../commit-batch.js';
 import { adaptPromptForCursor, buildCursorImplSpawnInstructions, buildImplModelsGate, formatCursorImplModelTable, recommendImplModels, modelForComplexity, resolveImplModelsConfirm, useNtmImplBackend, } from '../cursor-implement-swarm.js';
+import { areNextActionHintsEnabled } from '../flywheel-config.js';
+import { buildWaveCompleteHint } from '../next-action-hint.js';
 const log = createLogger('advance-wave');
 const execFileAsync = promisify(execFile);
 const GIT_TIMEOUT_MS = 5_000;
@@ -239,6 +241,7 @@ export async function runAdvanceWave(ctx, args) {
         });
     }
     if (ready.length === 0) {
+        const generationEpoch = getCoordinatorEpoch(state);
         const outcome = {
             verification,
             nextWave: null,
@@ -249,6 +252,11 @@ export async function runAdvanceWave(ctx, args) {
                 kind: 'wave_review_gate',
                 beadIds: args.closedBeadIds,
             },
+            ...(areNextActionHintsEnabled(cwd)
+                ? {
+                    nextActionHint: buildWaveCompleteHint(generationEpoch, args.closedBeadIds),
+                }
+                : {}),
         };
         const closedList = args.closedBeadIds.join(', ');
         return okResult(state.phase, [

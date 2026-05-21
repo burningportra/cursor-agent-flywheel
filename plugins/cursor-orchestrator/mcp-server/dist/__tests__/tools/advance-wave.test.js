@@ -155,6 +155,11 @@ describe('runAdvanceWave', () => {
         });
         expect(result.content[0].text).toContain('Queue drained');
         expect(result.content[0].text).toContain('flywheel_wave_review_gate');
+        expect(data.nextActionHint).toBeDefined();
+        expect(data.nextActionHint.primaryTool).toBe('flywheel_wave_review_gate');
+        expect(data.nextActionHint.beadIds).toEqual(['done-1', 'done-2']);
+        expect(data.nextActionHint.generationEpoch).toBe(ctx.state.coordinatorEpoch);
+        expect(data.nextActionHint.text.length).toBeLessThanOrEqual(160);
     });
     it('returns implModelsGate before first dispatch when models not confirmed', async () => {
         const nextBeads = [makeBead({ id: 'next-1' })];

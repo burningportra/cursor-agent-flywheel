@@ -1,4 +1,4 @@
-import type { McpToolResult, ToolContext, AdvanceWaveArgs, Bead } from '../types.js';
+import type { McpToolResult, ToolContext, AdvanceWaveArgs, Bead, CoordinatorNextActionHint } from '../types.js';
 import type { VerifyBeadsOutcome } from './verify-beads.js';
 import { runVerifyBeads } from './verify-beads.js';
 import { readyBeads } from '../beads.js';
@@ -11,7 +11,7 @@ import { adaptPromptForGemini } from '../adapters/gemini-prompt.js';
 import type { BeadDispatchContext, AdaptedPrompt } from '../adapters/codex-prompt.js';
 import { makeOkToolResult, makeToolError } from './shared.js';
 import { classifyExecError } from '../errors.js';
-import { persistCoordinatorEpochBump } from '../coordinator-epoch.js';
+import { persistCoordinatorEpochBump, getCoordinatorEpoch } from '../coordinator-epoch.js';
 import { createLogger } from '../logger.js';
 import * as path from 'node:path';
 import { execFile } from 'node:child_process';
@@ -34,6 +34,8 @@ import {
   useNtmImplBackend,
   type ImplModelsGate,
 } from '../cursor-implement-swarm.js';
+import { areNextActionHintsEnabled } from '../flywheel-config.js';
+import { buildWaveCompleteHint } from '../next-action-hint.js';
 
 const log = createLogger('advance-wave');
 const execFileAsync = promisify(execFile);
@@ -130,6 +132,8 @@ export interface AdvanceWaveOutcome {
         /** Beads that just closed in the wave being advanced. */
         beadIds: string[];
       };
+  /** Advisory one-line coordinator nudge when queue drains (template v1). */
+  nextActionHint?: CoordinatorNextActionHint;
 }
 
 function isAttestationRequired(): boolean {
@@ -395,6 +399,7 @@ export async function runAdvanceWave(
   }
 
   if (ready.length === 0) {
+    const generationEpoch = getCoordinatorEpoch(state);
     const outcome: AdvanceWaveOutcome = {
       verification,
       nextWave: null,
@@ -405,6 +410,14 @@ export async function runAdvanceWave(
         kind: 'wave_review_gate',
         beadIds: args.closedBeadIds,
       },
+      ...(areNextActionHintsEnabled(cwd)
+        ? {
+            nextActionHint: buildWaveCompleteHint(
+              generationEpoch,
+              args.closedBeadIds,
+            ),
+          }
+        : {}),
     };
     const closedList = args.closedBeadIds.join(', ');
     return okResult(

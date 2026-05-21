@@ -10,7 +10,8 @@ import { adaptPromptForCursor, buildCursorImplSpawnInstructions, getCursorImplMo
 import { buildAskQuestionFromGate, buildBatchReviewSynthesizedGate } from './cursor-user-gates.js';
 import { classifyBeadComplexity } from './model-routing.js';
 import { getCoordinatorEpoch, persistCoordinatorEpochBump } from './coordinator-epoch.js';
-import { areEpochGuardsEnabled, loadFlywheelConfigWithWarnings } from './flywheel-config.js';
+import { areEpochGuardsEnabled, areNextActionHintsEnabled, loadFlywheelConfigWithWarnings } from './flywheel-config.js';
+import { buildNextActionHint } from './next-action-hint.js';
 import { probeProfileStale } from './profile-staleness.js';
 import { runAdvanceWave } from './tools/advance-wave.js';
 import { runReview } from './tools/review.js';
@@ -78,6 +79,16 @@ export function finalizeTickPayload(epochAtTickStart, state, payload, epochGuard
         };
     }
     return { ...payload, epoch: epochAtTickStart };
+}
+function maybeAttachNextActionHint(cwd, kind, generationEpoch, opts) {
+    if (!areNextActionHintsEnabled(cwd))
+        return undefined;
+    if (kind !== 'wave_complete' &&
+        kind !== 'advance_wave' &&
+        kind !== 'dispatch_impl_tasks') {
+        return undefined;
+    }
+    return buildNextActionHint(kind, generationEpoch, opts);
 }
 function buildTickResult(epochAtTickStart, state, epochGuards, text, payload) {
     const data = finalizeTickPayload(epochAtTickStart, state, payload, epochGuards);
@@ -270,6 +281,7 @@ export async function runImplTickCore(ctx, args) {
             });
         }
         if (outcome?.waveComplete && outcome.nextStep?.kind === 'wave_review_gate') {
+            const waveBeadIds = outcome.nextStep.beadIds;
             return buildTickResult(epochAtTickStart, state, epochGuards, waveResult.content[0]?.text ?? 'Queue drained — wave review gate.', {
                 kind: 'wave_complete',
                 tickAt,
@@ -277,6 +289,9 @@ export async function runImplTickCore(ctx, args) {
                 snapshot: baseSnapshot,
                 coordinatorPlaybook: playbook,
                 advanceWave: outcome,
+                nextActionHint: maybeAttachNextActionHint(cwd, 'wave_complete', epochAtTickStart, {
+                    beadIds: waveBeadIds,
+                }),
             });
         }
         if (outcome?.nextWave?.prompts?.length) {
@@ -293,6 +308,10 @@ export async function runImplTickCore(ctx, args) {
                 coordinatorPlaybook: playbook,
                 advanceWave: outcome,
                 implTasks,
+                nextActionHint: maybeAttachNextActionHint(cwd, 'advance_wave', epochAtTickStart, {
+                    beadIds: outcome.nextWave.beadIds,
+                    beadCount: outcome.nextWave.beadIds?.length ?? outcome.nextWave.prompts.length,
+                }),
             });
         }
         return buildTickResult(epochAtTickStart, state, epochGuards, waveResult.content[0]?.text ?? 'Advance wave completed.', {
@@ -348,6 +367,10 @@ export async function runImplTickCore(ctx, args) {
                 snapshot: baseSnapshot,
                 coordinatorPlaybook: playbook,
                 implTasks,
+                nextActionHint: maybeAttachNextActionHint(cwd, 'dispatch_impl_tasks', epochAtTickStart, {
+                    beadIds: implTasks.map((t) => t.beadId),
+                    beadCount: implTasks.length,
+                }),
             });
         }
     }

@@ -67,6 +67,8 @@ export interface FlywheelConfigImplTick {
 export interface FlywheelConfigCoordinator {
     /** When false, skip server-side stale tick drop (default true). */
     epochGuards?: boolean;
+    /** When false, omit template nextActionHint payloads (default true). */
+    nextActionHints?: boolean;
 }
 export type FlywheelConfigProfileStaleAction = 'nudge' | 'auto_refresh';
 export interface FlywheelConfigProfile {
@@ -118,4 +120,6 @@ export declare function loadFlywheelConfigWithWarnings(cwd: string): FlywheelCon
 export declare function loadFlywheelConfig(cwd: string): FlywheelConfig;
 /** True when coordinator.epochGuards is absent or explicitly true (default on). */
 export declare function areEpochGuardsEnabled(cwd: string): boolean;
+/** True when coordinator.nextActionHints is absent or explicitly true (default on). */
+export declare function areNextActionHintsEnabled(cwd: string): boolean;
 //# sourceMappingURL=flywheel-config.d.ts.map

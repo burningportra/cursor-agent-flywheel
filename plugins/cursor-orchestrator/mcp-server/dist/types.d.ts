@@ -318,7 +318,7 @@ export type CoordinationMode = "worktree" | "single-branch";
 /** Known coordinator tools referenced by hints — closed enum prevents typo primaryTool. */
 export type CoordinatorPrimaryTool = "flywheel_wave_review_gate" | "flywheel_impl_tick" | "flywheel_wrap_up_gate" | "flywheel_review" | "flywheel_advance_wave";
 export interface CoordinatorNextActionHint {
-    /** Single line, ≤120 chars in v1 templates. */
+    /** Single line, ≤160 chars in v1 templates. */
     text: string;
     primaryTool: CoordinatorPrimaryTool;
     beadIds?: string[];

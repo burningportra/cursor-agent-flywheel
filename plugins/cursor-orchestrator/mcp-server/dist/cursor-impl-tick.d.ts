@@ -5,7 +5,7 @@
 import { buildAskQuestionFromGate } from './cursor-user-gates.js';
 import type { AdvanceWaveOutcome } from './tools/advance-wave.js';
 import type { ToolContext } from './types.js';
-import type { FlywheelState } from './types.js';
+import type { CoordinatorNextActionHint, FlywheelState } from './types.js';
 export interface ImplTickConfig {
     intervalSeconds: number;
     reviewModel: string;
@@ -58,6 +58,8 @@ export interface ImplTickStructured {
         advanceWave?: AdvanceWaveOutcome;
         reviewEnvelope?: unknown;
         askQuestion?: ReturnType<typeof buildAskQuestionFromGate>;
+        /** Advisory one-line coordinator nudge (template v1). */
+        nextActionHint?: CoordinatorNextActionHint;
     };
 }
 export declare function resolveImplTickConfig(cwd: string): ImplTickConfig;

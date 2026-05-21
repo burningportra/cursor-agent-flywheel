@@ -216,5 +216,69 @@ describe('runImplTickCore epoch guards', () => {
         expect(structured.data.kind).toBe('advance_wave');
         expect(structured.data.implTasks?.length).toBe(1);
     });
+    it('wave_complete includes nextActionHint with beadIds and matching epoch', async () => {
+        vi.spyOn(await import('../tools/advance-wave.js'), 'runAdvanceWave').mockResolvedValue({
+            content: [{ type: 'text', text: 'Queue drained — wave review gate.' }],
+            structuredContent: {
+                data: {
+                    waveComplete: true,
+                    nextStep: {
+                        kind: 'wave_review_gate',
+                        beadIds: ['bead-a', 'bead-b'],
+                    },
+                },
+            },
+        });
+        const ctx = makeCtx(dir, baseState({
+            coordinatorEpoch: 5,
+            implModelsConfirmed: true,
+            commitBatchThreshold: 0,
+        }));
+        const { structured } = await runImplTickCore(ctx, {
+            cwd: dir,
+            closedBeadIds: ['bead-a', 'bead-b'],
+        });
+        expect(structured.data.kind).toBe('wave_complete');
+        expect(structured.data.epoch).toBe(5);
+        expect(structured.data.nextActionHint).toBeDefined();
+        expect(structured.data.nextActionHint.generationEpoch).toBe(5);
+        expect(structured.data.nextActionHint.beadIds).toEqual(['bead-a', 'bead-b']);
+        expect(structured.data.nextActionHint.primaryTool).toBe('flywheel_wave_review_gate');
+    });
+    it('stale tick omits nextActionHint even when payload had one', () => {
+        const state = baseState({ coordinatorEpoch: 3 });
+        const out = finalizeTickPayload(2, state, {
+            kind: 'advance_wave',
+            tickAt: '2026-05-21T00:00:00.000Z',
+            nextTickInSeconds: 240,
+            snapshot: {
+                headSha: 'abc',
+                commitsSinceBaseline: 0,
+                commitBatchThreshold: 0,
+                readyCount: 0,
+                inProgressCount: 0,
+                closedCount: 0,
+                profileStale: false,
+            },
+            coordinatorPlaybook: 'playbook',
+            implTasks: [
+                {
+                    beadId: 'x',
+                    model: 'composer-2.5',
+                    subagent_type: 'generalPurpose',
+                    description: 'Impl x',
+                    prompt: 'work',
+                },
+            ],
+            nextActionHint: {
+                text: 'Next wave ready (1 beads). Spawn impl Tasks from tick, stagger ~30s.',
+                primaryTool: 'flywheel_impl_tick',
+                generationEpoch: 2,
+                beadIds: ['x'],
+            },
+        }, true);
+        expect(out.kind).toBe('stale');
+        expect(out.nextActionHint).toBeUndefined();
+    });
 });
 //# sourceMappingURL=cursor-impl-tick.test.js.map

@@ -403,7 +403,7 @@ export type CoordinatorPrimaryTool =
   | "flywheel_advance_wave";
 
 export interface CoordinatorNextActionHint {
-  /** Single line, ≤120 chars in v1 templates. */
+  /** Single line, ≤160 chars in v1 templates. */
   text: string;
   primaryTool: CoordinatorPrimaryTool;
   beadIds?: string[];

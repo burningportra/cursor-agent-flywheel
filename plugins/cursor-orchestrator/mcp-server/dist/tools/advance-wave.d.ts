@@ -1,4 +1,4 @@
-import type { McpToolResult, ToolContext, AdvanceWaveArgs } from '../types.js';
+import type { McpToolResult, ToolContext, AdvanceWaveArgs, CoordinatorNextActionHint } from '../types.js';
 import type { VerifyBeadsOutcome } from './verify-beads.js';
 import { type BeadComplexity } from '../model-routing.js';
 import { type ImplModelsGate } from '../cursor-implement-swarm.js';
@@ -81,6 +81,8 @@ export interface AdvanceWaveOutcome {
         /** Beads that just closed in the wave being advanced. */
         beadIds: string[];
     };
+    /** Advisory one-line coordinator nudge when queue drains (template v1). */
+    nextActionHint?: CoordinatorNextActionHint;
 }
 export declare function runAdvanceWave(ctx: ToolContext, args: AdvanceWaveArgs): Promise<McpToolResult>;
 export {};

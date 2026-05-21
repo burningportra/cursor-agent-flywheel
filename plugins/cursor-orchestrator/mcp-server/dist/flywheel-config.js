@@ -47,7 +47,7 @@ const KNOWN_KEYS = {
     duel: ['wizard_a', 'wizard_b', 'wizard_c', 'synthesis'],
     grader: ['model'],
     impl_tick: ['interval_seconds', 'review_model', 'max_parallel_impl'],
-    coordinator: ['epochGuards'],
+    coordinator: ['epochGuards', 'nextActionHints'],
     profile: ['watchIntentFiles', 'staleAction', 'debounceSeconds'],
 };
 export const DEFAULT_CONFIG = {
@@ -354,8 +354,12 @@ export function loadFlywheelConfigWithWarnings(cwd) {
     if (typeof coordinatorNode === 'object' && coordinatorNode !== null) {
         const c = coordinatorNode;
         const epochGuards = typeof c.epochGuards === 'boolean' ? c.epochGuards : undefined;
-        if (epochGuards !== undefined) {
-            coordinator = { epochGuards };
+        const nextActionHints = typeof c.nextActionHints === 'boolean' ? c.nextActionHints : undefined;
+        if (epochGuards !== undefined || nextActionHints !== undefined) {
+            coordinator = {
+                ...(epochGuards !== undefined ? { epochGuards } : {}),
+                ...(nextActionHints !== undefined ? { nextActionHints } : {}),
+            };
         }
     }
     let profile;
@@ -402,5 +406,10 @@ export function loadFlywheelConfig(cwd) {
 export function areEpochGuardsEnabled(cwd) {
     const { config } = loadFlywheelConfigWithWarnings(cwd);
     return config.coordinator?.epochGuards !== false;
+}
+/** True when coordinator.nextActionHints is absent or explicitly true (default on). */
+export function areNextActionHintsEnabled(cwd) {
+    const { config } = loadFlywheelConfigWithWarnings(cwd);
+    return config.coordinator?.nextActionHints !== false;
 }
 //# sourceMappingURL=flywheel-config.js.map

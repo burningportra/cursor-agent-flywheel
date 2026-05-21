@@ -27,13 +27,14 @@ import {
 import { buildAskQuestionFromGate, buildBatchReviewSynthesizedGate } from './cursor-user-gates.js';
 import { classifyBeadComplexity } from './model-routing.js';
 import { getCoordinatorEpoch, persistCoordinatorEpochBump } from './coordinator-epoch.js';
-import { areEpochGuardsEnabled, loadFlywheelConfigWithWarnings } from './flywheel-config.js';
+import { areEpochGuardsEnabled, areNextActionHintsEnabled, loadFlywheelConfigWithWarnings } from './flywheel-config.js';
+import { buildNextActionHint } from './next-action-hint.js';
 import { probeProfileStale } from './profile-staleness.js';
 import type { AdvanceWaveOutcome, AdvanceWavePrompt } from './tools/advance-wave.js';
 import { runAdvanceWave } from './tools/advance-wave.js';
 import { runReview } from './tools/review.js';
 import type { McpToolResult, ToolContext } from './types.js';
-import type { FlywheelState } from './types.js';
+import type { CoordinatorNextActionHint, FlywheelState } from './types.js';
 
 const DEFAULT_TICK_INTERVAL_SEC = 240;
 const DEFAULT_REVIEW_MODEL = 'opus-4.6';
@@ -104,6 +105,8 @@ export interface ImplTickStructured {
     advanceWave?: AdvanceWaveOutcome;
     reviewEnvelope?: unknown;
     askQuestion?: ReturnType<typeof buildAskQuestionFromGate>;
+    /** Advisory one-line coordinator nudge (template v1). */
+    nextActionHint?: CoordinatorNextActionHint;
   };
 }
 
@@ -186,6 +189,23 @@ export function finalizeTickPayload(
     };
   }
   return { ...payload, epoch: epochAtTickStart };
+}
+
+function maybeAttachNextActionHint(
+  cwd: string,
+  kind: ImplTickKind,
+  generationEpoch: number,
+  opts: { beadIds?: string[]; beadCount?: number },
+): CoordinatorNextActionHint | undefined {
+  if (!areNextActionHintsEnabled(cwd)) return undefined;
+  if (
+    kind !== 'wave_complete' &&
+    kind !== 'advance_wave' &&
+    kind !== 'dispatch_impl_tasks'
+  ) {
+    return undefined;
+  }
+  return buildNextActionHint(kind, generationEpoch, opts);
 }
 
 function buildTickResult(
@@ -436,6 +456,7 @@ export async function runImplTickCore(
     }
 
     if (outcome?.waveComplete && outcome.nextStep?.kind === 'wave_review_gate') {
+      const waveBeadIds = outcome.nextStep.beadIds;
       return buildTickResult(
         epochAtTickStart,
         state,
@@ -448,6 +469,9 @@ export async function runImplTickCore(
           snapshot: baseSnapshot,
           coordinatorPlaybook: playbook,
           advanceWave: outcome,
+          nextActionHint: maybeAttachNextActionHint(cwd, 'wave_complete', epochAtTickStart, {
+            beadIds: waveBeadIds,
+          }),
         },
       );
     }
@@ -475,6 +499,11 @@ export async function runImplTickCore(
           coordinatorPlaybook: playbook,
           advanceWave: outcome,
           implTasks,
+          nextActionHint: maybeAttachNextActionHint(cwd, 'advance_wave', epochAtTickStart, {
+            beadIds: outcome.nextWave.beadIds,
+            beadCount:
+              outcome.nextWave.beadIds?.length ?? outcome.nextWave.prompts.length,
+          }),
         },
       );
     }
@@ -547,6 +576,15 @@ export async function runImplTickCore(
           snapshot: baseSnapshot,
           coordinatorPlaybook: playbook,
           implTasks,
+          nextActionHint: maybeAttachNextActionHint(
+            cwd,
+            'dispatch_impl_tasks',
+            epochAtTickStart,
+            {
+              beadIds: implTasks.map((t) => t.beadId),
+              beadCount: implTasks.length,
+            },
+          ),
         },
       );
     }
