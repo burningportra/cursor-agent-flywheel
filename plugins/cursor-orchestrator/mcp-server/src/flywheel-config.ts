@@ -74,6 +74,19 @@ export interface FlywheelConfigImplTick {
   max_parallel_impl?: number;
 }
 
+export interface FlywheelConfigCoordinator {
+  /** When false, skip server-side stale tick drop (default true). */
+  epochGuards?: boolean;
+}
+
+export type FlywheelConfigProfileStaleAction = 'nudge' | 'auto_refresh';
+
+export interface FlywheelConfigProfile {
+  watchIntentFiles?: boolean;
+  staleAction?: FlywheelConfigProfileStaleAction;
+  debounceSeconds?: number;
+}
+
 export interface FlywheelConfig {
   convergence: FlywheelConfigConvergence;
   deep_plan?: FlywheelConfigDeepPlan;
@@ -81,6 +94,8 @@ export interface FlywheelConfig {
   duel?: FlywheelConfigDuel;
   grader?: FlywheelConfigGrader;
   impl_tick?: FlywheelConfigImplTick;
+  coordinator?: FlywheelConfigCoordinator;
+  profile?: FlywheelConfigProfile;
 }
 
 /**
@@ -109,13 +124,15 @@ export interface FlywheelConfigResult {
  * MUST update this map AND DEFAULT_CONFIG. Keep them lockstep.
  */
 const KNOWN_KEYS: Record<string, readonly string[]> = {
-  '': ['convergence', 'deep_plan', 'implement', 'duel', 'grader', 'impl_tick'],
+  '': ['convergence', 'deep_plan', 'implement', 'duel', 'grader', 'impl_tick', 'coordinator', 'profile'],
   convergence: ['gate_advance_wave'],
   deep_plan: ['correctness', 'ergonomics', 'robustness', 'synthesis'],
   implement: ['simple', 'medium', 'complex'],
   duel: ['wizard_a', 'wizard_b', 'wizard_c', 'synthesis'],
   grader: ['model'],
   impl_tick: ['interval_seconds', 'review_model', 'max_parallel_impl'],
+  coordinator: ['epochGuards'],
+  profile: ['watchIntentFiles', 'staleAction', 'debounceSeconds'],
 };
 
 export const DEFAULT_CONFIG: FlywheelConfig = {
@@ -422,6 +439,46 @@ export function loadFlywheelConfigWithWarnings(cwd: string): FlywheelConfigResul
     }
   }
 
+  let coordinator: FlywheelConfigCoordinator | undefined;
+  const coordinatorNode = parsed.coordinator;
+  if (typeof coordinatorNode === 'object' && coordinatorNode !== null) {
+    const c = coordinatorNode as Record<string, unknown>;
+    const epochGuards =
+      typeof c.epochGuards === 'boolean' ? c.epochGuards : undefined;
+    if (epochGuards !== undefined) {
+      coordinator = { epochGuards };
+    }
+  }
+
+  let profile: FlywheelConfigProfile | undefined;
+  const profileNode = parsed.profile;
+  if (typeof profileNode === 'object' && profileNode !== null) {
+    const p = profileNode as Record<string, unknown>;
+    const watchIntentFiles =
+      typeof p.watchIntentFiles === 'boolean' ? p.watchIntentFiles : undefined;
+    const staleActionRaw =
+      typeof p.staleAction === 'string' ? p.staleAction.trim().toLowerCase() : undefined;
+    const staleAction: FlywheelConfigProfileStaleAction | undefined =
+      staleActionRaw === 'nudge' || staleActionRaw === 'auto_refresh'
+        ? staleActionRaw
+        : undefined;
+    const debounceSeconds =
+      typeof p.debounceSeconds === 'number' && p.debounceSeconds >= 0
+        ? Math.floor(p.debounceSeconds)
+        : undefined;
+    if (
+      watchIntentFiles !== undefined ||
+      staleAction !== undefined ||
+      debounceSeconds !== undefined
+    ) {
+      profile = {
+        ...(watchIntentFiles !== undefined ? { watchIntentFiles } : {}),
+        ...(staleAction ? { staleAction } : {}),
+        ...(debounceSeconds !== undefined ? { debounceSeconds } : {}),
+      };
+    }
+  }
+
   return {
     config: {
       convergence: { gate_advance_wave: gate },
@@ -430,6 +487,8 @@ export function loadFlywheelConfigWithWarnings(cwd: string): FlywheelConfigResul
       ...(duel ? { duel } : {}),
       ...(grader ? { grader } : {}),
       ...(impl_tick ? { impl_tick } : {}),
+      ...(coordinator ? { coordinator } : {}),
+      ...(profile ? { profile } : {}),
     },
     warnings,
     source: configPath,
@@ -438,4 +497,10 @@ export function loadFlywheelConfigWithWarnings(cwd: string): FlywheelConfigResul
 
 export function loadFlywheelConfig(cwd: string): FlywheelConfig {
   return loadFlywheelConfigWithWarnings(cwd).config;
+}
+
+/** True when coordinator.epochGuards is absent or explicitly true (default on). */
+export function areEpochGuardsEnabled(cwd: string): boolean {
+  const { config } = loadFlywheelConfigWithWarnings(cwd);
+  return config.coordinator?.epochGuards !== false;
 }

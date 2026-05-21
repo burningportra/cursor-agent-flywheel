@@ -9,6 +9,16 @@ import { readMemory } from '../memory.js';
 import { errMsg, makeFlywheelErrorResult } from '../errors.js';
 import { assertSafeRelativePath, resolveRealpathWithinRoot, } from '../utils/path-safety.js';
 import { normalizeText } from '../utils/text-normalize.js';
+import { registerProfileWatch, } from '../profile-staleness.js';
+function bindPlanProfileWatch(state, cwd) {
+    const paths = [
+        ...(state.planDocument ? [state.planDocument] : []),
+        ...(state.outcomeRubricPath ? [state.outcomeRubricPath] : []),
+    ];
+    if (paths.length === 0)
+        return;
+    Object.assign(state, registerProfileWatch(state, cwd, paths, { merge: true }));
+}
 /**
  * Locate the most-recent brainstorm artifact for this goal.
  *
@@ -129,6 +139,7 @@ export async function runPlan(ctx, args) {
         if (args.source === 'picked-up-existing-plan') {
             state.planSource = 'picked-up-existing-plan';
         }
+        bindPlanProfileWatch(state, cwd);
         saveState(state);
         const isPickedUp = state.planSource === 'picked-up-existing-plan';
         const nextStepLine = isPickedUp
@@ -186,6 +197,7 @@ Plan loaded (${content.length} chars, ${content.split('\n').length} lines).`, 'a
         state.planDocument = relativePath;
         state.planRefinementRound = 0;
         state.phase = 'awaiting_plan_approval';
+        bindPlanProfileWatch(state, cwd);
         const saved = await saveState(state);
         if (saved === false) {
             state.planDocument = prevPlanDocument;

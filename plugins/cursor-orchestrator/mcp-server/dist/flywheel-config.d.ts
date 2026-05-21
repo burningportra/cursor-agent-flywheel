@@ -64,6 +64,16 @@ export interface FlywheelConfigImplTick {
     review_model?: string;
     max_parallel_impl?: number;
 }
+export interface FlywheelConfigCoordinator {
+    /** When false, skip server-side stale tick drop (default true). */
+    epochGuards?: boolean;
+}
+export type FlywheelConfigProfileStaleAction = 'nudge' | 'auto_refresh';
+export interface FlywheelConfigProfile {
+    watchIntentFiles?: boolean;
+    staleAction?: FlywheelConfigProfileStaleAction;
+    debounceSeconds?: number;
+}
 export interface FlywheelConfig {
     convergence: FlywheelConfigConvergence;
     deep_plan?: FlywheelConfigDeepPlan;
@@ -71,6 +81,8 @@ export interface FlywheelConfig {
     duel?: FlywheelConfigDuel;
     grader?: FlywheelConfigGrader;
     impl_tick?: FlywheelConfigImplTick;
+    coordinator?: FlywheelConfigCoordinator;
+    profile?: FlywheelConfigProfile;
 }
 /**
  * R-008 — single warning surfaced from the loader. Each reports a
@@ -104,4 +116,6 @@ export declare function suggestKey(unknown: string, known: readonly string[]): s
  */
 export declare function loadFlywheelConfigWithWarnings(cwd: string): FlywheelConfigResult;
 export declare function loadFlywheelConfig(cwd: string): FlywheelConfig;
+/** True when coordinator.epochGuards is absent or explicitly true (default on). */
+export declare function areEpochGuardsEnabled(cwd: string): boolean;
 //# sourceMappingURL=flywheel-config.d.ts.map

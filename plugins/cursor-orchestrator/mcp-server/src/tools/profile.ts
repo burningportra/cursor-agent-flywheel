@@ -6,6 +6,14 @@ import { createLogger } from '../logger.js';
 import { runOpeningCeremony } from '../opening-ceremony.js';
 import { VERSION } from '../version.js';
 import { errMsg, makeFlywheelErrorResult } from '../errors.js';
+import { loadFlywheelConfig } from '../flywheel-config.js';
+import {
+  applyProfileStalenessToState,
+  checkProfileStaleness,
+  clearProfileStaleFlags,
+  registerProfileWatch,
+  resolveDefaultWatchPaths,
+} from '../profile-staleness.js';
 
 const log = createLogger('profile');
 
@@ -20,6 +28,7 @@ const log = createLogger('profile');
  */
 export async function runProfile(ctx: ToolContext, args: ProfileArgs): Promise<McpToolResult> {
   const { exec, cwd, state, saveState, signal } = ctx;
+  const flywheelConfig = loadFlywheelConfig(cwd);
 
   state.phase = 'profiling';
 
@@ -75,6 +84,26 @@ export async function runProfile(ctx: ToolContext, args: ProfileArgs): Promise<M
       });
     }
     saveCachedProfile(exec, cwd, profile).catch(() => {});
+  }
+
+  if (args.force) {
+    Object.assign(
+      state,
+      registerProfileWatch(
+        clearProfileStaleFlags(state),
+        cwd,
+        resolveDefaultWatchPaths(state, cwd),
+        { merge: false },
+      ),
+    );
+  } else {
+    Object.assign(
+      state,
+      applyProfileStalenessToState(
+        state,
+        checkProfileStaleness(cwd, state, flywheelConfig.profile),
+      ),
+    );
   }
 
   // ── Detect coordination backends ──────────────────────────────
@@ -148,7 +177,11 @@ export async function runProfile(ctx: ToolContext, args: ProfileArgs): Promise<M
     ? `\n\n> Profile loaded from cache (git HEAD unchanged). Pass \`force: true\` to re-scan.`
     : '';
 
-  const text = `${ceremonyBanner}\n\n${roadmap}\n\n${coordLine}${cacheNote}${foundationWarning}${beadStatus}${goalSection}\n\n---\n\n${formatted}`;
+  const staleNote = state.profileStale
+    ? `\n\n> **Profile stale** (${state.profileStaleReason ?? 'intent file drift'}). Call \`flywheel_profile({ force: true })\` to refresh.`
+    : '';
+
+  const text = `${ceremonyBanner}\n\n${roadmap}\n\n${coordLine}${cacheNote}${staleNote}${foundationWarning}${beadStatus}${goalSection}\n\n---\n\n${formatted}`;
 
   const nextStep = args.goal
     ? makeNextToolStep('present_choices', 'A goal was provided. Either proceed directly to flywheel_select or run flywheel_discover to generate alternatives.', {
@@ -204,6 +237,8 @@ export async function runProfile(ctx: ToolContext, args: ProfileArgs): Promise<M
         ciPlatform: profile.ciPlatform,
         entrypoints: profile.entrypoints,
       },
+      profileStale: state.profileStale ?? false,
+      profileStaleReason: state.profileStaleReason,
     },
   });
 }

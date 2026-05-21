@@ -416,6 +416,8 @@ describe('runProfile', () => {
           ciPlatform: 'GitHub Actions',
           entrypoints: ['src/index.ts'],
         },
+        profileStale: false,
+        profileStaleReason: undefined,
       },
     });
   });
@@ -474,7 +476,24 @@ describe('runProfile', () => {
           ciPlatform: 'GitHub Actions',
           entrypoints: ['src/index.ts'],
         },
+        profileStale: false,
+        profileStaleReason: undefined,
       },
+    });
+  });
+
+  it('force clears profile stale flags and re-registers watch registry', async () => {
+    const { ctx, state } = makeCtx();
+    state.profileStale = true;
+    state.profileStaleReason = 'drift: docs/plans/x.md';
+
+    const result = await runProfile(ctx, { cwd: '/fake/cwd', force: true });
+
+    expect(state.profileStale).toBe(false);
+    expect(state.profileStaleReason).toBeUndefined();
+    expect(state.lastProfileRefreshAt).toMatch(/^\d{4}-/);
+    expect((result.structuredContent as { data?: { profileStale?: boolean } })?.data).toMatchObject({
+      profileStale: false,
     });
   });
 

@@ -1,6 +1,6 @@
 import { mkdirSync, writeFileSync, readFileSync, existsSync, readdirSync, lstatSync } from 'node:fs';
 import { join } from 'node:path';
-import type { ToolContext, McpToolResult, PlanArgs } from '../types.js';
+import type { ToolContext, McpToolResult, PlanArgs, FlywheelState } from '../types.js';
 import { makeOkToolResult, slugifyGoal } from './shared.js';
 import { CODEX_SUBAGENT_TYPE } from '../prompts.js';
 import { getDeepPlanModels } from '../model-detection.js';
@@ -25,6 +25,18 @@ import {
   resolveRealpathWithinRoot,
 } from '../utils/path-safety.js';
 import { normalizeText } from '../utils/text-normalize.js';
+import {
+  registerProfileWatch,
+} from '../profile-staleness.js';
+
+function bindPlanProfileWatch(state: FlywheelState, cwd: string): void {
+  const paths = [
+    ...(state.planDocument ? [state.planDocument] : []),
+    ...(state.outcomeRubricPath ? [state.outcomeRubricPath] : []),
+  ];
+  if (paths.length === 0) return;
+  Object.assign(state, registerProfileWatch(state, cwd, paths, { merge: true }));
+}
 
 /**
  * Locate the most-recent brainstorm artifact for this goal.
@@ -173,6 +185,7 @@ export async function runPlan(ctx: ToolContext, args: PlanArgs): Promise<McpTool
     if (args.source === 'picked-up-existing-plan') {
       state.planSource = 'picked-up-existing-plan';
     }
+    bindPlanProfileWatch(state, cwd);
     saveState(state);
 
     const isPickedUp = state.planSource === 'picked-up-existing-plan';
@@ -256,6 +269,7 @@ Plan loaded (${content.length} chars, ${content.split('\n').length} lines).`,
     state.planDocument = relativePath;
     state.planRefinementRound = 0;
     state.phase = 'awaiting_plan_approval';
+    bindPlanProfileWatch(state, cwd);
     const saved = await saveState(state);
     if (saved === false) {
       state.planDocument = prevPlanDocument;

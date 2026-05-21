@@ -40,13 +40,15 @@ import * as path from 'node:path';
  * MUST update this map AND DEFAULT_CONFIG. Keep them lockstep.
  */
 const KNOWN_KEYS = {
-    '': ['convergence', 'deep_plan', 'implement', 'duel', 'grader', 'impl_tick'],
+    '': ['convergence', 'deep_plan', 'implement', 'duel', 'grader', 'impl_tick', 'coordinator', 'profile'],
     convergence: ['gate_advance_wave'],
     deep_plan: ['correctness', 'ergonomics', 'robustness', 'synthesis'],
     implement: ['simple', 'medium', 'complex'],
     duel: ['wizard_a', 'wizard_b', 'wizard_c', 'synthesis'],
     grader: ['model'],
     impl_tick: ['interval_seconds', 'review_model', 'max_parallel_impl'],
+    coordinator: ['epochGuards'],
+    profile: ['watchIntentFiles', 'staleAction', 'debounceSeconds'],
 };
 export const DEFAULT_CONFIG = {
     convergence: {
@@ -347,6 +349,37 @@ export function loadFlywheelConfigWithWarnings(cwd) {
             };
         }
     }
+    let coordinator;
+    const coordinatorNode = parsed.coordinator;
+    if (typeof coordinatorNode === 'object' && coordinatorNode !== null) {
+        const c = coordinatorNode;
+        const epochGuards = typeof c.epochGuards === 'boolean' ? c.epochGuards : undefined;
+        if (epochGuards !== undefined) {
+            coordinator = { epochGuards };
+        }
+    }
+    let profile;
+    const profileNode = parsed.profile;
+    if (typeof profileNode === 'object' && profileNode !== null) {
+        const p = profileNode;
+        const watchIntentFiles = typeof p.watchIntentFiles === 'boolean' ? p.watchIntentFiles : undefined;
+        const staleActionRaw = typeof p.staleAction === 'string' ? p.staleAction.trim().toLowerCase() : undefined;
+        const staleAction = staleActionRaw === 'nudge' || staleActionRaw === 'auto_refresh'
+            ? staleActionRaw
+            : undefined;
+        const debounceSeconds = typeof p.debounceSeconds === 'number' && p.debounceSeconds >= 0
+            ? Math.floor(p.debounceSeconds)
+            : undefined;
+        if (watchIntentFiles !== undefined ||
+            staleAction !== undefined ||
+            debounceSeconds !== undefined) {
+            profile = {
+                ...(watchIntentFiles !== undefined ? { watchIntentFiles } : {}),
+                ...(staleAction ? { staleAction } : {}),
+                ...(debounceSeconds !== undefined ? { debounceSeconds } : {}),
+            };
+        }
+    }
     return {
         config: {
             convergence: { gate_advance_wave: gate },
@@ -355,6 +388,8 @@ export function loadFlywheelConfigWithWarnings(cwd) {
             ...(duel ? { duel } : {}),
             ...(grader ? { grader } : {}),
             ...(impl_tick ? { impl_tick } : {}),
+            ...(coordinator ? { coordinator } : {}),
+            ...(profile ? { profile } : {}),
         },
         warnings,
         source: configPath,
@@ -362,5 +397,10 @@ export function loadFlywheelConfigWithWarnings(cwd) {
 }
 export function loadFlywheelConfig(cwd) {
     return loadFlywheelConfigWithWarnings(cwd).config;
+}
+/** True when coordinator.epochGuards is absent or explicitly true (default on). */
+export function areEpochGuardsEnabled(cwd) {
+    const { config } = loadFlywheelConfigWithWarnings(cwd);
+    return config.coordinator?.epochGuards !== false;
 }
 //# sourceMappingURL=flywheel-config.js.map
