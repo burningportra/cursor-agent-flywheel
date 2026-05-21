@@ -350,3 +350,28 @@ describe('runImplTickCore epoch guards', () => {
     expect(out.nextActionHint).toBeUndefined();
   });
 });
+
+describe('buildImplTickCoordinatorPlaybook', () => {
+  it('documents epoch verification before spawning Tasks', async () => {
+    const { buildImplTickCoordinatorPlaybook, resolveImplTickConfig } = await import(
+      '../cursor-impl-tick.js'
+    );
+    const playbook = buildImplTickCoordinatorPlaybook(resolveImplTickConfig('/tmp'));
+    expect(playbook).toContain('Epoch check');
+    expect(playbook).toContain('data.epoch');
+    expect(playbook).toContain('coordinatorEpoch');
+    expect(playbook).toContain('kind: stale');
+    expect(playbook).toMatch(/advance_wave.*epoch check/i);
+    expect(playbook).toMatch(/dispatch_impl_tasks.*epoch check/i);
+  });
+
+  it('documents nextActionHint as advisory scan aid', async () => {
+    const { buildImplTickCoordinatorPlaybook, resolveImplTickConfig } = await import(
+      '../cursor-impl-tick.js'
+    );
+    const playbook = buildImplTickCoordinatorPlaybook(resolveImplTickConfig('/tmp'));
+    expect(playbook).toContain('nextActionHint.text');
+    expect(playbook).toContain('advisory');
+    expect(playbook).toContain('generationEpoch === data.epoch');
+  });
+});

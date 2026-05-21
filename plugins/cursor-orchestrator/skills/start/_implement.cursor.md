@@ -32,15 +32,25 @@ When beads finish, pass their IDs:
 flywheel_impl_tick({ cwd, closedBeadIds: ["br-1", "br-2"] })
 ```
 
+**Epoch check (before spawning Tasks):** Read `data.epoch` from the tick response. Confirm it matches checkpoint `coordinatorEpoch` (`flywheel_observe` or same-session state). If `kind: stale` or epochs differ, discard `implTasks` / `batchReviewTask` and re-call `flywheel_impl_tick` — do not spawn.
+
 | `data.kind` | Coordinator action |
 |-------------|-------------------|
 | `monitor` | Wait; schedule next tick |
-| `batch_review_dispatch` | Spawn **one** Task with `data.batchReviewTask` (`model` = decorrelated reviewer, default `opus-4.6`); tick again when verdict JSON exists |
+| `stale` | Epoch mismatch or user steered mid-tick — re-call `flywheel_impl_tick` immediately; do not spawn Tasks |
+| `batch_review_dispatch` | Epoch check → spawn **one** Task with `data.batchReviewTask` (`model` = decorrelated reviewer, default `opus-4.6`); tick again when verdict JSON exists |
 | `batch_review_in_progress` | Do not start another review; tick later |
 | `batch_review_verdict` | **AskQuestion** with `data.askQuestion`; approve synthesized beads → merge into wave → tick |
-| `advance_wave` | Spawn `data.implTasks` (stagger ~30s) |
-| `dispatch_impl_tasks` | Idle capacity — spawn ready-bead tasks |
-| `wave_complete` | `flywheel_wave_review_gate({ cwd, beadIds })` → **AskQuestion** → `flywheel_review` |
+| `advance_wave` | Epoch check → spawn `data.implTasks` (stagger ~30s) |
+| `dispatch_impl_tasks` | Epoch check → idle capacity — spawn ready-bead tasks |
+| `wave_complete` | Quote `nextActionHint.text` if present → `flywheel_wave_review_gate({ cwd, beadIds })` → **AskQuestion** → `flywheel_review` |
+
+### Hint discipline (context budget)
+
+- **Chat:** At most one line from `data.nextActionHint.text` per tick — use it for quick scan only.
+- **Never** echo full `coordinatorPlaybook`, `implTasks[].prompt`, or gate JSON.
+- Hints are **advisory**; `data.kind`, gate MCP tools, and `nextStep` are authoritative — never skip mandatory gates because a hint exists.
+- When both hint and structured fields exist, verify `nextActionHint.generationEpoch === data.epoch` before acting on the hint.
 
 Do **not** use `codex exec` or `claude --print` for commit-batch review in Cursor.
 
