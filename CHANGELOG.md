@@ -21,7 +21,8 @@ Sections are grouped by **capability waves**. The **version timeline** keeps chr
 
 | Label | Date (landed) | Summary |
 |-------|---------------|---------|
-| **[Unreleased]** | — | Open beads only (see below) |
+| **[Unreleased]** | — | No open beads |
+| **3.19.0** | 2026-05-20 | pi-prompt-suggester integration: coordinator epoch, profile staleness, next-action hints |
 | **3.18.1+visual** | 2026-05-20 | Planning browser companion + changelog rebuild ([89397cc](https://github.com/burningportra/cursor-agent-flywheel/commit/89397cc)) |
 | **3.18.1+gates** | 2026-05-20 | Upstream skills sync, native bead/impl gates, install + command parity |
 | **3.18.1** | 2026-04-09 – 2026-04-14 | Cursor port of agent-flywheel-plugin, CI, publishing, VS Code UI, guided `/flywheel` |
@@ -32,16 +33,32 @@ There are **no git tags** and **no GitHub Releases** in this repository yet.
 
 ## [Unreleased]
 
-### Open workstreams (beads)
+_No pending release items._
 
-| ID | Status | Title |
-|----|--------|-------|
-| `cursor-agent-flywheel-1jt` | open | Clarify Gate 3 checklist text in review.ts |
-| `cursor-agent-flywheel-1p4` | open | Fix orchestrator AGENTS.md Testing section |
-| `cursor-agent-flywheel-3ci` | open | Run MCP tests, build, and verify-cursor-orchestrator |
-| `cursor-agent-flywheel-3qo` | open | Add repo-root AGENTS.md with monorepo map and links |
+---
 
-Tracker file: [.beads/issues.jsonl](.beads/issues.jsonl)
+## 3.19.0 — pi-prompt-suggester integration (2026-05-20)
+
+Ports coordinator patterns from [pi-prompt-suggester](https://github.com/guwidoe/pi-prompt-suggester) into the Cursor orchestrator MCP: epoch guards on impl tick, profile intent staleness, and post-wave next-action hints.
+
+### Delivered capability
+
+- **`coordinator-epoch.ts`** — monotonic `coordinatorEpoch`; bump on wave review, wrap-up, and advance-wave steering paths.
+- **`flywheel_impl_tick`** — tags every response with `data.epoch`; returns `kind: 'stale'` (no `implTasks`) when the coordinator steered mid-tick.
+- **`profile-staleness.ts`** — sha256 watch registry for plan, rubric, AGENTS, README, and config; `profileStale` in observe, doctor, and impl tick.
+- **`next-action-hint.ts`** — single-line `nextActionHint` on wave complete / advance; steering-event suppression for rejected hints.
+- **Playbook** — `_implement.cursor.md` documents epoch verification before spawning Tasks.
+- **Docs beads** — repo-root `AGENTS.md`, orchestrator Testing section, Gate 3 checklist clarity.
+
+### Representative commits
+
+| Date | Commit | Summary |
+|------|--------|---------|
+| 2026-05-20 | [af6ad38](https://github.com/burningportra/cursor-agent-flywheel/commit/af6ad38) | Implement playbook epoch + hint docs |
+| 2026-05-20 | [a9a044c](https://github.com/burningportra/cursor-agent-flywheel/commit/a9a044c) | Coordinator epoch helpers + state types |
+| 2026-05-20 | [02187db](https://github.com/burningportra/cursor-agent-flywheel/commit/02187db) | Profile staleness watch registry |
+
+Plan: [docs/plans/2026-05-20-implement-pi-prompt-suggester-integration-synthesized.md](docs/plans/2026-05-20-implement-pi-prompt-suggester-integration-synthesized.md)
 
 ---
 

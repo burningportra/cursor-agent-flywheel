@@ -6,6 +6,22 @@ _No plugin-only changes beyond monorepo root._
 
 ---
 
+## [3.19.0] — 2026-05-20
+
+### Added
+
+- **`coordinator-epoch.ts`** — `getCoordinatorEpoch`, `bumpCoordinatorEpoch`, persisted bumps on gate steering.
+- **`profile-staleness.ts`** — plan/config drift detection; `profileStale` in observe, doctor, impl tick.
+- **`next-action-hint.ts`** — capped `nextActionHint` on wave complete and advance wave; `steering-events.ts` FIFO suppression.
+- **`flywheel_impl_tick`** — `data.epoch` on all responses; `kind: 'stale'` drops stale `implTasks` when epoch guards enabled.
+
+### Changed
+
+- **`tools/advance-wave.ts`**, **`tools/review.ts`**, **`tools/user-gate.ts`** — bump coordinator epoch on user steering.
+- **`skills/start/_implement.cursor.md`** — epoch check + advisory `nextActionHint` usage.
+
+---
+
 ## [3.18.1+visual] — 2026-05-20
 
 ### Added
