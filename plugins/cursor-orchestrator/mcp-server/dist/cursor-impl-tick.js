@@ -80,7 +80,7 @@ export function finalizeTickPayload(epochAtTickStart, state, payload, epochGuard
     }
     return { ...payload, epoch: epochAtTickStart };
 }
-function maybeAttachNextActionHint(cwd, kind, generationEpoch, opts) {
+function maybeAttachNextActionHint(cwd, kind, generationEpoch, state, opts) {
     if (!areNextActionHintsEnabled(cwd))
         return undefined;
     if (kind !== 'wave_complete' &&
@@ -88,7 +88,7 @@ function maybeAttachNextActionHint(cwd, kind, generationEpoch, opts) {
         kind !== 'dispatch_impl_tasks') {
         return undefined;
     }
-    return buildNextActionHint(kind, generationEpoch, opts);
+    return buildNextActionHint(kind, generationEpoch, { ...opts, state });
 }
 function buildTickResult(epochAtTickStart, state, epochGuards, text, payload) {
     const data = finalizeTickPayload(epochAtTickStart, state, payload, epochGuards);
@@ -289,7 +289,7 @@ export async function runImplTickCore(ctx, args) {
                 snapshot: baseSnapshot,
                 coordinatorPlaybook: playbook,
                 advanceWave: outcome,
-                nextActionHint: maybeAttachNextActionHint(cwd, 'wave_complete', epochAtTickStart, {
+                nextActionHint: maybeAttachNextActionHint(cwd, 'wave_complete', epochAtTickStart, state, {
                     beadIds: waveBeadIds,
                 }),
             });
@@ -308,7 +308,7 @@ export async function runImplTickCore(ctx, args) {
                 coordinatorPlaybook: playbook,
                 advanceWave: outcome,
                 implTasks,
-                nextActionHint: maybeAttachNextActionHint(cwd, 'advance_wave', epochAtTickStart, {
+                nextActionHint: maybeAttachNextActionHint(cwd, 'advance_wave', epochAtTickStart, state, {
                     beadIds: outcome.nextWave.beadIds,
                     beadCount: outcome.nextWave.beadIds?.length ?? outcome.nextWave.prompts.length,
                 }),
@@ -367,7 +367,7 @@ export async function runImplTickCore(ctx, args) {
                 snapshot: baseSnapshot,
                 coordinatorPlaybook: playbook,
                 implTasks,
-                nextActionHint: maybeAttachNextActionHint(cwd, 'dispatch_impl_tasks', epochAtTickStart, {
+                nextActionHint: maybeAttachNextActionHint(cwd, 'dispatch_impl_tasks', epochAtTickStart, state, {
                     beadIds: implTasks.map((t) => t.beadId),
                     beadCount: implTasks.length,
                 }),

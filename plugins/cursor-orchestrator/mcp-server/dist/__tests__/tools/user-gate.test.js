@@ -146,6 +146,11 @@ describe('flywheel user gate tools', () => {
         await runWrapUpGate(ctx, { cwd: process.cwd(), confirmWrapUp: 'full' });
         expect(ctx.state.coordinatorEpoch).toBe(1);
         expect(saved.some((s) => s.coordinatorEpoch === 1)).toBe(true);
+        expect(ctx.state.steeringEvents).toHaveLength(1);
+        expect(ctx.state.steeringEvents[0]).toMatchObject({
+            source: 'wrap_up',
+            actionId: 'wrap-up-full',
+        });
     });
     it('E8: flywheel_wave_review_gate confirmAction bumps coordinatorEpoch', async () => {
         const saved = [];
@@ -170,6 +175,12 @@ describe('flywheel user gate tools', () => {
         expect(data.coordinatorEpoch).toBe(5);
         expect(ctx.state.coordinatorEpoch).toBe(5);
         expect(saved.some((s) => s.coordinatorEpoch === 5)).toBe(true);
+        expect(ctx.state.steeringEvents).toHaveLength(1);
+        expect(ctx.state.steeringEvents[0]).toMatchObject({
+            source: 'wave_review',
+            actionId: 'looks-good-all',
+            beadIds: ['tb-9'],
+        });
     });
 });
 //# sourceMappingURL=user-gate.test.js.map

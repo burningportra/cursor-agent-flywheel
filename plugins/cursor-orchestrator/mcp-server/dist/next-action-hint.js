@@ -2,10 +2,17 @@
  * Template-only coordinator next-action hints (pi-prompt-suggester port v1).
  * One-line nudges for wave completion / dispatch without parsing full MCP JSON.
  */
+import { shouldSuppressNextActionHint } from './steering-events.js';
 /** Hard cap on hint text length (bead AC + synthesized plan). */
 export const HINT_MAX_CHARS = 160;
 /** When bead id lists exceed this, hint text uses count only and omits beadIds. */
 export const HINT_BEAD_ID_CAP = 50;
+/** Gate action id used when checking steering suppression for each hint kind. */
+const HINT_SUPPRESSION_ACTION = {
+    wave_complete: 'fresh-eyes',
+    advance_wave: 'skip',
+    dispatch_impl_tasks: 'skip',
+};
 function truncateHintText(text, max = HINT_MAX_CHARS) {
     if (text.length <= max)
         return text;
@@ -48,6 +55,11 @@ export function buildDispatchImplTasksHint(generationEpoch, beadCount, beadIds) 
     return finalizeHint(text, 'flywheel_impl_tick', generationEpoch, beadIds);
 }
 export function buildNextActionHint(kind, generationEpoch, opts) {
+    const suppressionActionId = HINT_SUPPRESSION_ACTION[kind];
+    if (opts.state &&
+        shouldSuppressNextActionHint(opts.state, suppressionActionId, opts.beadIds)) {
+        return undefined;
+    }
     const count = opts.beadCount ?? opts.beadIds?.length ?? 0;
     switch (kind) {
         case 'wave_complete':

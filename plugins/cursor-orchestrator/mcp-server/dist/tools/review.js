@@ -2,7 +2,7 @@ import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 import { BatchReviewVerdictSchema } from '../types.js';
 import { errMsg, makeFlywheelErrorResult } from '../errors.js';
-import { persistCoordinatorEpochBump } from '../coordinator-epoch.js';
+import { recordGateSteering } from '../steering-events.js';
 import { createLogger } from '../logger.js';
 import { makeOkToolResult } from './shared.js';
 import { clearPendingBatchReview, markBatchReviewDispatched, synthesizeBeadsFromFindings, rollbackSynthesizedBeads, } from '../commit-batch.js';
@@ -179,7 +179,11 @@ export async function runReview(ctx, args) {
                 saveState(state);
             }
             // E3: already-closed bead accepted at review gate
-            await persistCoordinatorEpochBump(ctx);
+            await recordGateSteering(ctx, {
+                source: 'wave_review',
+                actionId: 'looks-good-all',
+                beadIds: [beadId],
+            });
             return nextBeadOrGates(ctx, beadId, bead.title, 'Already closed by impl agent');
         }
         if (args.action === 'skip') {
@@ -206,8 +210,11 @@ export async function runReview(ctx, args) {
             summary: 'Skipped by user',
         };
         // E5: defer at review gate
-        await persistCoordinatorEpochBump(ctx);
-        saveState(state);
+        await recordGateSteering(ctx, {
+            source: 'wave_review',
+            actionId: 'skip',
+            beadIds: [beadId],
+        });
         return nextBeadOrGates(ctx, beadId, bead.title, 'Skipped');
     }
     // ── action: looks-good ────────────────────────────────────────
@@ -250,8 +257,11 @@ export async function runReview(ctx, args) {
             }
         }
         // E3: successful looks-good closes bead and advances
-        await persistCoordinatorEpochBump(ctx);
-        saveState(state);
+        await recordGateSteering(ctx, {
+            source: 'wave_review',
+            actionId: 'looks-good-all',
+            beadIds: [beadId],
+        });
         return nextBeadOrGates(ctx, beadId, bead.title, 'Passed');
     }
     // ── action: hit-me — return parallel review agent specs ───────
@@ -269,8 +279,11 @@ export async function runReview(ctx, args) {
         state.beadHitMeTriggered[beadId] = true;
         state.beadHitMeCompleted[beadId] = false;
         // E4: dispatching parallel reviewers after wave review gate
-        await persistCoordinatorEpochBump(ctx);
-        saveState(state);
+        await recordGateSteering(ctx, {
+            source: 'wave_review',
+            actionId: 'hit-me',
+            beadIds: [beadId],
+        });
         // Extract file list from bead description (heuristic: lines containing paths)
         const files = extractFilesFromBead(bead);
         const fileList = files.length > 0 ? files.join(', ') : '(check bead description for files)';
@@ -757,7 +770,15 @@ After completing this gate check:
 async function regressToPhase(ctx, targetPhase, phaseName) {
     const { state, saveState } = ctx;
     // E6: phase regression is user steering
-    await persistCoordinatorEpochBump(ctx);
+    const regressActionId = targetPhase === 'planning'
+        ? 'regress-to-plan'
+        : targetPhase === 'creating_beads'
+            ? 'regress-to-beads'
+            : 'regress-to-implement';
+    await recordGateSteering(ctx, {
+        source: 'wave_review',
+        actionId: regressActionId,
+    });
     state.phase = targetPhase;
     state.currentGateIndex = 0;
     state.iterationRound = 0;

@@ -3,7 +3,8 @@
  * One-line nudges for wave completion / dispatch without parsing full MCP JSON.
  */
 
-import type { CoordinatorNextActionHint } from './types.js';
+import { shouldSuppressNextActionHint } from './steering-events.js';
+import type { CoordinatorNextActionHint, FlywheelState } from './types.js';
 
 /** Hard cap on hint text length (bead AC + synthesized plan). */
 export const HINT_MAX_CHARS = 160;
@@ -15,6 +16,13 @@ export type NextActionHintKind =
   | 'wave_complete'
   | 'advance_wave'
   | 'dispatch_impl_tasks';
+
+/** Gate action id used when checking steering suppression for each hint kind. */
+const HINT_SUPPRESSION_ACTION: Record<NextActionHintKind, string> = {
+  wave_complete: 'fresh-eyes',
+  advance_wave: 'skip',
+  dispatch_impl_tasks: 'skip',
+};
 
 function truncateHintText(text: string, max = HINT_MAX_CHARS): string {
   if (text.length <= max) return text;
@@ -86,8 +94,20 @@ export function buildDispatchImplTasksHint(
 export function buildNextActionHint(
   kind: NextActionHintKind,
   generationEpoch: number,
-  opts: { beadIds?: string[]; beadCount?: number },
+  opts: { beadIds?: string[]; beadCount?: number; state?: FlywheelState },
 ): CoordinatorNextActionHint | undefined {
+  const suppressionActionId = HINT_SUPPRESSION_ACTION[kind];
+  if (
+    opts.state &&
+    shouldSuppressNextActionHint(
+      opts.state,
+      suppressionActionId,
+      opts.beadIds,
+    )
+  ) {
+    return undefined;
+  }
+
   const count = opts.beadCount ?? opts.beadIds?.length ?? 0;
   switch (kind) {
     case 'wave_complete':

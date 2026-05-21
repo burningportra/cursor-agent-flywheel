@@ -805,6 +805,12 @@ describe('runReview', () => {
             ]);
             await runReview(ctx, { cwd: '/fake/cwd', beadId: 'test-bead-1', action: 'skip' });
             expect(state.coordinatorEpoch).toBe(1);
+            expect(state.steeringEvents).toHaveLength(1);
+            expect(state.steeringEvents[0]).toMatchObject({
+                source: 'wave_review',
+                actionId: 'skip',
+                beadIds: ['test-bead-1'],
+            });
         });
         it('E6: __regress_to_plan__ bumps coordinatorEpoch', async () => {
             const { ctx, state } = makeCtx({ phase: 'reviewing' });

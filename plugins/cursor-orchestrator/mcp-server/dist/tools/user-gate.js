@@ -1,4 +1,4 @@
-import { persistCoordinatorEpochBump } from "../coordinator-epoch.js";
+import { recordGateSteering, wrapUpConfirmActionId, } from "../steering-events.js";
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
 import { readBeads } from "../beads.js";
@@ -54,7 +54,11 @@ export async function runWaveReviewGate(ctx, args) {
     const { cwd, state, exec } = ctx;
     // E8: record wave review gate action after AskQuestion maps actions id
     if (args.confirmAction !== undefined) {
-        const epoch = await persistCoordinatorEpochBump(ctx);
+        const epoch = await recordGateSteering(ctx, {
+            source: "wave_review",
+            actionId: args.confirmAction,
+            beadIds: args.beadIds,
+        });
         return makeOkToolResult("flywheel_wave_review_gate", state.phase, `Wave review action recorded: ${args.confirmAction} (epoch ${epoch}).`, {
             kind: "wave_review_confirmed",
             confirmAction: args.confirmAction,
@@ -185,7 +189,10 @@ export async function runWrapUpGate(ctx, args) {
     });
     if (args.confirmWrapUp !== undefined) {
         // E7: wrap-up confirm is user steering
-        await persistCoordinatorEpochBump(ctx);
+        await recordGateSteering(ctx, {
+            source: "wrap_up",
+            actionId: wrapUpConfirmActionId(args.confirmWrapUp),
+        });
         state.wrapUpConfirmed = true;
         state.phase = state.phase === "complete" ? "complete" : "iterating";
         saveState(state);

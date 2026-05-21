@@ -195,6 +195,7 @@ function maybeAttachNextActionHint(
   cwd: string,
   kind: ImplTickKind,
   generationEpoch: number,
+  state: FlywheelState,
   opts: { beadIds?: string[]; beadCount?: number },
 ): CoordinatorNextActionHint | undefined {
   if (!areNextActionHintsEnabled(cwd)) return undefined;
@@ -205,7 +206,7 @@ function maybeAttachNextActionHint(
   ) {
     return undefined;
   }
-  return buildNextActionHint(kind, generationEpoch, opts);
+  return buildNextActionHint(kind, generationEpoch, { ...opts, state });
 }
 
 function buildTickResult(
@@ -469,7 +470,7 @@ export async function runImplTickCore(
           snapshot: baseSnapshot,
           coordinatorPlaybook: playbook,
           advanceWave: outcome,
-          nextActionHint: maybeAttachNextActionHint(cwd, 'wave_complete', epochAtTickStart, {
+          nextActionHint: maybeAttachNextActionHint(cwd, 'wave_complete', epochAtTickStart, state, {
             beadIds: waveBeadIds,
           }),
         },
@@ -499,7 +500,7 @@ export async function runImplTickCore(
           coordinatorPlaybook: playbook,
           advanceWave: outcome,
           implTasks,
-          nextActionHint: maybeAttachNextActionHint(cwd, 'advance_wave', epochAtTickStart, {
+          nextActionHint: maybeAttachNextActionHint(cwd, 'advance_wave', epochAtTickStart, state, {
             beadIds: outcome.nextWave.beadIds,
             beadCount:
               outcome.nextWave.beadIds?.length ?? outcome.nextWave.prompts.length,
@@ -580,6 +581,7 @@ export async function runImplTickCore(
             cwd,
             'dispatch_impl_tasks',
             epochAtTickStart,
+            state,
             {
               beadIds: implTasks.map((t) => t.beadId),
               beadCount: implTasks.length,
