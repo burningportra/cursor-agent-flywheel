@@ -419,6 +419,7 @@ describe('flywheel_observe — hard rules', () => {
 import { computeStateHash } from '../../checkpoint.js';
 import type { CompletionReportV1 } from '../../completion-report.js';
 import type { FlywheelState } from '../../types.js';
+import { registerProfileWatch } from '../../profile-staleness.js';
 
 function writeCheckpointFixture(cwd: string, activeBeadIds: string[]): void {
   mkdirSync(join(cwd, '.pi-flywheel'), { recursive: true });
@@ -578,6 +579,52 @@ describe('flywheel_observe — T7 attestation hints', () => {
         h.message.includes('attestation') || h.message.includes('in-flight'),
       );
       expect(attestationHints).toEqual([]);
+    } finally {
+      cleanup(cwd);
+    }
+  });
+});
+
+describe('flywheel_observe — profile intent staleness', () => {
+  it('surfaces a warn hint when intent files drift from profileWatch', async () => {
+    const cwd = makeTmpCwd();
+    try {
+      const planRel = 'docs/plans/test-plan.md';
+      mkdirSync(join(cwd, 'docs/plans'), { recursive: true });
+      writeFileSync(join(cwd, planRel), '# original', 'utf8');
+
+      let state: FlywheelState = registerProfileWatch(
+        { ...createInitialState(), phase: 'planning', planDocument: planRel },
+        cwd,
+        [planRel],
+        { merge: false },
+      );
+      writeFileSync(join(cwd, planRel), '# edited on same commit', 'utf8');
+
+      mkdirSync(join(cwd, '.pi-flywheel'), { recursive: true });
+      const envelope = {
+        schemaVersion: 1,
+        writtenAt: new Date().toISOString(),
+        flywheelVersion: 'test',
+        gitHead: undefined,
+        state,
+        stateHash: computeStateHash(state),
+      };
+      writeFileSync(
+        join(cwd, '.pi-flywheel', 'checkpoint.json'),
+        JSON.stringify(envelope, null, 2),
+      );
+
+      const exec = makeStubbedExec(gracefulDegradeStubs());
+      const result = await runObserve(makeCtx(cwd, exec), { cwd });
+      const sc = result.structuredContent as {
+        data: { report: FlywheelObserveReport };
+      };
+      const staleHint = sc.data.report.hints.find(
+        (h) => h.severity === 'warn' && h.message.includes('repo profile stale'),
+      );
+      expect(staleHint).toBeDefined();
+      expect(staleHint!.nextAction).toContain('flywheel_profile');
     } finally {
       cleanup(cwd);
     }

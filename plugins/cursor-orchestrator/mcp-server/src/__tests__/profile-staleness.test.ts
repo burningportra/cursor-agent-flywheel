@@ -9,6 +9,7 @@ import {
   clearProfileStaleFlags,
   hashFile,
   normalizeWatchPath,
+  probeProfileStale,
   registerProfileWatch,
 } from '../profile-staleness.js';
 import { createInitialState } from '../types.js';

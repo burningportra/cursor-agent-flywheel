@@ -27,6 +27,8 @@ import { resolveRealpathWithinRoot } from '../utils/path-safety.js';
 import { checkOrphanTenderDaemons } from '../checks/orphan-tender-daemons.js';
 import { GEMINI_MODEL_ALLOWLIST, isGeminiModelAllowed, parseGeminiModelFromOutput, } from '../model-detection.js';
 import { readConvergenceFromDisk, planSlugFromIdentifier, } from './convergence-tool.js';
+import { loadFlywheelConfig } from '../flywheel-config.js';
+import { probeProfileStale } from '../profile-staleness.js';
 const log = createLogger('doctor');
 // ─── Constants ────────────────────────────────────────────────────────────
 /** Per-check exec timeout (ms). */
@@ -89,6 +91,10 @@ export const DOCTOR_CHECK_NAMES = [
     // RubricSchemaV1 — green when no rubric or rubric parses with criteria,
     // yellow on missing-file / parse failure, red on empty-criteria.
     'outcome_rubric_validity',
+    // Intent-file drift vs registered profileWatch hashes (bead nbb).
+    // Yellow when plan/rubric/config changed on the same commit; refresh via
+    // flywheel_profile({ force: true }).
+    'profile_intent_stale',
     // T6.1 (v3.16.0 noob-onboarding). Green when ntm is absent or when
     // `<projects_base>/<basename(cwd)>` is reachable. Yellow when ntm is
     // installed and configured with a projects_base but the symlink/dir is
@@ -114,6 +120,9 @@ const VERSION_DRIFT_HINT = 'Run `/flywheel-setup` (or `cd mcp-server && npm run 
 const OUTCOME_RUBRIC_GREEN_HINT = 'No action needed; continue the flywheel.';
 const OUTCOME_RUBRIC_YELLOW_HINT = 'Open the rubric gate and choose Re-edit or Regenerate before creating beads.';
 const OUTCOME_RUBRIC_RED_HINT = 'Regenerate the rubric now; an empty criteria list cannot grade the cycle.';
+const PROFILE_INTENT_STALE_GREEN_HINT = 'No action needed; continue the flywheel.';
+const PROFILE_INTENT_STALE_INACTIVE_HINT = 'No intent-file watch registered; staleness is tracked after flywheel_profile or plan registration.';
+const PROFILE_INTENT_STALE_YELLOW_HINT = 'Call flywheel_profile({ force: true }) to refresh the repo profile and re-register intent file hashes after plan/rubric edits.';
 /**
  * Run all 11 health checks in parallel. Never throws.
  *
@@ -193,6 +202,7 @@ export async function runDoctorChecks(cwd, signal, options = {}) {
         () => checkOrphanTenderDaemons(exec, cwd, combined, perCheckTimeoutMs, now),
         () => checkConvergenceStateValidity(cwd, combined, now),
         () => checkOutcomeRubricValidity(cwd, combined, now),
+        () => checkProfileIntentStale(cwd, combined, now),
         () => checkProjectsBase(exec, cwd, combined, perCheckTimeoutMs, now),
     ];
     const wrapped = checkFns.map((fn, idx) => semaphore.acquire().then(async (release) => {
@@ -1776,6 +1786,57 @@ async function checkOutcomeRubricValidity(cwd, signal, now) {
             durationMs: now() - start,
         };
     }
+}
+// ─── profile intent staleness (bead nbb) ─────────────────────────────────
+async function checkProfileIntentStale(cwd, signal, now) {
+    const start = now();
+    if (signal.aborted)
+        return abortedCheck('profile_intent_stale');
+    const ckpt = readCheckpoint(cwd);
+    const state = ckpt?.envelope.state;
+    if (!state) {
+        return {
+            name: 'profile_intent_stale',
+            severity: 'green',
+            message: 'no checkpoint - profile intent watch not applicable',
+            hint: PROFILE_INTENT_STALE_INACTIVE_HINT,
+            durationMs: now() - start,
+        };
+    }
+    let profileConfig;
+    try {
+        profileConfig = loadFlywheelConfig(cwd).profile;
+    }
+    catch {
+        profileConfig = undefined;
+    }
+    const watchEnabled = profileConfig?.watchIntentFiles !== false;
+    if (!watchEnabled || !state.profileWatch?.files?.length) {
+        return {
+            name: 'profile_intent_stale',
+            severity: 'green',
+            message: 'profile intent watch inactive',
+            hint: PROFILE_INTENT_STALE_INACTIVE_HINT,
+            durationMs: now() - start,
+        };
+    }
+    const result = probeProfileStale(cwd, state, profileConfig);
+    if (result.stale) {
+        return {
+            name: 'profile_intent_stale',
+            severity: 'yellow',
+            message: `repo profile stale (${result.reason ?? 'intent file drift'})`,
+            hint: PROFILE_INTENT_STALE_YELLOW_HINT,
+            durationMs: now() - start,
+        };
+    }
+    return {
+        name: 'profile_intent_stale',
+        severity: 'green',
+        message: 'profile intent files match registered hashes',
+        hint: PROFILE_INTENT_STALE_GREEN_HINT,
+        durationMs: now() - start,
+    };
 }
 /**
  * Loose check for "the YAML had a `criteria:` key but the list was empty"

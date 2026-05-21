@@ -27,6 +27,7 @@ export declare const RemediateInputSchema: z.ZodObject<{
         npm_marketplace_version_drift: "npm_marketplace_version_drift";
         convergence_state_validity: "convergence_state_validity";
         outcome_rubric_validity: "outcome_rubric_validity";
+        profile_intent_stale: "profile_intent_stale";
         projects_base_misconfig: "projects_base_misconfig";
     }>;
     autoConfirm: z.ZodDefault<z.ZodOptional<z.ZodBoolean>>;

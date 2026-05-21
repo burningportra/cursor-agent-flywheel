@@ -28,6 +28,7 @@ import { readCompletionReport } from '../completion-report.js';
 import { ConvergenceStateSchema } from '../convergence.js';
 import { readConvergenceFromDisk, planSlugFromIdentifier, } from './convergence-tool.js';
 import { loadFlywheelConfig } from '../flywheel-config.js';
+import { probeProfileStale } from '../profile-staleness.js';
 const log = createLogger('observe');
 // ─── Constants ────────────────────────────────────────────────────────────
 /** Per-probe timeout budget. Keeps the tool inside the 1.5s wall-clock target. */
@@ -518,8 +519,15 @@ async function getCachedOrFreshDoctor(ctx, now) {
     }
 }
 // ─── Hints derivation ─────────────────────────────────────────────────────
-function deriveHints(report) {
+function deriveHints(report, profileStale) {
     const hints = [];
+    if (profileStale?.stale) {
+        hints.push({
+            severity: 'warn',
+            message: `repo profile stale (${profileStale.reason ?? 'intent file drift'})`,
+            nextAction: 'call flywheel_profile({ force: true }) to refresh',
+        });
+    }
     if (report.checkpoint.exists && report.checkpoint.warnings.length > 0) {
         for (const w of report.checkpoint.warnings) {
             hints.push({
@@ -679,6 +687,8 @@ export async function runObserve(ctx, args) {
             }
         })();
         const convergenceGated = config?.convergence.gate_advance_wave ?? true;
+        const ckptResult = readCheckpoint(ctx.cwd);
+        const profileStaleStatus = probeProfileStale(ctx.cwd, ckptResult?.envelope.state, config?.profile);
         let convergence;
         const convergenceHints = [];
         if (checkpoint.planDocument) {
@@ -719,7 +729,7 @@ export async function runObserve(ctx, args) {
             convergence,
             convergenceGated,
         };
-        const hints = [...deriveHints(partial), ...convergenceHints];
+        const hints = [...deriveHints(partial, profileStaleStatus), ...convergenceHints];
         const report = { ...partial, hints };
         const validated = FlywheelObserveReportSchema.safeParse(report);
         if (!validated.success) {

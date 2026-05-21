@@ -6,6 +6,7 @@ import * as path from 'node:path';
 import { resolveImplTickConfig } from '../cursor-impl-tick.js';
 import { markBatchReviewDispatched } from '../commit-batch.js';
 import { runImplTick } from '../tools/impl-tick.js';
+import { registerProfileWatch } from '../profile-staleness.js';
 import type { FlywheelState, ToolContext } from '../types.js';
 
 function baseState(overrides: Partial<FlywheelState> = {}): FlywheelState {
@@ -87,6 +88,35 @@ describe('flywheel_impl_tick', () => {
     expect(sc.data.kind).toBe('monitor');
     expect(sc.data.nextTickInSeconds).toBe(240);
     expect(sc.data.epoch).toBe(0);
+  });
+
+  it('includes profileStale=true in snapshot when intent files drift', async () => {
+    const planRel = 'docs/plans/tick-plan.md';
+    await fs.promises.mkdir(path.join(dir, 'docs/plans'), { recursive: true });
+    await fs.promises.writeFile(path.join(dir, planRel), '# v1', 'utf8');
+
+    const watched = registerProfileWatch(
+      baseState({ planDocument: planRel }),
+      dir,
+      [planRel],
+      { merge: false },
+    );
+    await fs.promises.writeFile(path.join(dir, planRel), '# v2 edited', 'utf8');
+
+    const ctx = makeCtx(
+      dir,
+      baseState({
+        ...watched,
+        commitBatchThreshold: 0,
+        implModelsConfirmed: true,
+        implModels: { simple: 'composer-2.5', medium: 'composer-2.5', complex: 'opus-4.6' },
+      }),
+    );
+    const result = await runImplTick(ctx, { cwd: dir });
+    const sc = result.structuredContent as {
+      data: { snapshot: { profileStale: boolean } };
+    };
+    expect(sc.data.snapshot.profileStale).toBe(true);
   });
 
 });

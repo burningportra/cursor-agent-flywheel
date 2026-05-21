@@ -68,6 +68,7 @@ export const REMEDIATION_REGISTRY = {
     // overwrite operator edits (`source: 'edited'`); the doctor hint already
     // points at the right gate.
     outcome_rubric_validity: null,
+    profile_intent_stale: null,
     // T6.1 (v3.16.0 noob-onboarding) — `ntm` is installed and configured with
     // a projects_base, but `<projects_base>/<basename(cwd)>` is missing. The
     // handler reads the projects_base from `ntm config show` then issues a

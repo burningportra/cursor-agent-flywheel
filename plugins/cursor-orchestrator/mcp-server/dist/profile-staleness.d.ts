@@ -33,6 +33,11 @@ export declare function registerProfileWatch(state: FlywheelState, cwd: string, 
 export declare function checkProfileStaleness(cwd: string, state: FlywheelState, config?: FlywheelConfigProfile, opts?: {
     respectDebounce?: boolean;
 }): ProfileStalenessResult;
+/**
+ * Read-only staleness probe for observe / doctor / impl_tick.
+ * Runs a live hash check first, then falls back to persisted checkpoint flags.
+ */
+export declare function probeProfileStale(cwd: string, state: FlywheelState | undefined, config?: FlywheelConfigProfile): ProfileStalenessResult;
 /** Apply staleness check results onto flywheel state (mutates flags only). */
 export declare function applyProfileStalenessToState(state: FlywheelState, result: ProfileStalenessResult): FlywheelState;
 /** Clear stale flags after a forced profile refresh. */

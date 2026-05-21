@@ -159,6 +159,24 @@ export function checkProfileStaleness(
   return { stale: false };
 }
 
+/**
+ * Read-only staleness probe for observe / doctor / impl_tick.
+ * Runs a live hash check first, then falls back to persisted checkpoint flags.
+ */
+export function probeProfileStale(
+  cwd: string,
+  state: FlywheelState | undefined,
+  config?: FlywheelConfigProfile,
+): ProfileStalenessResult {
+  if (!state) return { stale: false };
+  const live = checkProfileStaleness(cwd, state, config);
+  if (live.stale) return live;
+  if (state.profileStale) {
+    return { stale: true, reason: state.profileStaleReason ?? 'intent file drift' };
+  }
+  return { stale: false };
+}
+
 /** Apply staleness check results onto flywheel state (mutates flags only). */
 export function applyProfileStalenessToState(
   state: FlywheelState,
