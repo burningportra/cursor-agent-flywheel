@@ -672,10 +672,11 @@ ${JSON.stringify({ agents: agentConfigs }, null, 2)}
 }
 async function runGates(ctx, action) {
     const { state, saveState, cwd } = ctx;
+    // Instructional review-gate prompts shown to reviewers (not executable code).
     const gateChecks = [
         `### Gate 1: Tests passing\nRun \`npm test\` or equivalent. Report results.`,
         `### Gate 2: No regressions\nCheck test changes are all intentional.`,
-        `### Gate 3: Code quality\nCheck for: TODO/FIXME left over, console.log not cleaned up, dead code. Report findings.`,
+        `### Gate 3: Code quality\nIn the code under review, check for leftover TODO/FIXME markers, debug logging that should be removed, and dead code. Report findings.`,
         `### Gate 4: Documentation\nAre new features/APIs documented? Do AGENTS.md, README need updates?`,
         `### Gate 5: Integration sanity\nDo a quick end-to-end smoke test if possible. Does the feature work as described in the goal?`,
     ];
