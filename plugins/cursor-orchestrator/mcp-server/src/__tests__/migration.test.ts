@@ -22,7 +22,13 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
 
-import { readCheckpoint, CHECKPOINT_DIR, CHECKPOINT_FILE } from '../checkpoint.js';
+import {
+  readCheckpoint,
+  validateCheckpoint,
+  computeStateHash,
+  CHECKPOINT_DIR,
+  CHECKPOINT_FILE,
+} from '../checkpoint.js';
 import {
   getMaxOutcomeIterations,
   DEFAULT_OUTCOME_ITERATIONS,
@@ -34,6 +40,7 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 
 const FIXTURE_PATH = join(__dirname, 'fixtures', 'checkpoint-v3.12.json');
+const PRE_P3_FIXTURE_PATH = join(__dirname, 'fixtures', 'checkpoint-pre-p3.json');
 
 describe('v3.12.x → v3.13.0 checkpoint migration', () => {
   let dir: string;
@@ -110,5 +117,49 @@ describe('v3.12.x → v3.13.0 checkpoint migration', () => {
       if (prev === undefined) delete process.env.FW_MAX_OUTCOME_ITERATIONS;
       else process.env.FW_MAX_OUTCOME_ITERATIONS = prev;
     }
+  });
+});
+
+/**
+ * Pre-P3 checkpoint migration — v3.19.x checkpoints without gateResolutions
+ * continue to load under v3.20.0 recover-gates additions.
+ *
+ * Bead: cursor-agent-flywheel-1gd.
+ */
+describe('pre-P3 → v3.20.0 checkpoint migration', () => {
+  let dir: string;
+
+  afterEach(() => {
+    if (dir) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('loads checkpoint-pre-p3.json with gateResolutions absent and state hash round-trips', () => {
+    dir = mkdtempSync(join(tmpdir(), 'flywheel-migration-pre-p3-'));
+    const ckptDir = join(dir, CHECKPOINT_DIR);
+    mkdirSync(ckptDir, { recursive: true });
+
+    const fixtureRaw = readFileSync(PRE_P3_FIXTURE_PATH, 'utf8');
+    writeFileSync(join(ckptDir, CHECKPOINT_FILE), fixtureRaw, 'utf8');
+
+    const parsed = JSON.parse(fixtureRaw);
+    expect(validateCheckpoint(parsed)).toEqual({
+      valid: true,
+      warnings: ['Checkpoint was written by v3.19.0, current is v3.20.0'],
+    });
+    expect(computeStateHash(parsed.state)).toBe(parsed.stateHash);
+
+    const result = readCheckpoint(dir);
+    expect(result).not.toBeNull();
+    expect(result!.envelope.flywheelVersion).toBe('3.19.0');
+
+    const state = result!.envelope.state;
+    expect(state.gateResolutions).toBeUndefined();
+    expect(state.coordinatorEpoch).toBe(2);
+    expect(state.steeringEvents).toHaveLength(1);
+    expect(state.activeBeadIds).toEqual([
+      'cursor-agent-flywheel-31n',
+      'cursor-agent-flywheel-1gd',
+    ]);
+    expect(computeStateHash(state)).toBe(result!.envelope.stateHash);
   });
 });

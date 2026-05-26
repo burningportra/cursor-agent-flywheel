@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "writtenAt": "2026-05-26T15:00:00.000Z",
+  "flywheelVersion": "3.19.0",
+  "gitHead": "16ede83abc123def4567890123456789012345678",
+  "state": {
+    "phase": "implementing",
+    "selectedGoal": "Recover gates after crash",
+    "constraints": [
+      "backward compat"
+    ],
+    "retryCount": 0,
+    "maxRetries": 3,
+    "maxReviewPasses": 2,
+    "iterationRound": 1,
+    "currentGateIndex": 0,
+    "polishRound": 0,
+    "polishChanges": [],
+    "polishConverged": false,
+    "planDocument": "docs/plans/2026-05-26-polish-recover-gates-and-post-implement-flywheel-gate-ux-rec-synthesized.md",
+    "activeBeadIds": [
+      "cursor-agent-flywheel-31n",
+      "cursor-agent-flywheel-1gd"
+    ],
+    "sessionStartSha": "16ede83abc123def4567890123456789012345678",
+    "coordinatorEpoch": 2,
+    "steeringEvents": [
+      {
+        "at": "2026-05-26T14:00:00.000Z",
+        "source": "wave_review",
+        "actionId": "looks-good-all",
+        "beadIds": [
+          "cursor-agent-flywheel-31n"
+        ],
+        "normalizedKey": "abc123def4567890123456789012345678901234567890123456789012345678"
+      }
+    ],
+    "implModelsConfirmed": true,
+    "beadResults": {
+      "cursor-agent-flywheel-31n": {
+        "status": "closed",
+        "reviewPasses": 1
+      }
+    }
+  },
+  "stateHash": "35d44dcda93e4d4dee32bcd32ea604aead61f0e08df71de38f1280e57baf9f81"
+}
