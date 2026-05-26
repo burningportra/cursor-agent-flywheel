@@ -748,19 +748,96 @@ export interface DuelArgs {
     };
     skipDuelModelsGate?: boolean;
 }
+/** Wave-review confirm actions accepted by `flywheel_wave_review_gate`. */
+export declare const WAVE_REVIEW_CONFIRM_ACTIONS: readonly ["looks-good-all", "self-review", "fresh-eyes", "duel-review"];
+export type WaveReviewConfirmAction = (typeof WAVE_REVIEW_CONFIRM_ACTIONS)[number];
+/** Wrap-up confirm actions accepted by `flywheel_wrap_up_gate`. */
+export declare const WRAP_UP_CONFIRM_ACTIONS: readonly ["full", "commit_only", "skip"];
+export type WrapUpConfirmAction = (typeof WRAP_UP_CONFIRM_ACTIONS)[number];
+/**
+ * Closed action keys carried in compact gate payloads (`data.actions`).
+ * Populated on every `FlywheelUserGateOption` in P2; optional in P1.
+ */
+export declare const ACTION_KEYS: readonly ["looks-good-all", "self-review", "fresh-eyes", "duel-review", "wrap-up-full", "wrap-up-commit-only", "wrap-up-skip", "iterate-remediate", "continue-wrap-up", "abort", "bead-score-and-launch-gate", "bead-polish", "bead-launch", "bead-launch-anyway", "bead-back-to-plan", "bead-coordinator-serial", "bead-swarm-launch", "bead-coverage-create", "bead-coverage-defer", "bead-dedup-merge-all", "bead-dedup-review-pairs", "bead-dedup-keep", "synthesized-approve-all", "synthesized-approve-subset", "synthesized-reject-all", "synthesized-regress-plan"];
+export type ActionKey = (typeof ACTION_KEYS)[number];
+export declare const FLYWHEEL_USER_GATE_KINDS: readonly ["wave_review", "wrap_up", "wrap_up_verdict", "wrap_up_already_confirmed", "review_mode", "bead_review", "bead_launch", "bead_low_quality", "bead_hotspot", "bead_coverage", "bead_dedup"];
+export type FlywheelUserGateKind = (typeof FLYWHEEL_USER_GATE_KINDS)[number];
+export declare const CompactGatePayloadSchema: z.ZodObject<{
+    gateMeta: z.ZodObject<{
+        kind: z.ZodEnum<{
+            wave_review: "wave_review";
+            wrap_up: "wrap_up";
+            wrap_up_verdict: "wrap_up_verdict";
+            wrap_up_already_confirmed: "wrap_up_already_confirmed";
+            review_mode: "review_mode";
+            bead_review: "bead_review";
+            bead_launch: "bead_launch";
+            bead_low_quality: "bead_low_quality";
+            bead_hotspot: "bead_hotspot";
+            bead_coverage: "bead_coverage";
+            bead_dedup: "bead_dedup";
+        }>;
+        title: z.ZodString;
+        rationale: z.ZodString;
+        beadIds: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        riskyBeadIds: z.ZodOptional<z.ZodArray<z.ZodString>>;
+    }, z.core.$strip>;
+    askQuestion: z.ZodNullable<z.ZodObject<{
+        title: z.ZodOptional<z.ZodString>;
+        questions: z.ZodArray<z.ZodObject<{
+            id: z.ZodString;
+            prompt: z.ZodString;
+            options: z.ZodArray<z.ZodObject<{
+                id: z.ZodString;
+                label: z.ZodString;
+                description: z.ZodOptional<z.ZodString>;
+            }, z.core.$strip>>;
+            allow_multiple: z.ZodOptional<z.ZodBoolean>;
+        }, z.core.$strip>>;
+    }, z.core.$strip>>;
+    actions: z.ZodRecord<z.ZodString, z.ZodEnum<{
+        abort: "abort";
+        "looks-good-all": "looks-good-all";
+        "self-review": "self-review";
+        "fresh-eyes": "fresh-eyes";
+        "duel-review": "duel-review";
+        "wrap-up-full": "wrap-up-full";
+        "wrap-up-commit-only": "wrap-up-commit-only";
+        "wrap-up-skip": "wrap-up-skip";
+        "iterate-remediate": "iterate-remediate";
+        "continue-wrap-up": "continue-wrap-up";
+        "bead-score-and-launch-gate": "bead-score-and-launch-gate";
+        "bead-polish": "bead-polish";
+        "bead-launch": "bead-launch";
+        "bead-launch-anyway": "bead-launch-anyway";
+        "bead-back-to-plan": "bead-back-to-plan";
+        "bead-coordinator-serial": "bead-coordinator-serial";
+        "bead-swarm-launch": "bead-swarm-launch";
+        "bead-coverage-create": "bead-coverage-create";
+        "bead-coverage-defer": "bead-coverage-defer";
+        "bead-dedup-merge-all": "bead-dedup-merge-all";
+        "bead-dedup-review-pairs": "bead-dedup-review-pairs";
+        "bead-dedup-keep": "bead-dedup-keep";
+        "synthesized-approve-all": "synthesized-approve-all";
+        "synthesized-approve-subset": "synthesized-approve-subset";
+        "synthesized-reject-all": "synthesized-reject-all";
+        "synthesized-regress-plan": "synthesized-regress-plan";
+    }>>;
+}, z.core.$strip>;
+export type CompactGatePayload = z.infer<typeof CompactGatePayloadSchema>;
 export interface WaveReviewGateArgs {
     cwd: string;
     /** Bead IDs that finished in the current wave (from Agent Mail / swarm). */
     beadIds: string[];
     /** User's AskQuestion selection — records steering and bumps coordinator epoch (E8). */
-    confirmAction?: string;
+    confirmAction?: WaveReviewConfirmAction;
     /** Target bead for fresh-eyes / self-review when the wave has multiple beads. */
     reviewBeadId?: string;
 }
 export interface WrapUpGateArgs {
     cwd: string;
     /** User choice after presenting the gate: "full" | "commit_only" | "skip". */
-    confirmWrapUp?: 'full' | 'commit_only' | 'skip';
+    confirmWrapUp?: WrapUpConfirmAction;
     /** Re-show the wrap-up menu even if already confirmed. */
     force?: boolean;
 }

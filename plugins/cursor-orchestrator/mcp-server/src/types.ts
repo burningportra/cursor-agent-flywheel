@@ -929,19 +929,122 @@ export interface DuelArgs {
     | { wizard_a: string; wizard_b: string; wizard_c?: string };
   skipDuelModelsGate?: boolean;
 }
+
+// ─── v3.20 recover-gates closed enums (P1 — types + MCP boundary) ──
+
+/** Wave-review confirm actions accepted by `flywheel_wave_review_gate`. */
+export const WAVE_REVIEW_CONFIRM_ACTIONS = [
+  'looks-good-all',
+  'self-review',
+  'fresh-eyes',
+  'duel-review',
+] as const;
+export type WaveReviewConfirmAction = (typeof WAVE_REVIEW_CONFIRM_ACTIONS)[number];
+
+/** Wrap-up confirm actions accepted by `flywheel_wrap_up_gate`. */
+export const WRAP_UP_CONFIRM_ACTIONS = ['full', 'commit_only', 'skip'] as const;
+export type WrapUpConfirmAction = (typeof WRAP_UP_CONFIRM_ACTIONS)[number];
+
+/**
+ * Closed action keys carried in compact gate payloads (`data.actions`).
+ * Populated on every `FlywheelUserGateOption` in P2; optional in P1.
+ */
+export const ACTION_KEYS = [
+  // wave_review
+  'looks-good-all',
+  'self-review',
+  'fresh-eyes',
+  'duel-review',
+  // wrap_up
+  'wrap-up-full',
+  'wrap-up-commit-only',
+  'wrap-up-skip',
+  // wrap_up_verdict
+  'iterate-remediate',
+  'continue-wrap-up',
+  'abort',
+  // bead_review / launch / low_quality / hotspot
+  'bead-score-and-launch-gate',
+  'bead-polish',
+  'bead-launch',
+  'bead-launch-anyway',
+  'bead-back-to-plan',
+  'bead-coordinator-serial',
+  'bead-swarm-launch',
+  // bead_coverage / dedup
+  'bead-coverage-create',
+  'bead-coverage-defer',
+  'bead-dedup-merge-all',
+  'bead-dedup-review-pairs',
+  'bead-dedup-keep',
+  // batch-review synthesized beads gate
+  'synthesized-approve-all',
+  'synthesized-approve-subset',
+  'synthesized-reject-all',
+  'synthesized-regress-plan',
+] as const;
+export type ActionKey = (typeof ACTION_KEYS)[number];
+
+export const FLYWHEEL_USER_GATE_KINDS = [
+  'wave_review',
+  'wrap_up',
+  'wrap_up_verdict',
+  'wrap_up_already_confirmed',
+  'review_mode',
+  'bead_review',
+  'bead_launch',
+  'bead_low_quality',
+  'bead_hotspot',
+  'bead_coverage',
+  'bead_dedup',
+] as const;
+export type FlywheelUserGateKind = (typeof FLYWHEEL_USER_GATE_KINDS)[number];
+
+const CursorAskQuestionOptionSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  description: z.string().optional(),
+});
+
+const CursorAskQuestionPayloadSchema = z.object({
+  title: z.string().optional(),
+  questions: z.array(
+    z.object({
+      id: z.string(),
+      prompt: z.string(),
+      options: z.array(CursorAskQuestionOptionSchema),
+      allow_multiple: z.boolean().optional(),
+    }),
+  ),
+});
+
+export const CompactGatePayloadSchema = z.object({
+  gateMeta: z.object({
+    kind: z.enum(FLYWHEEL_USER_GATE_KINDS),
+    title: z.string(),
+    rationale: z.string(),
+    beadIds: z.array(z.string()).optional(),
+    riskyBeadIds: z.array(z.string()).optional(),
+  }),
+  askQuestion: CursorAskQuestionPayloadSchema.nullable(),
+  actions: z.record(z.string(), z.enum(ACTION_KEYS)),
+});
+
+export type CompactGatePayload = z.infer<typeof CompactGatePayloadSchema>;
+
 export interface WaveReviewGateArgs {
   cwd: string;
   /** Bead IDs that finished in the current wave (from Agent Mail / swarm). */
   beadIds: string[];
   /** User's AskQuestion selection — records steering and bumps coordinator epoch (E8). */
-  confirmAction?: string;
+  confirmAction?: WaveReviewConfirmAction;
   /** Target bead for fresh-eyes / self-review when the wave has multiple beads. */
   reviewBeadId?: string;
 }
 export interface WrapUpGateArgs {
   cwd: string;
   /** User choice after presenting the gate: "full" | "commit_only" | "skip". */
-  confirmWrapUp?: 'full' | 'commit_only' | 'skip';
+  confirmWrapUp?: WrapUpConfirmAction;
   /** Re-show the wrap-up menu even if already confirmed. */
   force?: boolean;
 }

@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
+import { z } from 'zod';
 import { makeExec } from './exec.js';
 import { createLogger } from './logger.js';
 import { clearState, loadState, saveState } from './state.js';
@@ -34,8 +35,28 @@ import { runRobotDocs, ROBOT_DOCS_SECTIONS } from './tools/robot-docs.js';
 import { makeToolError } from './tools/shared.js';
 import { FlywheelError, makeFlywheelErrorResult } from './errors.js';
 import { resolveRealpath } from './utils/path-safety.js';
+import { WAVE_REVIEW_CONFIRM_ACTIONS, WRAP_UP_CONFIRM_ACTIONS, } from './types.js';
 import { VERSION } from './version.js';
 const log = createLogger('server');
+export const WaveReviewGateArgsSchema = z
+    .object({
+    cwd: z.string().min(1),
+    beadIds: z.array(z.string().min(1)).min(1, 'beadIds must be non-empty'),
+    confirmAction: z.enum(WAVE_REVIEW_CONFIRM_ACTIONS).optional(),
+    reviewBeadId: z.string().min(1).optional(),
+})
+    .strict();
+export const WrapUpGateArgsSchema = z
+    .object({
+    cwd: z.string().min(1),
+    confirmWrapUp: z.enum(WRAP_UP_CONFIRM_ACTIONS).optional(),
+    force: z.boolean().optional(),
+})
+    .strict();
+const GATE_TOOL_ZOD_SCHEMAS = {
+    flywheel_wave_review_gate: WaveReviewGateArgsSchema,
+    flywheel_wrap_up_gate: WrapUpGateArgsSchema,
+};
 const PRIMARY_TOOLS = [
     {
         name: 'flywheel_profile',
@@ -320,6 +341,7 @@ const PRIMARY_TOOLS = [
                 },
                 confirmAction: {
                     type: 'string',
+                    enum: ['looks-good-all', 'self-review', 'fresh-eyes', 'duel-review'],
                     description: 'User AskQuestion selection — records steering and bumps coordinator epoch (E8). looks-good-all closes beads; fresh-eyes/self-review dispatch review (pass reviewBeadId for multi-bead waves). Re-call after user picks.',
                 },
                 reviewBeadId: {
@@ -800,6 +822,57 @@ const EXTENSION_RUNNERS = {
 function isKnownToolName(name) {
     return TOOLS.some((tool) => tool.name === name);
 }
+function zodIssueToValidationError(toolName, issue) {
+    const path = issue.path.map(String).join('.') || undefined;
+    const field = path?.split('.')[0];
+    if (issue.code === 'unrecognized_keys') {
+        const keys = 'keys' in issue ? issue.keys.join(', ') : 'unknown';
+        return {
+            message: `Error: unrecognized parameter(s) [${keys}] for tool '${toolName}'.`,
+            field,
+            reason: 'invalid_type',
+        };
+    }
+    if (issue.code === 'invalid_value' && field === 'confirmAction') {
+        return {
+            message: `Error: 'confirmAction' must be one of [${WAVE_REVIEW_CONFIRM_ACTIONS.map((v) => JSON.stringify(v)).join(', ')}] for tool '${toolName}'; got ${JSON.stringify('input' in issue ? issue.input : undefined)}.`,
+            field: 'confirmAction',
+            reason: 'invalid_enum_value',
+        };
+    }
+    if (issue.code === 'invalid_value' && field === 'confirmWrapUp') {
+        return {
+            message: `Error: 'confirmWrapUp' must be one of [${WRAP_UP_CONFIRM_ACTIONS.map((v) => JSON.stringify(v)).join(', ')}] for tool '${toolName}'; got ${JSON.stringify('input' in issue ? issue.input : undefined)}.`,
+            field: 'confirmWrapUp',
+            reason: 'invalid_enum_value',
+        };
+    }
+    if (issue.code === 'invalid_type') {
+        return {
+            message: `Error: '${field ?? path ?? 'input'}' has invalid type for tool '${toolName}': ${issue.message}.`,
+            field,
+            reason: 'invalid_type',
+        };
+    }
+    return {
+        message: `Error: invalid input for tool '${toolName}'${path ? ` at '${path}'` : ''}: ${issue.message}.`,
+        field,
+        reason: 'invalid_type',
+    };
+}
+function validateGateToolArgsWithZod(toolName, args) {
+    const schema = GATE_TOOL_ZOD_SCHEMAS[toolName];
+    if (!schema)
+        return null;
+    const result = schema.safeParse(args);
+    if (result.success)
+        return null;
+    const issue = result.error.issues[0];
+    return issue ? zodIssueToValidationError(toolName, issue) : {
+        message: `Error: invalid input for tool '${toolName}'.`,
+        reason: 'invalid_type',
+    };
+}
 export function validateToolArgs(toolName, args) {
     const tool = TOOLS.find((candidate) => candidate.name === toolName);
     if (!tool) {
@@ -866,6 +939,10 @@ export function validateToolArgs(toolName, args) {
                 reason: 'invalid_enum_value',
             };
         }
+    }
+    const zodError = validateGateToolArgsWithZod(toolName, args);
+    if (zodError) {
+        return zodError;
     }
     return null;
 }

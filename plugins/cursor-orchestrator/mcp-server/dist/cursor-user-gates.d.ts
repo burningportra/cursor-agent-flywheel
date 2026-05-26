@@ -2,16 +2,18 @@
  * Cursor flywheel user gates — numbered options + MCP confirm payloads.
  * Replaces Claude `AskUserQuestion` for review, wrap-up, and post-impl flows.
  */
-import type { Bead, FlywheelState } from "./types.js";
+import type { ActionKey, Bead, FlywheelState } from "./types.js";
 export interface FlywheelUserGateOption {
     id: string;
     label: string;
     detail?: string;
+    /** Source of truth for `data.actions` mapping (P2 makes this required). */
+    action?: ActionKey;
     /** Hint for the coordinator after the user picks this option. */
     coordinatorAction?: string;
 }
 export interface FlywheelUserGate {
-    kind: "wave_review" | "wrap_up" | "wrap_up_verdict" | "review_mode" | "bead_review" | "bead_launch" | "bead_low_quality" | "bead_hotspot" | "bead_coverage" | "bead_dedup";
+    kind: "wave_review" | "wrap_up" | "wrap_up_verdict" | "wrap_up_already_confirmed" | "review_mode" | "bead_review" | "bead_launch" | "bead_low_quality" | "bead_hotspot" | "bead_coverage" | "bead_dedup";
     title: string;
     rationale: string;
     options: FlywheelUserGateOption[];
@@ -39,7 +41,7 @@ export declare function gateActionsFromOptions(gate: FlywheelUserGate): Record<s
 /** MCP payload without duplicating options/coordinatorAction (saves ~80% JSON vs full userGate). */
 export declare function toCompactGatePayload(gate: FlywheelUserGate): {
     gateMeta: {
-        kind: "wave_review" | "wrap_up" | "wrap_up_verdict" | "review_mode" | "bead_review" | "bead_launch" | "bead_low_quality" | "bead_hotspot" | "bead_coverage" | "bead_dedup";
+        kind: "wave_review" | "wrap_up" | "wrap_up_verdict" | "wrap_up_already_confirmed" | "review_mode" | "bead_review" | "bead_launch" | "bead_low_quality" | "bead_hotspot" | "bead_coverage" | "bead_dedup";
         title: string;
         rationale: string;
         beadIds: string[] | undefined;

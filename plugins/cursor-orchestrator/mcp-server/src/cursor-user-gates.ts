@@ -3,12 +3,14 @@
  * Replaces Claude `AskUserQuestion` for review, wrap-up, and post-impl flows.
  */
 
-import type { Bead, FlywheelState } from "./types.js";
+import type { ActionKey, Bead, FlywheelState } from "./types.js";
 
 export interface FlywheelUserGateOption {
   id: string;
   label: string;
   detail?: string;
+  /** Source of truth for `data.actions` mapping (P2 makes this required). */
+  action?: ActionKey;
   /** Hint for the coordinator after the user picks this option. */
   coordinatorAction?: string;
 }
@@ -18,6 +20,7 @@ export interface FlywheelUserGate {
     | "wave_review"
     | "wrap_up"
     | "wrap_up_verdict"
+    | "wrap_up_already_confirmed"
     | "review_mode"
     | "bead_review"
     | "bead_launch"

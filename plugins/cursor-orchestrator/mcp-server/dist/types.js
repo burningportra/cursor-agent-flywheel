@@ -29,6 +29,92 @@ export function createInitialState() {
     };
 }
 export { FLYWHEEL_ERROR_CODES, FlywheelStructuredErrorSchema } from './errors.js';
+// ─── v3.20 recover-gates closed enums (P1 — types + MCP boundary) ──
+/** Wave-review confirm actions accepted by `flywheel_wave_review_gate`. */
+export const WAVE_REVIEW_CONFIRM_ACTIONS = [
+    'looks-good-all',
+    'self-review',
+    'fresh-eyes',
+    'duel-review',
+];
+/** Wrap-up confirm actions accepted by `flywheel_wrap_up_gate`. */
+export const WRAP_UP_CONFIRM_ACTIONS = ['full', 'commit_only', 'skip'];
+/**
+ * Closed action keys carried in compact gate payloads (`data.actions`).
+ * Populated on every `FlywheelUserGateOption` in P2; optional in P1.
+ */
+export const ACTION_KEYS = [
+    // wave_review
+    'looks-good-all',
+    'self-review',
+    'fresh-eyes',
+    'duel-review',
+    // wrap_up
+    'wrap-up-full',
+    'wrap-up-commit-only',
+    'wrap-up-skip',
+    // wrap_up_verdict
+    'iterate-remediate',
+    'continue-wrap-up',
+    'abort',
+    // bead_review / launch / low_quality / hotspot
+    'bead-score-and-launch-gate',
+    'bead-polish',
+    'bead-launch',
+    'bead-launch-anyway',
+    'bead-back-to-plan',
+    'bead-coordinator-serial',
+    'bead-swarm-launch',
+    // bead_coverage / dedup
+    'bead-coverage-create',
+    'bead-coverage-defer',
+    'bead-dedup-merge-all',
+    'bead-dedup-review-pairs',
+    'bead-dedup-keep',
+    // batch-review synthesized beads gate
+    'synthesized-approve-all',
+    'synthesized-approve-subset',
+    'synthesized-reject-all',
+    'synthesized-regress-plan',
+];
+export const FLYWHEEL_USER_GATE_KINDS = [
+    'wave_review',
+    'wrap_up',
+    'wrap_up_verdict',
+    'wrap_up_already_confirmed',
+    'review_mode',
+    'bead_review',
+    'bead_launch',
+    'bead_low_quality',
+    'bead_hotspot',
+    'bead_coverage',
+    'bead_dedup',
+];
+const CursorAskQuestionOptionSchema = z.object({
+    id: z.string(),
+    label: z.string(),
+    description: z.string().optional(),
+});
+const CursorAskQuestionPayloadSchema = z.object({
+    title: z.string().optional(),
+    questions: z.array(z.object({
+        id: z.string(),
+        prompt: z.string(),
+        options: z.array(CursorAskQuestionOptionSchema),
+        allow_multiple: z.boolean().optional(),
+    })),
+});
+export const CompactGatePayloadSchema = z.object({
+    gateMeta: z.object({
+        kind: z.enum(FLYWHEEL_USER_GATE_KINDS),
+        title: z.string(),
+        rationale: z.string(),
+        beadIds: z.array(z.string()).optional(),
+        riskyBeadIds: z.array(z.string()).optional(),
+    }),
+    askQuestion: CursorAskQuestionPayloadSchema.nullable(),
+    actions: z.record(z.string(), z.enum(ACTION_KEYS)),
+});
 // ─── v3.4.0 Shared Contracts (doctor / hotspot / postmortem / template / telemetry) ──
 export const DoctorCheckSeveritySchema = z.enum(['green', 'yellow', 'red']);
 export const DoctorCheckSchema = z.object({

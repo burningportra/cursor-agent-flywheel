@@ -19,6 +19,12 @@
     },
     "confirmAction": {
       "type": "string",
+      "enum": [
+        "looks-good-all",
+        "self-review",
+        "fresh-eyes",
+        "duel-review"
+      ],
       "description": "User AskQuestion selection — records steering and bumps coordinator epoch (E8). looks-good-all closes beads; fresh-eyes/self-review dispatch review (pass reviewBeadId for multi-bead waves). Re-call after user picks."
     },
     "reviewBeadId": {

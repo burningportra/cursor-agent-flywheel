@@ -1,7 +1,28 @@
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
+import { z } from 'zod';
 import { makeExec } from './exec.js';
 import { clearState, loadState, saveState } from './state.js';
 import type { McpToolResult, FlywheelToolName, ToolContext } from './types.js';
+export declare const WaveReviewGateArgsSchema: z.ZodObject<{
+    cwd: z.ZodString;
+    beadIds: z.ZodArray<z.ZodString>;
+    confirmAction: z.ZodOptional<z.ZodEnum<{
+        "looks-good-all": "looks-good-all";
+        "self-review": "self-review";
+        "fresh-eyes": "fresh-eyes";
+        "duel-review": "duel-review";
+    }>>;
+    reviewBeadId: z.ZodOptional<z.ZodString>;
+}, z.core.$strict>;
+export declare const WrapUpGateArgsSchema: z.ZodObject<{
+    cwd: z.ZodString;
+    confirmWrapUp: z.ZodOptional<z.ZodEnum<{
+        skip: "skip";
+        full: "full";
+        commit_only: "commit_only";
+    }>>;
+    force: z.ZodOptional<z.ZodBoolean>;
+}, z.core.$strict>;
 type ToolRunner = (ctx: ToolContext, args: any) => Promise<McpToolResult>;
 type ToolRunnerMap = Partial<Record<FlywheelToolName, ToolRunner>>;
 interface ToolValidationError {
@@ -899,6 +920,7 @@ export declare const TOOLS: ({
             };
             confirmAction: {
                 type: string;
+                enum: string[];
                 description: string;
             };
             reviewBeadId: {
