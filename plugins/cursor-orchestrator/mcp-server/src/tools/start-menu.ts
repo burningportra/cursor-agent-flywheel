@@ -44,6 +44,7 @@ export async function runStartMenu(
       id: o.id,
       label: o.label,
       detail: o.description,
+      action: o.action,
       coordinatorAction: o.route,
     })),
     instructions: "AskQuestion(structuredContent.data.askQuestion); route via routeHints.",

@@ -41,7 +41,7 @@ export const WAVE_REVIEW_CONFIRM_ACTIONS = [
 export const WRAP_UP_CONFIRM_ACTIONS = ['full', 'commit_only', 'skip'];
 /**
  * Closed action keys carried in compact gate payloads (`data.actions`).
- * Populated on every `FlywheelUserGateOption` in P2; optional in P1.
+ * Populated on every `FlywheelUserGateOption`; required since P2.
  */
 export const ACTION_KEYS = [
     // wave_review

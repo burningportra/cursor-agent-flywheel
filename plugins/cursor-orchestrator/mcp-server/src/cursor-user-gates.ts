@@ -20,8 +20,8 @@ export interface FlywheelUserGateOption {
   id: string;
   label: string;
   detail?: string;
-  /** Source of truth for `data.actions` mapping (P2 makes this required). */
-  action?: ActionKey;
+  /** Source of truth for `data.actions` mapping. */
+  action: ActionKey;
   /** Hint for the coordinator after the user picks this option. */
   coordinatorAction?: string;
 }
@@ -63,92 +63,7 @@ export interface CursorAskQuestionPayload {
 export function gateActionsFromOptions(
   gate: FlywheelUserGate,
 ): Record<string, ActionKey> {
-  const map: Record<string, ActionKey> = {};
-  for (const o of gate.options) {
-    if (o.action) {
-      map[o.id] = o.action;
-      continue;
-    }
-    const label = o.label.toLowerCase();
-    if (label.includes("duel")) {
-      map[o.id] = "duel-review";
-    } else if (label.includes("fresh")) {
-      map[o.id] = "fresh-eyes";
-    } else if (label.includes("self")) {
-      map[o.id] = "self-review";
-    } else if (label.includes("full wrap")) {
-      map[o.id] = "wrap-up-full";
-    } else if (label.includes("commit only")) {
-      map[o.id] = "wrap-up-commit-only";
-    } else if (label.includes("skip wrap")) {
-      map[o.id] = "wrap-up-skip";
-    } else if (label.includes("looks good") || label.includes("accept")) {
-      map[o.id] = "looks-good-all";
-    } else if (label.includes("abort")) {
-      map[o.id] = "abort";
-    } else if (label.includes("iterate")) {
-      map[o.id] = "iterate-remediate";
-    } else if (label.includes("continue")) {
-      map[o.id] = "continue-wrap-up";
-    } else if (label.includes("start implementing") || label === "start") {
-      map[o.id] = "bead-score-and-launch-gate";
-    } else if (label.includes("polish further") || label.includes("polish beads") || label.includes("polish more")) {
-      map[o.id] = "bead-polish";
-    } else if (label.includes("launch anyway")) {
-      map[o.id] = "bead-launch-anyway";
-    } else if (label.includes("launch") && !label.includes("anyway")) {
-      map[o.id] = "bead-launch";
-    } else if (label.includes("back to plan")) {
-      map[o.id] = "bead-back-to-plan";
-    } else if (label.includes("coordinator-serial")) {
-      map[o.id] = "bead-coordinator-serial";
-    } else if (label.includes("swarm")) {
-      map[o.id] = "bead-swarm-launch";
-    } else if (label.includes("catch-up")) {
-      map[o.id] = "bead-coverage-create";
-    } else if (label.includes("out of scope")) {
-      map[o.id] = "bead-coverage-defer";
-    } else if (label.includes("merge all")) {
-      map[o.id] = "bead-dedup-merge-all";
-    } else if (label.includes("review per-pair")) {
-      map[o.id] = "bead-dedup-review-pairs";
-    } else if (label.includes("keep separate")) {
-      map[o.id] = "bead-dedup-keep";
-    } else if (label.includes("approve all")) {
-      map[o.id] = "synthesized-approve-all";
-    } else if (label.includes("approve subset")) {
-      map[o.id] = "synthesized-approve-subset";
-    } else if (label.includes("reject all")) {
-      map[o.id] = "synthesized-reject-all";
-    } else if (label.includes("regress to plan")) {
-      map[o.id] = "synthesized-regress-plan";
-    } else if (label.includes("reject")) {
-      map[o.id] = "abort";
-    } else if (label.includes("all covered")) {
-      map[o.id] = "continue-wrap-up";
-    } else if (label.includes("none found")) {
-      map[o.id] = "continue-wrap-up";
-    } else if (label === "resume swarm" || label.includes("resume swarm")) {
-      map[o.id] = "continue-wrap-up";
-    } else if (label.includes("resume session")) {
-      map[o.id] = "continue-wrap-up";
-    } else if (label.includes("set a goal")) {
-      map[o.id] = "bead-back-to-plan";
-    } else if (label.includes("pick up existing plan")) {
-      map[o.id] = "bead-back-to-plan";
-    } else if (label.includes("work on beads")) {
-      map[o.id] = "bead-launch";
-    } else if (label.includes("scan & discover")) {
-      map[o.id] = "bead-back-to-plan";
-    } else if (label.includes("reality check")) {
-      map[o.id] = "fresh-eyes";
-    } else if (label.includes("tour")) {
-      map[o.id] = "continue-wrap-up";
-    } else {
-      map[o.id] = "continue-wrap-up";
-    }
-  }
-  return map;
+  return Object.fromEntries(gate.options.map((o) => [o.id, o.action]));
 }
 
 /** MCP payload without duplicating options/coordinatorAction (saves ~80% JSON vs full userGate). */
@@ -233,12 +148,14 @@ export function buildWaveReviewGate(
           id: "1",
           label: "Looks good — accept all",
           detail: `Mark ${ids.length} beads reviewed and advance`,
+          action: "looks-good-all",
           coordinatorAction: `For each bead in [${idList}]: flywheel_review({ action: "looks-good", beadId })`,
         },
         {
           id: "2",
           label: "Self review",
           detail: "Send the original implementor back to audit its diff (one bead — reply with bead id)",
+          action: "self-review",
           coordinatorAction:
             "Follow skills/start/_review.md §8 self-review; then flywheel_review looks-good for that bead",
         },
@@ -246,6 +163,7 @@ export function buildWaveReviewGate(
           id: "3",
           label: "Fresh-eyes review",
           detail: "5 parallel reviewers on one bead (reply with bead id)",
+          action: "fresh-eyes",
           coordinatorAction:
             'flywheel_review({ action: "hit-me", beadId: "<id>" }) then spawn reviewers per _review.md',
         },
@@ -255,18 +173,21 @@ export function buildWaveReviewGate(
           id: "1",
           label: "Looks good",
           detail: "Accept and advance",
+          action: "looks-good-all",
           coordinatorAction: `flywheel_review({ action: "looks-good", beadId: "${ids[0]}" })`,
         },
         {
           id: "2",
           label: "Self review",
           detail: "Same implementor re-reads its diff",
+          action: "self-review",
           coordinatorAction: `Follow _review.md §8 self-review for ${ids[0]}`,
         },
         {
           id: "3",
           label: "Fresh-eyes",
           detail: "5 parallel independent reviewers",
+          action: "fresh-eyes",
           coordinatorAction: `flywheel_review({ action: "hit-me", beadId: "${ids[0]}" })`,
         },
       ];
@@ -276,6 +197,7 @@ export function buildWaveReviewGate(
       id: String(options.length + 1),
       label: "Duel review (risky bead)",
       detail: `Adversarial review for: ${risky.join(", ")} — /dueling-idea-wizards`,
+      action: "duel-review",
       coordinatorAction:
         "Invoke dueling-idea-wizards per _review.md §8.0a (security vs reliability mode)",
     });
@@ -335,6 +257,7 @@ export function buildWrapUpGate(opts: {
         id: "1",
         label: "Full wrap-up (recommended)",
         detail: "Review commits, update docs, version bump, rebuild",
+        action: "wrap-up-full",
         coordinatorAction:
           "Read skills/start/_wrapup.md Step 9.5 — full path (sub-steps 1–7)",
       },
@@ -342,12 +265,14 @@ export function buildWrapUpGate(opts: {
         id: "2",
         label: "Commit only",
         detail: "Commit/push strays — skip docs and version bump",
+        action: "wrap-up-commit-only",
         coordinatorAction: "Read _wrapup.md — Commit only branch (sub-steps 1, 3, 7)",
       },
       {
         id: "3",
         label: "Skip wrap-up",
         detail: "Leave tree as-is; proceed to learnings / post-flywheel menu",
+        action: "wrap-up-skip",
         coordinatorAction: "Read _wrapup.md Step 10+ without commit sub-steps",
       },
     ],
@@ -370,24 +295,28 @@ export function buildBatchReviewSynthesizedGate(beadCount: number): FlywheelUser
         id: "1",
         label: "Approve all",
         detail: "Merge every bead into the active wave",
+        action: "synthesized-approve-all",
         coordinatorAction: "Merge bead IDs into state.activeBeadIds; continue impl tick",
       },
       {
         id: "2",
         label: "Approve subset",
         detail: "Multi-select which beads to keep",
+        action: "synthesized-approve-subset",
         coordinatorAction: "Rollback unchosen via rollbackSynthesizedBeads",
       },
       {
         id: "3",
         label: "Reject all",
         detail: "Roll back every synthesized bead",
+        action: "synthesized-reject-all",
         coordinatorAction: "rollbackSynthesizedBeads for the sha range",
       },
       {
         id: "4",
         label: "Regress to plan",
         detail: "Findings need plan-level rework",
+        action: "synthesized-regress-plan",
         coordinatorAction: "Return to planning Step 5.6",
       },
     ],
@@ -414,12 +343,14 @@ export function buildWrapUpVerdictGate(verdict: {
           id: "1",
           label: "Continue to wrap-up",
           detail: "Proceed to commit review and landing",
+          action: "continue-wrap-up",
           coordinatorAction: "flywheel_wrap_up_gate({ cwd })",
         },
         {
           id: "2",
           label: "Abort cycle",
           detail: "Stop before wrap-up",
+          action: "abort",
           coordinatorAction: "Stop; do not call wrap_up_gate",
         },
       ],
@@ -438,6 +369,7 @@ export function buildWrapUpVerdictGate(verdict: {
           id: "1",
           label: "Abort",
           detail: "Stop the cycle",
+          action: "abort",
           coordinatorAction: "End flywheel run",
         },
       ],
@@ -456,12 +388,14 @@ export function buildWrapUpVerdictGate(verdict: {
           id: "1",
           label: "Accept anyway",
           detail: "Continue wrap-up with final failing verdict recorded",
+          action: "continue-wrap-up",
           coordinatorAction: "flywheel_wrap_up_gate({ cwd })",
         },
         {
           id: "2",
           label: "Abort",
           detail: "Stop before commit review or wrap-up",
+          action: "abort",
           coordinatorAction: "End flywheel run",
         },
       ],
@@ -479,6 +413,7 @@ export function buildWrapUpVerdictGate(verdict: {
         id: "1",
         label: "Iterate — create remediation beads",
         detail: "One bead per failing criterion (recommended)",
+        action: "iterate-remediate",
         coordinatorAction:
           'flywheel_approve_beads({ action: "remediate", ... }) per _wrapup.md',
       },
@@ -486,12 +421,14 @@ export function buildWrapUpVerdictGate(verdict: {
         id: "2",
         label: "Accept anyway",
         detail: "Continue wrap-up; verdict stays on record",
+        action: "continue-wrap-up",
         coordinatorAction: "flywheel_wrap_up_gate({ cwd }) per _wrapup.md",
       },
       {
         id: "3",
         label: "Abort",
         detail: "Stop before commit review or wrap-up",
+        action: "abort",
         coordinatorAction: "End flywheel run",
       },
     ],
@@ -515,6 +452,7 @@ export function buildBeadReviewGate(beadCount: number): FlywheelUserGate {
         id: "1",
         label: "Start implementing",
         detail: "Score beads and show the launch confirmation gate (recommended)",
+        action: "bead-score-and-launch-gate",
         coordinatorAction:
           'flywheel_bead_approval_gate({ cwd, step: "launch" }) then AskQuestion',
       },
@@ -522,6 +460,7 @@ export function buildBeadReviewGate(beadCount: number): FlywheelUserGate {
         id: "2",
         label: "Polish further",
         detail: "Refine bead titles, descriptions, and dependencies before launch",
+        action: "bead-polish",
         coordinatorAction:
           'flywheel_approve_beads({ action: "polish" }) then flywheel_bead_approval_gate({ step: "review" })',
       },
@@ -529,6 +468,7 @@ export function buildBeadReviewGate(beadCount: number): FlywheelUserGate {
         id: "3",
         label: "Reject",
         detail: "Discard these beads and return to goal selection",
+        action: "abort",
         coordinatorAction: 'flywheel_approve_beads({ action: "reject" })',
       },
     ],
@@ -560,6 +500,7 @@ export function buildBeadLaunchGate(opts: {
         id: "1",
         label: "Launch",
         detail: `Start implementing ${beadCount} bead(s) with agents (recommended)`,
+        action: "bead-launch",
         coordinatorAction:
           "Step 7: flywheel_confirm_impl_models → commit-batch AskQuestion → flywheel_approve_beads({ action: \"start\" })",
       },
@@ -567,6 +508,7 @@ export function buildBeadLaunchGate(opts: {
         id: "2",
         label: "Polish more",
         detail: "Another refinement round on the bead graph",
+        action: "bead-polish",
         coordinatorAction:
           'flywheel_approve_beads({ action: "polish" }) then flywheel_bead_approval_gate({ step: "review" })',
       },
@@ -574,6 +516,7 @@ export function buildBeadLaunchGate(opts: {
         id: "3",
         label: "Back to plan",
         detail: "Return to plan refinement (Step 5.6) before implementing",
+        action: "bead-back-to-plan",
         coordinatorAction: "Re-enter planning; do not call approve start",
       },
     ],
@@ -600,6 +543,7 @@ export function buildBeadLowQualityGate(opts: {
         id: "1",
         label: "Polish beads",
         detail: "Run another bead refinement round (recommended)",
+        action: "bead-polish",
         coordinatorAction:
           'flywheel_approve_beads({ action: "polish" }) then flywheel_bead_approval_gate({ step: "review" })',
       },
@@ -607,12 +551,14 @@ export function buildBeadLowQualityGate(opts: {
         id: "2",
         label: "Back to plan",
         detail: "Refine the plan itself (Step 5.6)",
+        action: "bead-back-to-plan",
         coordinatorAction: "Return to planning gate — do not launch",
       },
       {
         id: "3",
         label: "Launch anyway",
         detail: "Proceed despite low score — note the risk in your summary",
+        action: "bead-launch-anyway",
         coordinatorAction:
           "Step 7 pre-loop then flywheel_approve_beads({ action: \"start\" })",
       },
@@ -620,6 +566,7 @@ export function buildBeadLowQualityGate(opts: {
         id: "4",
         label: "Reject",
         detail: "Discard beads and pick a new goal",
+        action: "abort",
         coordinatorAction: 'flywheel_approve_beads({ action: "reject" })',
       },
     ],
@@ -642,6 +589,7 @@ export function buildBeadHotspotGate(matrixSummary: string): FlywheelUserGate {
         id: "1",
         label: "Coordinator-serial",
         detail: "One bead at a time through the coordinator — contention-safe (recommended)",
+        action: "bead-coordinator-serial",
         coordinatorAction:
           'Set launchMode coordinator-serial; Step 7 single Task loop; flywheel_approve_beads({ action: "start" })',
       },
@@ -649,6 +597,7 @@ export function buildBeadHotspotGate(matrixSummary: string): FlywheelUserGate {
         id: "2",
         label: "Swarm anyway",
         detail: "Parallel agents — accept contention risk",
+        action: "bead-swarm-launch",
         coordinatorAction:
           'Step 7 parallel Tasks; flywheel_approve_beads({ action: "start" })',
       },
@@ -656,6 +605,7 @@ export function buildBeadHotspotGate(matrixSummary: string): FlywheelUserGate {
         id: "3",
         label: "Polish beads",
         detail: "Refine beads to remove overlapping file scope",
+        action: "bead-polish",
         coordinatorAction:
           'flywheel_approve_beads({ action: "polish" }) then flywheel_bead_approval_gate({ step: "review" })',
       },
@@ -663,6 +613,7 @@ export function buildBeadHotspotGate(matrixSummary: string): FlywheelUserGate {
         id: "4",
         label: "Reject",
         detail: "Discard beads and return to goal selection",
+        action: "abort",
         coordinatorAction: 'flywheel_approve_beads({ action: "reject" })',
       },
     ],
@@ -689,18 +640,21 @@ export function buildBeadCoverageGate(opts: {
         id: "1",
         label: "All covered",
         detail: "Every plan section has at least one bead — proceed to dedup",
+        action: "continue-wrap-up",
         coordinatorAction: 'flywheel_bead_approval_gate({ cwd, step: "dedup" })',
       },
       {
         id: "2",
         label: "Create catch-up beads",
         detail: "Generate beads for missing section(s) (recommended when gaps exist)",
+        action: "bead-coverage-create",
         coordinatorAction: "br create per missing section, then re-run coverage gate",
       },
       {
         id: "3",
         label: "Sections out of scope",
         detail: "Mark missing sections deferred in the plan, then dedup",
+        action: "bead-coverage-defer",
         coordinatorAction: "Append ## Deferred to plan, then step=dedup",
       },
     ],
@@ -723,24 +677,28 @@ export function buildBeadDedupGate(pairCount: number): FlywheelUserGate {
         id: "1",
         label: "None found",
         detail: "No real overlaps — proceed to Step 6 review gate (recommended when scan is empty)",
+        action: "continue-wrap-up",
         coordinatorAction: 'flywheel_bead_approval_gate({ cwd, step: "review" })',
       },
       {
         id: "2",
         label: "Merge all",
         detail: "Combine each pair into the canonical richer bead",
+        action: "bead-dedup-merge-all",
         coordinatorAction: "br update + br close duplicates, then step=review",
       },
       {
         id: "3",
         label: "Review per-pair",
         detail: "Go through each pair in chat before merging",
+        action: "bead-dedup-review-pairs",
         coordinatorAction: "User picks per pair, then step=review",
       },
       {
         id: "4",
         label: "Keep separate",
         detail: "Pairs are distinct — add rationale to each description",
+        action: "bead-dedup-keep",
         coordinatorAction: 'flywheel_bead_approval_gate({ cwd, step: "review" })',
       },
     ],

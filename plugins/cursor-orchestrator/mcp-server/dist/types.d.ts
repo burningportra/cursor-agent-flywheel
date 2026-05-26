@@ -756,7 +756,7 @@ export declare const WRAP_UP_CONFIRM_ACTIONS: readonly ["full", "commit_only", "
 export type WrapUpConfirmAction = (typeof WRAP_UP_CONFIRM_ACTIONS)[number];
 /**
  * Closed action keys carried in compact gate payloads (`data.actions`).
- * Populated on every `FlywheelUserGateOption` in P2; optional in P1.
+ * Populated on every `FlywheelUserGateOption`; required since P2.
  */
 export declare const ACTION_KEYS: readonly ["looks-good-all", "self-review", "fresh-eyes", "duel-review", "wrap-up-full", "wrap-up-commit-only", "wrap-up-skip", "iterate-remediate", "continue-wrap-up", "abort", "bead-score-and-launch-gate", "bead-polish", "bead-launch", "bead-launch-anyway", "bead-back-to-plan", "bead-coordinator-serial", "bead-swarm-launch", "bead-coverage-create", "bead-coverage-defer", "bead-dedup-merge-all", "bead-dedup-review-pairs", "bead-dedup-keep", "synthesized-approve-all", "synthesized-approve-subset", "synthesized-reject-all", "synthesized-regress-plan"];
 export type ActionKey = (typeof ACTION_KEYS)[number];
@@ -971,8 +971,8 @@ export declare const HotspotMatrixSchema: z.ZodObject<{
     }, z.core.$strip>>;
     maxContention: z.ZodNumber;
     recommendation: z.ZodEnum<{
-        "coordinator-serial": "coordinator-serial";
         swarm: "swarm";
+        "coordinator-serial": "coordinator-serial";
     }>;
     summaryOnly: z.ZodDefault<z.ZodBoolean>;
 }, z.core.$strip>;

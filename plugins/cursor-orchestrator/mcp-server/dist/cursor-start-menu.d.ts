@@ -2,12 +2,14 @@
  * Step 0d start menus — AskQuestion payloads + route hints for Cursor.
  */
 import { type CursorAskQuestionPayload } from "./cursor-user-gates.js";
+import type { ActionKey } from "./types.js";
 export type StartMenuVariant = "previous-session-exists" | "open-beads-exist" | "fresh-start";
 export interface StartMenuOption {
     id: string;
     label: string;
     description?: string;
     route: string;
+    action: ActionKey;
     recommended?: boolean;
 }
 export interface StartMenuResult {

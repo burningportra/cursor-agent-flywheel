@@ -11,6 +11,7 @@ function gateFromOptions(kind, title, rationale, options) {
             id: o.id,
             label: o.recommended ? `${o.label} (Recommended)` : o.label,
             detail: o.description,
+            action: o.action,
             coordinatorAction: o.route,
         })),
         instructions: "Present AskQuestion with askQuestion. Map selected option id to routeHints[ id ].",
@@ -61,6 +62,7 @@ export function buildStartMenu(input) {
                     label: "Resume swarm",
                     description: "/flywheel-resume — Cursor Task + worktrees",
                     route: "Resume swarm",
+                    action: "continue-wrap-up",
                     recommended: true,
                 },
                 {
@@ -68,18 +70,21 @@ export function buildStartMenu(input) {
                     label: "Resume session",
                     description: "Continue manually from checkpoint",
                     route: "Resume session",
+                    action: "continue-wrap-up",
                 },
                 {
                     id: "set-goal",
                     label: "Set a goal",
                     description: "Type goal in Other; append-mode",
                     route: "Set a goal",
+                    action: "bead-back-to-plan",
                 },
                 {
                     id: "pick-plan",
                     label: "Pick up existing plan",
                     description: "Path in Other → flywheel_plan → Step 5.45 validate",
                     route: "Pick up existing plan",
+                    action: "bead-back-to-plan",
                 },
             ];
             break;
@@ -90,6 +95,7 @@ export function buildStartMenu(input) {
                     label: "Resume swarm",
                     description: "/flywheel-resume",
                     route: "Resume swarm",
+                    action: "continue-wrap-up",
                     recommended: true,
                 },
                 {
@@ -97,18 +103,21 @@ export function buildStartMenu(input) {
                     label: "Work on beads",
                     description: "Manual refine / implement / inspect",
                     route: "Work on beads",
+                    action: "bead-launch",
                 },
                 {
                     id: "set-goal",
                     label: "Set a goal",
                     description: "Append new beads",
                     route: "Set a goal",
+                    action: "bead-back-to-plan",
                 },
                 {
                     id: "pick-plan",
                     label: "Pick up existing plan",
                     description: "Merge via Step 5.45",
                     route: "Pick up existing plan",
+                    action: "bead-back-to-plan",
                 },
             ];
             break;
@@ -120,6 +129,7 @@ export function buildStartMenu(input) {
                         label: "Take the 5-min tour",
                         description: "_tutorial_bead.md",
                         route: "Take the 5-min tour",
+                        action: "continue-wrap-up",
                         recommended: true,
                     },
                     {
@@ -127,18 +137,21 @@ export function buildStartMenu(input) {
                         label: "Set a goal",
                         description: "Type goal in Other",
                         route: "Set a goal",
+                        action: "bead-back-to-plan",
                     },
                     {
                         id: "pick-plan",
                         label: "Pick up existing plan",
                         description: "Step 5.45 validate menu",
                         route: "Pick up existing plan",
+                        action: "bead-back-to-plan",
                     },
                     {
                         id: "scan-discover",
                         label: "Scan & discover",
                         description: "Profile + discover ideas",
                         route: "Scan & discover",
+                        action: "bead-back-to-plan",
                     },
                 ];
             }
@@ -152,12 +165,14 @@ export function buildStartMenu(input) {
                         label: "Set a goal",
                         description: "Type goal in Other",
                         route: "Set a goal",
+                        action: "bead-back-to-plan",
                     },
                     {
                         id: "pick-plan",
                         label: "Pick up existing plan",
                         description: "Step 5.45 validate before beads",
                         route: "Pick up existing plan",
+                        action: "bead-back-to-plan",
                         recommended: rec === "pick-plan",
                     },
                     {
@@ -165,6 +180,7 @@ export function buildStartMenu(input) {
                         label: "Scan & discover",
                         description: "Greenfield default",
                         route: "Scan & discover",
+                        action: "bead-back-to-plan",
                         recommended: rec === "scan-discover",
                     },
                     {
@@ -172,6 +188,7 @@ export function buildStartMenu(input) {
                         label: "Reality check",
                         description: "/reality-check-for-project",
                         route: "Reality check",
+                        action: "fresh-eyes",
                     },
                 ];
             }

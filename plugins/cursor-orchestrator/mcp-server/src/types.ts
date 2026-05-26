@@ -947,7 +947,7 @@ export type WrapUpConfirmAction = (typeof WRAP_UP_CONFIRM_ACTIONS)[number];
 
 /**
  * Closed action keys carried in compact gate payloads (`data.actions`).
- * Populated on every `FlywheelUserGateOption` in P2; optional in P1.
+ * Populated on every `FlywheelUserGateOption`; required since P2.
  */
 export const ACTION_KEYS = [
   // wave_review

@@ -8,8 +8,8 @@ export interface FlywheelUserGateOption {
     id: string;
     label: string;
     detail?: string;
-    /** Source of truth for `data.actions` mapping (P2 makes this required). */
-    action?: ActionKey;
+    /** Source of truth for `data.actions` mapping. */
+    action: ActionKey;
     /** Hint for the coordinator after the user picks this option. */
     coordinatorAction?: string;
 }

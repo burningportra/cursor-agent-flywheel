@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { buildAskQuestionFromGate, buildBeadLaunchGate, buildBeadReviewGate, buildWaveReviewGate, buildWrapUpGate, gateActionsFromOptions, isRiskyBead, toCompactGatePayload, } from '../cursor-user-gates.js';
-import { createInitialState } from '../types.js';
+import { ACTION_KEYS, createInitialState } from '../types.js';
+import { buildAskQuestionFromGate, buildBatchReviewSynthesizedGate, buildBeadCoverageGate, buildBeadDedupGate, buildBeadHotspotGate, buildBeadLaunchGate, buildBeadLowQualityGate, buildBeadReviewGate, buildWaveReviewGate, buildWrapUpGate, buildWrapUpVerdictGate, gateActionsFromOptions, isRiskyBead, toCompactGatePayload, } from '../cursor-user-gates.js';
 function bead(id, title, description = '') {
     return {
         id,
@@ -12,9 +12,15 @@ function bead(id, title, description = '') {
         labels: [],
     };
 }
+const actionKeySet = new Set(ACTION_KEYS);
+function expectAllOptionsHaveValidActions(gate, label) {
+    for (const o of gate.options) {
+        expect(actionKeySet.has(o.action), `${label} option ${o.id}`).toBe(true);
+    }
+}
 describe('cursor-user-gates', () => {
+    const state = createInitialState();
     it('buildWaveReviewGate includes duel option for risky beads', () => {
-        const state = createInitialState();
         const b = bead('tb-1', 'Auth migration', 'security authentication');
         expect(isRiskyBead(b, state)).toBe(true);
         const gate = buildWaveReviewGate([b], state);
@@ -23,7 +29,6 @@ describe('cursor-user-gates', () => {
         expect(gate.rationale).toContain('Risky');
     });
     it('toCompactGatePayload drops duplicate option blobs', () => {
-        const state = createInitialState();
         const beads = ['tb-1', 'tb-2', 'tb-3', 'tb-4'].map((id) => bead(id, `Task ${id}`, 'implement feature'));
         const gate = buildWaveReviewGate(beads, state);
         const full = JSON.stringify({ userGate: gate, askQuestion: buildAskQuestionFromGate(gate) });
@@ -55,6 +60,41 @@ describe('cursor-user-gates', () => {
         expect(gateActionsFromOptions(gate)['1']).toBe('bead-score-and-launch-gate');
         const launch = buildBeadLaunchGate({ qualityScore: 0.82, beadCount: 4 });
         expect(gateActionsFromOptions(launch)['1']).toBe('bead-launch');
+    });
+    it('every buildXGate option.action is a member of ACTION_KEYS', () => {
+        expectAllOptionsHaveValidActions(buildWaveReviewGate([bead('tb-1', 'Task one')], state), 'wave_review single');
+        expectAllOptionsHaveValidActions(buildWaveReviewGate([bead('tb-1', 'Auth migration', 'security authentication'), bead('tb-2', 'Task two')], state), 'wave_review multi risky');
+        expectAllOptionsHaveValidActions(buildWrapUpGate({ uncommittedCount: 0, uncommittedPreview: [] }), 'wrap_up');
+        expectAllOptionsHaveValidActions(buildBatchReviewSynthesizedGate(2), 'batch synthesized');
+        for (const verdict of [
+            { status: 'satisfied', explanation: 'ok' },
+            { status: 'failed', explanation: 'fail' },
+            { status: 'max_iterations_reached', explanation: 'cap' },
+            { status: 'needs_revision', explanation: 'revise' },
+        ]) {
+            expectAllOptionsHaveValidActions(buildWrapUpVerdictGate(verdict), `wrap_up_verdict ${verdict.status}`);
+        }
+        expectAllOptionsHaveValidActions(buildBeadReviewGate(4), 'bead_review');
+        expectAllOptionsHaveValidActions(buildBeadLaunchGate({ qualityScore: 0.82, beadCount: 4 }), 'bead_launch');
+        expectAllOptionsHaveValidActions(buildBeadLowQualityGate({ qualityScore: 0.55, weakSummary: 'weak' }), 'bead_low_quality');
+        expectAllOptionsHaveValidActions(buildBeadHotspotGate('tb-1 ↔ tb-2 overlap'), 'bead_hotspot');
+        expectAllOptionsHaveValidActions(buildBeadCoverageGate({ covered: 3, total: 4, missingSections: ['§2'] }), 'bead_coverage');
+        expectAllOptionsHaveValidActions(buildBeadDedupGate(2), 'bead_dedup');
+    });
+    it('gateActionsFromOptions snapshot for multi-bead wave review with risky bead', () => {
+        const gate = buildWaveReviewGate([
+            bead('tb-1', 'Auth migration', 'security authentication'),
+            bead('tb-2', 'Task two'),
+            bead('tb-3', 'Task three'),
+        ], state);
+        expect(gateActionsFromOptions(gate)).toMatchInlineSnapshot(`
+      {
+        "1": "looks-good-all",
+        "2": "self-review",
+        "3": "fresh-eyes",
+        "4": "duel-review",
+      }
+    `);
     });
 });
 //# sourceMappingURL=cursor-user-gates.test.js.map
