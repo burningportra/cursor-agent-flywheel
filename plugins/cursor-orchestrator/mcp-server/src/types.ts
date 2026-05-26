@@ -532,6 +532,8 @@ export interface FlywheelState {
 
   /** Set after the operator picks a wrap-up path (Step 9.5 gate). */
   wrapUpConfirmed?: boolean;
+  /** Last wrap-up path recorded when wrapUpConfirmed is true. */
+  wrapUpConfirmedAction?: WrapUpConfirmAction;
 
   // ─── Plan document state ───────────────────────────────────
   /** Path to generated plan artifact. */

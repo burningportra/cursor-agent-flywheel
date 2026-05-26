@@ -29,8 +29,10 @@ import {
   buildBeadLowQualityGate,
   buildBeadReviewGate,
   buildWaveReviewGate,
+  buildWrapUpAlreadyConfirmedPayload,
   buildWrapUpGate,
   toCompactGatePayload,
+  WRAP_UP_ALREADY_CONFIRMED_FORCE_HINT,
   isRiskyBead,
 } from "../cursor-user-gates.js";
 import {
@@ -734,6 +736,7 @@ export async function runWrapUpGate(
       resolvedAt: new Date().toISOString(),
     });
     state.wrapUpConfirmed = true;
+    state.wrapUpConfirmedAction = args.confirmWrapUp;
     state.phase = state.phase === "complete" ? "complete" : "iterating";
     saveState(state);
 
@@ -765,15 +768,18 @@ export async function runWrapUpGate(
   }
 
   if (state.wrapUpConfirmed && !args.force) {
-    const gate = buildWrapUpGate({
-      uncommittedCount: 0,
-      uncommittedPreview: [],
+    const outcome = buildWrapUpAlreadyConfirmedPayload({
+      confirmedAction: state.wrapUpConfirmedAction,
     });
     return makeOkToolResult(
       "flywheel_wrap_up_gate",
       state.phase,
-      "Wrap-up already confirmed. flywheel_get_skill(agent-flywheel:start_wrapup) only if needed; pass force=true to re-prompt.",
-      { ...toCompactGatePayload(gate), wrapUpConfirmed: true },
+      [
+        "Wrap-up already confirmed.",
+        `flywheel_get_skill(${outcome.nextSkill}) only if needed.`,
+        WRAP_UP_ALREADY_CONFIRMED_FORCE_HINT,
+      ].join(" "),
+      outcome,
     );
   }
 

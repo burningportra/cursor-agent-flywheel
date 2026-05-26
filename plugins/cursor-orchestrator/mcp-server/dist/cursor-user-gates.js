@@ -155,6 +155,33 @@ export function buildWaveReviewGate(beads, state) {
         ].join(" "),
     };
 }
+export const WRAP_UP_ALREADY_CONFIRMED_NEXT_SKILL = "agent-flywheel:start_wrapup";
+export const WRAP_UP_ALREADY_CONFIRMED_FORCE_HINT = "Pass force=true to re-open the wrap-up menu.";
+/** Idempotent retry — no AskQuestion; coordinator loads start_wrapup if needed. */
+export function buildWrapUpAlreadyConfirmedPayload(opts) {
+    const payload = {
+        gateMeta: {
+            kind: "wrap_up_already_confirmed",
+            title: "Wrap-up already confirmed",
+            rationale: opts?.confirmedAction
+                ? `Recorded choice: ${opts.confirmedAction}.`
+                : "Recorded earlier in this session.",
+        },
+        askQuestion: null,
+        actions: {},
+        wrapUpConfirmed: true,
+        nextSkill: WRAP_UP_ALREADY_CONFIRMED_NEXT_SKILL,
+        forceHint: WRAP_UP_ALREADY_CONFIRMED_FORCE_HINT,
+        ...(opts?.confirmedAction ? { confirmedAction: opts.confirmedAction } : {}),
+    };
+    const parsed = CompactGatePayloadSchema.safeParse(payload);
+    if (!parsed.success) {
+        log.warn("wrap_up_already_confirmed payload failed schema validation", {
+            issues: parsed.error.issues,
+        });
+    }
+    return payload;
+}
 /** Step 9.5 wrap-up gate — commit / docs / version bump. */
 export function buildWrapUpGate(opts) {
     const { uncommittedCount, uncommittedPreview, beadCommitCount } = opts;

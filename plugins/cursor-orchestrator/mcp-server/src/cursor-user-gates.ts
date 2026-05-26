@@ -10,6 +10,7 @@ import {
   type Bead,
   type CompactGatePayload,
   type FlywheelState,
+  type WrapUpConfirmAction,
 } from "./types.js";
 
 export { CompactGatePayloadSchema, type CompactGatePayload } from "./types.js";
@@ -226,6 +227,46 @@ export function buildWaveReviewGate(
       "When the bead queue is empty after review, call flywheel_wrap_up_gate({ cwd }).",
     ].join(" "),
   };
+}
+
+export const WRAP_UP_ALREADY_CONFIRMED_NEXT_SKILL = "agent-flywheel:start_wrapup";
+
+export const WRAP_UP_ALREADY_CONFIRMED_FORCE_HINT =
+  "Pass force=true to re-open the wrap-up menu.";
+
+export type WrapUpAlreadyConfirmedPayload = CompactGatePayload & {
+  wrapUpConfirmed: true;
+  confirmedAction?: WrapUpConfirmAction;
+  nextSkill: typeof WRAP_UP_ALREADY_CONFIRMED_NEXT_SKILL;
+  forceHint: typeof WRAP_UP_ALREADY_CONFIRMED_FORCE_HINT;
+};
+
+/** Idempotent retry — no AskQuestion; coordinator loads start_wrapup if needed. */
+export function buildWrapUpAlreadyConfirmedPayload(opts?: {
+  confirmedAction?: WrapUpConfirmAction;
+}): WrapUpAlreadyConfirmedPayload {
+  const payload: WrapUpAlreadyConfirmedPayload = {
+    gateMeta: {
+      kind: "wrap_up_already_confirmed",
+      title: "Wrap-up already confirmed",
+      rationale: opts?.confirmedAction
+        ? `Recorded choice: ${opts.confirmedAction}.`
+        : "Recorded earlier in this session.",
+    },
+    askQuestion: null,
+    actions: {},
+    wrapUpConfirmed: true,
+    nextSkill: WRAP_UP_ALREADY_CONFIRMED_NEXT_SKILL,
+    forceHint: WRAP_UP_ALREADY_CONFIRMED_FORCE_HINT,
+    ...(opts?.confirmedAction ? { confirmedAction: opts.confirmedAction } : {}),
+  };
+  const parsed = CompactGatePayloadSchema.safeParse(payload);
+  if (!parsed.success) {
+    log.warn("wrap_up_already_confirmed payload failed schema validation", {
+      issues: parsed.error.issues,
+    });
+  }
+  return payload;
 }
 
 /** Step 9.5 wrap-up gate — commit / docs / version bump. */

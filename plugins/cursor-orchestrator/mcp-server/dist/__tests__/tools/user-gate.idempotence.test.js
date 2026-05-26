@@ -200,5 +200,17 @@ describe('runWrapUpGate idempotence', () => {
         expect(ctx.state.steeringEvents ?? []).toHaveLength(steeringAfterFirst);
         expect(ctx.state.gateResolutions).toHaveLength(ledgerAfterFirst);
     });
+    it('wrapUpConfirmed build path returns wrap_up_already_confirmed without askQuestion', async () => {
+        const { ctx } = makeCtx(5, []);
+        await runWrapUpGate(ctx, { cwd: '/fake/project', confirmWrapUp: 'full' });
+        const result = await runWrapUpGate(ctx, { cwd: '/fake/project' });
+        const data = result.structuredContent.data;
+        expect(data.gateMeta).toMatchObject({ kind: 'wrap_up_already_confirmed' });
+        expect(data.askQuestion).toBeNull();
+        expect(data.nextSkill).toBe('agent-flywheel:start_wrapup');
+        expect(data.forceHint).toMatch(/force=true/);
+        expect(data.confirmedAction).toBe('full');
+        expect(data.wrapUpConfirmed).toBe(true);
+    });
 });
 //# sourceMappingURL=user-gate.idempotence.test.js.map

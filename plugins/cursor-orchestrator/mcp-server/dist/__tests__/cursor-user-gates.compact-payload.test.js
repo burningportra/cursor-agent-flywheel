@@ -3,7 +3,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { CompactGatePayloadSchema, FLYWHEEL_USER_GATE_KINDS, createInitialState, } from '../types.js';
-import { buildBatchReviewSynthesizedGate, buildBeadCoverageGate, buildBeadDedupGate, buildBeadHotspotGate, buildBeadLaunchGate, buildBeadLowQualityGate, buildBeadReviewGate, buildWaveReviewGate, buildWrapUpGate, buildWrapUpVerdictGate, toCompactGatePayload, } from '../cursor-user-gates.js';
+import { buildBatchReviewSynthesizedGate, buildBeadCoverageGate, buildBeadDedupGate, buildBeadHotspotGate, buildBeadLaunchGate, buildBeadLowQualityGate, buildBeadReviewGate, buildWaveReviewGate, buildWrapUpAlreadyConfirmedPayload, buildWrapUpGate, buildWrapUpVerdictGate, toCompactGatePayload, } from '../cursor-user-gates.js';
 import { buildStartMenu } from '../cursor-start-menu.js';
 function bead(id, title, description = '') {
     return {
@@ -63,13 +63,10 @@ describe('CompactGatePayloadSchema round-trip', () => {
         }
         expectRoundTrip(buildBatchReviewSynthesizedGate(2), 'wrap_up_verdict batch synthesized');
         covered.add('wrap_up_verdict');
-        expectRoundTrip({
-            kind: 'wrap_up_already_confirmed',
-            title: 'Wrap-up already confirmed',
-            rationale: 'Recorded earlier in this session.',
-            options: [],
-            instructions: 'Do not AskQuestion; proceed to start_wrapup if needed.',
-        }, 'wrap_up_already_confirmed');
+        const alreadyConfirmed = buildWrapUpAlreadyConfirmedPayload({ confirmedAction: 'full' });
+        const alreadyParsed = CompactGatePayloadSchema.safeParse(alreadyConfirmed);
+        expect(alreadyParsed.success, 'wrap_up_already_confirmed').toBe(true);
+        expect(alreadyConfirmed.askQuestion).toBeNull();
         covered.add('wrap_up_already_confirmed');
         expectRoundTrip(reviewModeGateFromStartMenu(), 'review_mode fresh-start');
         covered.add('review_mode');

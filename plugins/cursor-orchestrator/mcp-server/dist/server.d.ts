@@ -17,9 +17,9 @@ export declare const WaveReviewGateArgsSchema: z.ZodObject<{
 export declare const WrapUpGateArgsSchema: z.ZodObject<{
     cwd: z.ZodString;
     confirmWrapUp: z.ZodOptional<z.ZodEnum<{
-        skip: "skip";
         full: "full";
         commit_only: "commit_only";
+        skip: "skip";
     }>>;
     force: z.ZodOptional<z.ZodBoolean>;
 }, z.core.$strict>;

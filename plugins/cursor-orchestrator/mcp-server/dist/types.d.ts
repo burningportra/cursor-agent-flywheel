@@ -437,6 +437,8 @@ export interface FlywheelState {
     duelModelsConfirmed?: boolean;
     /** Set after the operator picks a wrap-up path (Step 9.5 gate). */
     wrapUpConfirmed?: boolean;
+    /** Last wrap-up path recorded when wrapUpConfirmed is true. */
+    wrapUpConfirmedAction?: WrapUpConfirmAction;
     /** Path to generated plan artifact. */
     planDocument?: string;
     /** Current plan refinement round. */

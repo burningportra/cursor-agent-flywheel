@@ -2,7 +2,7 @@
  * Cursor flywheel user gates — numbered options + MCP confirm payloads.
  * Replaces Claude `AskUserQuestion` for review, wrap-up, and post-impl flows.
  */
-import { type ActionKey, type Bead, type CompactGatePayload, type FlywheelState } from "./types.js";
+import { type ActionKey, type Bead, type CompactGatePayload, type FlywheelState, type WrapUpConfirmAction } from "./types.js";
 export { CompactGatePayloadSchema, type CompactGatePayload } from "./types.js";
 export interface FlywheelUserGateOption {
     id: string;
@@ -45,6 +45,18 @@ export declare function buildAskQuestionFromGate(gate: FlywheelUserGate): Cursor
 export declare function isRiskyBead(bead: Bead, state: FlywheelState): boolean;
 /** Step 8 wave-completion gate (after all impl agents in a wave report back). */
 export declare function buildWaveReviewGate(beads: Bead[], state: FlywheelState): FlywheelUserGate;
+export declare const WRAP_UP_ALREADY_CONFIRMED_NEXT_SKILL = "agent-flywheel:start_wrapup";
+export declare const WRAP_UP_ALREADY_CONFIRMED_FORCE_HINT = "Pass force=true to re-open the wrap-up menu.";
+export type WrapUpAlreadyConfirmedPayload = CompactGatePayload & {
+    wrapUpConfirmed: true;
+    confirmedAction?: WrapUpConfirmAction;
+    nextSkill: typeof WRAP_UP_ALREADY_CONFIRMED_NEXT_SKILL;
+    forceHint: typeof WRAP_UP_ALREADY_CONFIRMED_FORCE_HINT;
+};
+/** Idempotent retry — no AskQuestion; coordinator loads start_wrapup if needed. */
+export declare function buildWrapUpAlreadyConfirmedPayload(opts?: {
+    confirmedAction?: WrapUpConfirmAction;
+}): WrapUpAlreadyConfirmedPayload;
 /** Step 9.5 wrap-up gate — commit / docs / version bump. */
 export declare function buildWrapUpGate(opts: {
     uncommittedCount: number;

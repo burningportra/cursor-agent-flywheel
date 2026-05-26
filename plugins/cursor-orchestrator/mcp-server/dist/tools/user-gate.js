@@ -4,7 +4,7 @@ import { appendGateResolution, deriveGateResolutionKey, findReplay, } from "../g
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
 import { readBeads } from "../beads.js";
-import { buildBeadCoverageGate, buildBeadDedupGate, buildBeadHotspotGate, buildBeadLaunchGate, buildBeadLowQualityGate, buildBeadReviewGate, buildWaveReviewGate, buildWrapUpGate, toCompactGatePayload, isRiskyBead, } from "../cursor-user-gates.js";
+import { buildBeadCoverageGate, buildBeadDedupGate, buildBeadHotspotGate, buildBeadLaunchGate, buildBeadLowQualityGate, buildBeadReviewGate, buildWaveReviewGate, buildWrapUpAlreadyConfirmedPayload, buildWrapUpGate, toCompactGatePayload, WRAP_UP_ALREADY_CONFIRMED_FORCE_HINT, isRiskyBead, } from "../cursor-user-gates.js";
 import { computeBeadApprovalMetrics, formatQualityLine, loadOpenBeadsForGate, } from "../bead-approval-metrics.js";
 import { makeOkToolResult, makeToolError } from "./shared.js";
 import { acceptWaveBeadsAtReview, runReview } from "./review.js";
@@ -454,6 +454,7 @@ export async function runWrapUpGate(ctx, args) {
             resolvedAt: new Date().toISOString(),
         });
         state.wrapUpConfirmed = true;
+        state.wrapUpConfirmedAction = args.confirmWrapUp;
         state.phase = state.phase === "complete" ? "complete" : "iterating";
         saveState(state);
         const uncommitted = await gitPorcelain(cwd);
@@ -477,11 +478,14 @@ export async function runWrapUpGate(ctx, args) {
         });
     }
     if (state.wrapUpConfirmed && !args.force) {
-        const gate = buildWrapUpGate({
-            uncommittedCount: 0,
-            uncommittedPreview: [],
+        const outcome = buildWrapUpAlreadyConfirmedPayload({
+            confirmedAction: state.wrapUpConfirmedAction,
         });
-        return makeOkToolResult("flywheel_wrap_up_gate", state.phase, "Wrap-up already confirmed. flywheel_get_skill(agent-flywheel:start_wrapup) only if needed; pass force=true to re-prompt.", { ...toCompactGatePayload(gate), wrapUpConfirmed: true });
+        return makeOkToolResult("flywheel_wrap_up_gate", state.phase, [
+            "Wrap-up already confirmed.",
+            `flywheel_get_skill(${outcome.nextSkill}) only if needed.`,
+            WRAP_UP_ALREADY_CONFIRMED_FORCE_HINT,
+        ].join(" "), outcome);
     }
     const uncommitted = await gitPorcelain(cwd);
     const beadCommitCount = await gitBeadCommitCount(cwd);
