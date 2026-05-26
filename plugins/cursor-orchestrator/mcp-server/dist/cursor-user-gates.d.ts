@@ -2,7 +2,8 @@
  * Cursor flywheel user gates — numbered options + MCP confirm payloads.
  * Replaces Claude `AskUserQuestion` for review, wrap-up, and post-impl flows.
  */
-import type { ActionKey, Bead, FlywheelState } from "./types.js";
+import { type ActionKey, type Bead, type CompactGatePayload, type FlywheelState } from "./types.js";
+export { CompactGatePayloadSchema, type CompactGatePayload } from "./types.js";
 export interface FlywheelUserGateOption {
     id: string;
     label: string;
@@ -37,19 +38,9 @@ export interface CursorAskQuestionPayload {
     }>;
 }
 /** Short action keys — map in skills/start/_review.md and _wrapup.md. */
-export declare function gateActionsFromOptions(gate: FlywheelUserGate): Record<string, string>;
+export declare function gateActionsFromOptions(gate: FlywheelUserGate): Record<string, ActionKey>;
 /** MCP payload without duplicating options/coordinatorAction (saves ~80% JSON vs full userGate). */
-export declare function toCompactGatePayload(gate: FlywheelUserGate): {
-    gateMeta: {
-        kind: "wave_review" | "wrap_up" | "wrap_up_verdict" | "wrap_up_already_confirmed" | "review_mode" | "bead_review" | "bead_launch" | "bead_low_quality" | "bead_hotspot" | "bead_coverage" | "bead_dedup";
-        title: string;
-        rationale: string;
-        beadIds: string[] | undefined;
-        riskyBeadIds: string[] | undefined;
-    };
-    askQuestion: CursorAskQuestionPayload;
-    actions: Record<string, string>;
-};
+export declare function toCompactGatePayload(gate: FlywheelUserGate): CompactGatePayload;
 export declare function buildAskQuestionFromGate(gate: FlywheelUserGate): CursorAskQuestionPayload;
 export declare function isRiskyBead(bead: Bead, state: FlywheelState): boolean;
 /** Step 8 wave-completion gate (after all impl agents in a wave report back). */

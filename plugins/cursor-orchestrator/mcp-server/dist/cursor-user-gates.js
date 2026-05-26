@@ -2,10 +2,18 @@
  * Cursor flywheel user gates — numbered options + MCP confirm payloads.
  * Replaces Claude `AskUserQuestion` for review, wrap-up, and post-impl flows.
  */
+import { createLogger } from "./logger.js";
+import { CompactGatePayloadSchema, } from "./types.js";
+export { CompactGatePayloadSchema } from "./types.js";
+const log = createLogger("cursor-user-gates");
 /** Short action keys — map in skills/start/_review.md and _wrapup.md. */
 export function gateActionsFromOptions(gate) {
     const map = {};
     for (const o of gate.options) {
+        if (o.action) {
+            map[o.id] = o.action;
+            continue;
+        }
         const label = o.label.toLowerCase();
         if (label.includes("duel")) {
             map[o.id] = "duel-review";
@@ -73,15 +81,60 @@ export function gateActionsFromOptions(gate) {
         else if (label.includes("keep separate")) {
             map[o.id] = "bead-dedup-keep";
         }
+        else if (label.includes("approve all")) {
+            map[o.id] = "synthesized-approve-all";
+        }
+        else if (label.includes("approve subset")) {
+            map[o.id] = "synthesized-approve-subset";
+        }
+        else if (label.includes("reject all")) {
+            map[o.id] = "synthesized-reject-all";
+        }
+        else if (label.includes("regress to plan")) {
+            map[o.id] = "synthesized-regress-plan";
+        }
+        else if (label.includes("reject")) {
+            map[o.id] = "abort";
+        }
+        else if (label.includes("all covered")) {
+            map[o.id] = "continue-wrap-up";
+        }
+        else if (label.includes("none found")) {
+            map[o.id] = "continue-wrap-up";
+        }
+        else if (label === "resume swarm" || label.includes("resume swarm")) {
+            map[o.id] = "continue-wrap-up";
+        }
+        else if (label.includes("resume session")) {
+            map[o.id] = "continue-wrap-up";
+        }
+        else if (label.includes("set a goal")) {
+            map[o.id] = "bead-back-to-plan";
+        }
+        else if (label.includes("pick up existing plan")) {
+            map[o.id] = "bead-back-to-plan";
+        }
+        else if (label.includes("work on beads")) {
+            map[o.id] = "bead-launch";
+        }
+        else if (label.includes("scan & discover")) {
+            map[o.id] = "bead-back-to-plan";
+        }
+        else if (label.includes("reality check")) {
+            map[o.id] = "fresh-eyes";
+        }
+        else if (label.includes("tour")) {
+            map[o.id] = "continue-wrap-up";
+        }
         else {
-            map[o.id] = o.coordinatorAction?.slice(0, 48) ?? o.id;
+            map[o.id] = "continue-wrap-up";
         }
     }
     return map;
 }
 /** MCP payload without duplicating options/coordinatorAction (saves ~80% JSON vs full userGate). */
 export function toCompactGatePayload(gate) {
-    return {
+    const payload = {
         gateMeta: {
             kind: gate.kind,
             title: gate.title,
@@ -92,6 +145,14 @@ export function toCompactGatePayload(gate) {
         askQuestion: buildAskQuestionFromGate(gate),
         actions: gateActionsFromOptions(gate),
     };
+    const parsed = CompactGatePayloadSchema.safeParse(payload);
+    if (!parsed.success) {
+        log.warn("compact gate payload failed schema validation", {
+            kind: gate.kind,
+            issues: parsed.error.issues,
+        });
+    }
+    return payload;
 }
 export function buildAskQuestionFromGate(gate) {
     const needsBeadFollowUp = gate.options.some((o) => /reply with bead id/i.test(o.detail ?? o.label));
