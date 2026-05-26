@@ -1,4 +1,8 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { CHECKPOINT_DIR, CHECKPOINT_FILE, computeStateHash, } from '../../checkpoint.js';
 import { runBeadApprovalGate, runWaveReviewGate, runWrapUpGate } from '../../tools/user-gate.js';
 import { createMockExec, makeState } from '../helpers/mocks.js';
 import { invalidateBeadCache } from '../../beads.js';
@@ -9,20 +13,45 @@ const BR_LIST_ARGS = [
     'id,title,description,status,priority,issue_type,labels,estimate,parent,created_at,updated_at,closed_at',
     '--deferred',
 ];
-function makeBead(id) {
+function makeBead(id, status = 'open') {
     return {
         id,
         title: 'Test',
         description: 'docs readme',
-        status: 'open',
+        status,
         priority: 2,
         type: 'task',
         labels: [],
     };
 }
+function makeEnvelope(state, overrides = {}) {
+    const envelope = {
+        schemaVersion: 1,
+        writtenAt: new Date().toISOString(),
+        flywheelVersion: '3.20.0',
+        gitHead: '16ede83abc123def4567890123456789012345678',
+        state,
+        stateHash: '',
+        ...overrides,
+    };
+    envelope.stateHash = computeStateHash(envelope.state);
+    return envelope;
+}
+function writeCheckpoint(cwd, envelope) {
+    const dir = join(cwd, CHECKPOINT_DIR);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, CHECKPOINT_FILE), JSON.stringify(envelope, null, 2));
+}
 describe('flywheel user gate tools', () => {
+    let recoveryTempDir;
     beforeEach(() => {
         invalidateBeadCache();
+    });
+    afterEach(() => {
+        if (recoveryTempDir) {
+            rmSync(recoveryTempDir, { recursive: true, force: true });
+            recoveryTempDir = undefined;
+        }
     });
     it('flywheel_wave_review_gate returns userGate', async () => {
         const bead = makeBead('tb-9');
@@ -296,6 +325,174 @@ describe('flywheel user gate tools', () => {
         expect(data.reviewBeadId).toBe('tb-9');
         expect(data.reviewOutcome?.kind).toBe('review_tasks');
         expect(data.reviewOutcome?.agentTasks?.length).toBe(5);
+    });
+    it('empty beadIds returns suggestedBeadIds from trusted checkpoint', async () => {
+        recoveryTempDir = mkdtempSync(join(tmpdir(), 'user-gate-recover-trusted-'));
+        const beadId = 'cursor-agent-flywheel-3fz';
+        const state = makeState({
+            phase: 'implementing',
+            beadResults: {
+                [beadId]: { beadId, status: 'success', summary: 'done' },
+            },
+        });
+        writeCheckpoint(recoveryTempDir, makeEnvelope(state, {
+            gitHead: '16ede83abc123def4567890123456789012345678',
+        }));
+        const { ctx } = {
+            ctx: {
+                exec: createMockExec([
+                    {
+                        cmd: 'br',
+                        args: BR_LIST_ARGS,
+                        result: {
+                            code: 0,
+                            stdout: JSON.stringify({ issues: [makeBead(beadId, 'closed')] }),
+                            stderr: '',
+                        },
+                    },
+                    {
+                        cmd: 'git',
+                        args: ['rev-parse', 'HEAD'],
+                        result: {
+                            code: 0,
+                            stdout: '16ede83abc123def4567890123456789012345678\n',
+                            stderr: '',
+                        },
+                    },
+                ]),
+                cwd: recoveryTempDir,
+                state: makeState({ phase: 'implementing' }),
+                saveState: (_s) => { },
+                clearState: () => { },
+            },
+        };
+        const result = await runWaveReviewGate(ctx, {
+            cwd: recoveryTempDir,
+            beadIds: [],
+        });
+        const data = result.structuredContent.data;
+        expect(result.isError).toBeFalsy();
+        expect(data.kind).toBe('recover_gate_context');
+        expect(data.suggestedBeadIds).toEqual([beadId]);
+        expect(data.recoverySource).toBe('checkpoint');
+        expect(data.recoveryConfidence).toBe('trusted');
+        expect(data.requiresConfirmation).toBe(false);
+        expect(result.content[0]?.text).toContain('recover_gate_context');
+    });
+    it('empty beadIds with stale checkpoint sets requiresConfirmation', async () => {
+        recoveryTempDir = mkdtempSync(join(tmpdir(), 'user-gate-recover-stale-'));
+        const beadId = 'tb-stale-wave';
+        const staleWrittenAt = new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString();
+        const state = makeState({
+            phase: 'implementing',
+            beadResults: {
+                [beadId]: { beadId, status: 'success', summary: 'done' },
+            },
+        });
+        writeCheckpoint(recoveryTempDir, makeEnvelope(state, {
+            writtenAt: staleWrittenAt,
+            gitHead: '16ede83abc123def4567890123456789012345678',
+        }));
+        const { ctx } = {
+            ctx: {
+                exec: createMockExec([
+                    {
+                        cmd: 'br',
+                        args: BR_LIST_ARGS,
+                        result: {
+                            code: 0,
+                            stdout: JSON.stringify({ issues: [makeBead(beadId, 'closed')] }),
+                            stderr: '',
+                        },
+                    },
+                    {
+                        cmd: 'git',
+                        args: ['rev-parse', 'HEAD'],
+                        result: {
+                            code: 0,
+                            stdout: '16ede83abc123def4567890123456789012345678\n',
+                            stderr: '',
+                        },
+                    },
+                ]),
+                cwd: recoveryTempDir,
+                state: makeState({ phase: 'implementing' }),
+                saveState: (_s) => { },
+                clearState: () => { },
+            },
+        };
+        const result = await runWaveReviewGate(ctx, {
+            cwd: recoveryTempDir,
+            beadIds: [],
+        });
+        const data = result.structuredContent.data;
+        expect(result.isError).toBeFalsy();
+        expect(data.kind).toBe('recover_gate_context');
+        expect(data.suggestedBeadIds).toEqual([beadId]);
+        expect(data.recoveryConfidence).toBe('stale');
+        expect(data.requiresConfirmation).toBe(true);
+        expect(result.content[0]?.text).toContain('Stale or inferred candidates');
+    });
+    it('empty beadIds manual_required returns invalid_input with recovery metadata', async () => {
+        recoveryTempDir = mkdtempSync(join(tmpdir(), 'user-gate-recover-manual-'));
+        const { ctx } = {
+            ctx: {
+                exec: createMockExec([
+                    {
+                        cmd: 'br',
+                        args: BR_LIST_ARGS,
+                        result: { code: 1, stdout: '', stderr: 'br down' },
+                    },
+                    {
+                        cmd: 'git',
+                        args: ['rev-parse', 'HEAD'],
+                        result: { code: 1, stdout: '', stderr: 'not a repo' },
+                    },
+                ]),
+                cwd: recoveryTempDir,
+                state: makeState({ phase: 'implementing' }),
+                saveState: (_s) => { },
+                clearState: () => { },
+            },
+        };
+        const result = await runWaveReviewGate(ctx, {
+            cwd: recoveryTempDir,
+            beadIds: [],
+        });
+        const err = result.structuredContent.data.error;
+        expect(result.isError).toBe(true);
+        expect(err.code).toBe('invalid_input');
+        expect(err.details?.suggestedBeadIds).toEqual([]);
+        expect(err.details?.recovery?.source).toBe('manual_required');
+    });
+    it('explicit beadIds does not run recovery git or checkpoint probes', async () => {
+        const bead = makeBead('tb-9');
+        const exec = vi.fn(async (cmd, args) => {
+            if (cmd === 'br' && args[0] === 'list') {
+                return {
+                    code: 0,
+                    stdout: JSON.stringify({ issues: [bead] }),
+                    stderr: '',
+                };
+            }
+            return { code: 1, stdout: '', stderr: 'should not be called' };
+        });
+        const { ctx } = {
+            ctx: {
+                exec: exec,
+                cwd: '/fake/project',
+                state: makeState({ phase: 'implementing' }),
+                saveState: (_s) => { },
+                clearState: () => { },
+            },
+        };
+        await runWaveReviewGate(ctx, {
+            cwd: '/fake/project',
+            beadIds: ['tb-9'],
+        });
+        expect(exec).toHaveBeenCalledTimes(1);
+        expect(exec.mock.calls[0]?.[0]).toBe('br');
+        expect(exec.mock.calls.some((c) => c[0] === 'git')).toBe(false);
     });
     it('confirmAction self-review returns playbook for target bead', async () => {
         const { ctx } = {
