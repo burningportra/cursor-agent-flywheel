@@ -7,6 +7,7 @@ import { execFile } from "node:child_process";
 import type {
   McpToolResult,
   ToolContext,
+  WaveReviewConfirmAction,
   WaveReviewGateArgs,
   WrapUpGateArgs,
 } from "../types.js";
@@ -138,164 +139,209 @@ function reviewDataFromResult(result: McpToolResult): Record<string, unknown> | 
   return { kind, ...reviewRest };
 }
 
-async function confirmWaveReviewAction(
+type WaveReviewConfirmArgs = WaveReviewGateArgs & {
+  confirmAction: WaveReviewConfirmAction;
+};
+
+async function handleLooksGoodAll(
   ctx: ToolContext,
-  args: WaveReviewGateArgs,
+  args: WaveReviewConfirmArgs,
   epoch: number,
 ): Promise<McpToolResult> {
-  const { cwd, state, exec } = ctx;
+  const { state } = ctx;
   const { confirmAction, beadIds } = args;
-
-  if (confirmAction === "looks-good-all") {
-    const reviewResult = await acceptWaveBeadsAtReview(ctx, beadIds);
-    const reviewRest = reviewDataFromResult(reviewResult);
-    return makeOkToolResult(
-      "flywheel_wave_review_gate",
-      state.phase,
-      [
-        `Wave review accepted: closed ${beadIds.length} bead(s) (epoch ${epoch}).`,
-        reviewResult.content[0]?.text ?? "",
-      ]
-        .filter(Boolean)
-        .join("\n\n"),
-      {
-        kind: "wave_review_confirmed",
-        confirmAction,
-        coordinatorEpoch: epoch,
-        beadIds,
-        closedBeadIds: beadIds,
-        reviewOutcome: reviewRest,
-      },
-    );
-  }
-
-  if (confirmAction === "fresh-eyes") {
-    const resolved = resolveReviewBeadId(beadIds, args.reviewBeadId);
-    if ("error" in resolved) {
-      return makeToolError(
-        "flywheel_wave_review_gate",
-        state.phase,
-        "invalid_input",
-        resolved.error,
-      );
-    }
-    const reviewResult = await runReview(ctx, {
-      cwd,
-      beadId: resolved.beadId,
-      action: "hit-me",
-    });
-    if (reviewResult.isError) {
-      return reviewResult;
-    }
-    return makeOkToolResult(
-      "flywheel_wave_review_gate",
-      state.phase,
-      [
-        `Fresh-eyes review dispatched for ${resolved.beadId} (epoch ${epoch}).`,
-        "Spawn parallel review Tasks from reviewOutcome.agentTasks, then flywheel_review looks-good per bead.",
-        reviewResult.content[0]?.text ?? "",
-      ]
-        .filter(Boolean)
-        .join("\n\n"),
-      {
-        kind: "wave_review_confirmed",
-        confirmAction,
-        coordinatorEpoch: epoch,
-        beadIds,
-        reviewBeadId: resolved.beadId,
-        reviewOutcome: reviewDataFromResult(reviewResult),
-      },
-    );
-  }
-
-  if (confirmAction === "self-review") {
-    const resolved = resolveReviewBeadId(beadIds, args.reviewBeadId);
-    if ("error" in resolved) {
-      return makeToolError(
-        "flywheel_wave_review_gate",
-        state.phase,
-        "invalid_input",
-        resolved.error,
-      );
-    }
-    const beadId = resolved.beadId;
-    return makeOkToolResult(
-      "flywheel_wave_review_gate",
-      state.phase,
-      [
-        `Self-review routed for ${beadId} (epoch ${epoch}).`,
-        "Delegate diff audit to the original implementor (Agent Mail / same Task identity).",
-        "After the self-review report arrives, call flywheel_review({ action: \"looks-good\", beadId }).",
-      ].join("\n"),
-      {
-        kind: "wave_review_confirmed",
-        confirmAction,
-        coordinatorEpoch: epoch,
-        beadIds,
-        reviewBeadId: beadId,
-        selfReviewPlaybook: [
-          `## Self-review — ${beadId}`,
-          "",
-          "1. Resolve the implementor identity (Agent Mail inbox / impl Task metadata).",
-          `2. Ask them to re-read their diff for bead ${beadId} (bugs, missing tests, style).`,
-          "3. Wait for the [review] self-review report before closing the bead.",
-          `4. Then: flywheel_review({ cwd, beadId: "${beadId}", action: "looks-good" }).`,
-          "",
-          "Cursor port: if no live implementor, coordinator runs a focused diff review on that bead's files only.",
-        ].join("\n"),
-      },
-    );
-  }
-
-  if (confirmAction === "duel-review") {
-    let riskyIds = beadIds;
-    try {
-      const allBeads = await readBeads(exec, cwd);
-      const byId = new Map(allBeads.map((b) => [b.id, b]));
-      riskyIds = beadIds.filter((id) => {
-        const bead = byId.get(id);
-        return bead != null && isRiskyBead(bead, state);
-      });
-    } catch {
-      // fall back to full wave list
-    }
-    const targets = riskyIds.length > 0 ? riskyIds : beadIds;
-    return makeOkToolResult(
-      "flywheel_wave_review_gate",
-      state.phase,
-      [
-        `Duel review routed for ${targets.join(", ")} (epoch ${epoch}).`,
-        "Invoke flywheel_duel or /dueling-idea-wizards per skills/start/_review.md §8.0a.",
-      ].join("\n"),
-      {
-        kind: "wave_review_confirmed",
-        confirmAction,
-        coordinatorEpoch: epoch,
-        beadIds,
-        riskyBeadIds: targets,
-        duelReviewPlaybook: [
-          "## Duel review (risky beads)",
-          "",
-          `Targets: ${targets.join(", ")}`,
-          "",
-          "1. Call flywheel_duel({ cwd, focus: \"adversarial review of closed bead implementation\" })",
-          "   OR load agent-flywheel:flywheel-duel and run security vs reliability wizards.",
-          "2. Synthesize findings into follow-up beads or flywheel_review hit-me on the target bead.",
-        ].join("\n"),
-      },
-    );
-  }
-
+  const reviewResult = await acceptWaveBeadsAtReview(ctx, beadIds);
+  const reviewRest = reviewDataFromResult(reviewResult);
   return makeOkToolResult(
     "flywheel_wave_review_gate",
     state.phase,
-    `Wave review action recorded: ${confirmAction} (epoch ${epoch}).`,
+    [
+      `Wave review accepted: closed ${beadIds.length} bead(s) (epoch ${epoch}).`,
+      reviewResult.content[0]?.text ?? "",
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
     {
       kind: "wave_review_confirmed",
       confirmAction,
       coordinatorEpoch: epoch,
       beadIds,
+      closedBeadIds: beadIds,
+      reviewOutcome: reviewRest,
     },
+  );
+}
+
+async function handleFreshEyes(
+  ctx: ToolContext,
+  args: WaveReviewConfirmArgs,
+  epoch: number,
+): Promise<McpToolResult> {
+  const { cwd, state } = ctx;
+  const { confirmAction, beadIds } = args;
+  const resolved = resolveReviewBeadId(beadIds, args.reviewBeadId);
+  if ("error" in resolved) {
+    return makeToolError(
+      "flywheel_wave_review_gate",
+      state.phase,
+      "invalid_input",
+      resolved.error,
+    );
+  }
+  const reviewResult = await runReview(ctx, {
+    cwd,
+    beadId: resolved.beadId,
+    action: "hit-me",
+  });
+  if (reviewResult.isError) {
+    return reviewResult;
+  }
+  return makeOkToolResult(
+    "flywheel_wave_review_gate",
+    state.phase,
+    [
+      `Fresh-eyes review dispatched for ${resolved.beadId} (epoch ${epoch}).`,
+      "Spawn parallel review Tasks from reviewOutcome.agentTasks, then flywheel_review looks-good per bead.",
+      reviewResult.content[0]?.text ?? "",
+    ]
+      .filter(Boolean)
+      .join("\n\n"),
+    {
+      kind: "wave_review_confirmed",
+      confirmAction,
+      coordinatorEpoch: epoch,
+      beadIds,
+      reviewBeadId: resolved.beadId,
+      reviewOutcome: reviewDataFromResult(reviewResult),
+    },
+  );
+}
+
+async function handleSelfReview(
+  ctx: ToolContext,
+  args: WaveReviewConfirmArgs,
+  epoch: number,
+): Promise<McpToolResult> {
+  const { state } = ctx;
+  const { confirmAction, beadIds } = args;
+  const resolved = resolveReviewBeadId(beadIds, args.reviewBeadId);
+  if ("error" in resolved) {
+    return makeToolError(
+      "flywheel_wave_review_gate",
+      state.phase,
+      "invalid_input",
+      resolved.error,
+    );
+  }
+  const beadId = resolved.beadId;
+  return makeOkToolResult(
+    "flywheel_wave_review_gate",
+    state.phase,
+    [
+      `Self-review routed for ${beadId} (epoch ${epoch}).`,
+      "Delegate diff audit to the original implementor (Agent Mail / same Task identity).",
+      'After the self-review report arrives, call flywheel_review({ action: "looks-good", beadId }).',
+    ].join("\n"),
+    {
+      kind: "wave_review_confirmed",
+      confirmAction,
+      coordinatorEpoch: epoch,
+      beadIds,
+      reviewBeadId: beadId,
+      selfReviewPlaybook: [
+        `## Self-review — ${beadId}`,
+        "",
+        "1. Resolve the implementor identity (Agent Mail inbox / impl Task metadata).",
+        `2. Ask them to re-read their diff for bead ${beadId} (bugs, missing tests, style).`,
+        "3. Wait for the [review] self-review report before closing the bead.",
+        `4. Then: flywheel_review({ cwd, beadId: "${beadId}", action: "looks-good" }).`,
+        "",
+        "Cursor port: if no live implementor, coordinator runs a focused diff review on that bead's files only.",
+      ].join("\n"),
+    },
+  );
+}
+
+async function handleDuelReview(
+  ctx: ToolContext,
+  args: WaveReviewConfirmArgs,
+  epoch: number,
+): Promise<McpToolResult> {
+  const { cwd, state, exec } = ctx;
+  const { confirmAction, beadIds } = args;
+  let riskyIds = beadIds;
+  try {
+    const allBeads = await readBeads(exec, cwd);
+    const byId = new Map(allBeads.map((b) => [b.id, b]));
+    riskyIds = beadIds.filter((id) => {
+      const bead = byId.get(id);
+      return bead != null && isRiskyBead(bead, state);
+    });
+  } catch {
+    // fall back to full wave list
+  }
+  const targets = riskyIds.length > 0 ? riskyIds : beadIds;
+  return makeOkToolResult(
+    "flywheel_wave_review_gate",
+    state.phase,
+    [
+      `Duel review routed for ${targets.join(", ")} (epoch ${epoch}).`,
+      "Invoke flywheel_duel or /dueling-idea-wizards per skills/start/_review.md §8.0a.",
+    ].join("\n"),
+    {
+      kind: "wave_review_confirmed",
+      confirmAction,
+      coordinatorEpoch: epoch,
+      beadIds,
+      riskyBeadIds: targets,
+      duelReviewPlaybook: [
+        "## Duel review (risky beads)",
+        "",
+        `Targets: ${targets.join(", ")}`,
+        "",
+        '1. Call flywheel_duel({ cwd, focus: "adversarial review of closed bead implementation" })',
+        "   OR load agent-flywheel:flywheel-duel and run security vs reliability wizards.",
+        "2. Synthesize findings into follow-up beads or flywheel_review hit-me on the target bead.",
+      ].join("\n"),
+    },
+  );
+}
+
+async function confirmWaveReviewAction(
+  ctx: ToolContext,
+  args: WaveReviewConfirmArgs,
+  epoch: number,
+): Promise<McpToolResult> {
+  const { state } = ctx;
+  const { confirmAction } = args;
+
+  switch (confirmAction) {
+    case "looks-good-all":
+      return handleLooksGoodAll(ctx, args, epoch);
+    case "fresh-eyes":
+      return handleFreshEyes(ctx, args, epoch);
+    case "self-review":
+      return handleSelfReview(ctx, args, epoch);
+    case "duel-review":
+      return handleDuelReview(ctx, args, epoch);
+    default: {
+      const _: never = confirmAction;
+      return makeToolError(
+        "flywheel_wave_review_gate",
+        state.phase,
+        "unsupported_action",
+        `Unsupported wave review confirmAction: ${String(_)}`,
+      );
+    }
+  }
+}
+
+function waveReviewEmptyBeadIdsError(ctx: ToolContext): McpToolResult {
+  return makeToolError(
+    "flywheel_wave_review_gate",
+    ctx.state.phase,
+    "invalid_input",
+    "beadIds must be a non-empty array of beads that finished in this wave.",
   );
 }
 
@@ -305,24 +351,26 @@ export async function runWaveReviewGate(
 ): Promise<McpToolResult> {
   const { cwd, state, exec } = ctx;
 
-  // E8: record wave review gate action after AskQuestion maps actions id
   if (args.confirmAction !== undefined) {
+    if (!Array.isArray(args.beadIds) || args.beadIds.length === 0) {
+      return waveReviewEmptyBeadIdsError(ctx);
+    }
+
     const epoch = await recordGateSteering(ctx, {
       source: "wave_review",
       actionId: args.confirmAction,
       beadIds: args.beadIds,
     });
 
-    return confirmWaveReviewAction(ctx, args, epoch);
+    return confirmWaveReviewAction(
+      ctx,
+      { ...args, confirmAction: args.confirmAction },
+      epoch,
+    );
   }
 
   if (!Array.isArray(args.beadIds) || args.beadIds.length === 0) {
-    return makeToolError(
-      "flywheel_wave_review_gate",
-      state.phase,
-      "invalid_input",
-      "beadIds must be a non-empty array of beads that finished in this wave.",
-    );
+    return waveReviewEmptyBeadIdsError(ctx);
   }
 
   let allBeads;
