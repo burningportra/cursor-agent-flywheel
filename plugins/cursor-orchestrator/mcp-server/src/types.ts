@@ -423,6 +423,19 @@ export interface SteeringEvent {
   normalizedKey: string;
 }
 
+export type GateResolutionKind = "wave_review" | "wrap_up";
+
+/** Capped replay ledger for idempotent gate confirmations (FIFO elsewhere). */
+export interface GateResolution {
+  key: string;
+  kind: GateResolutionKind;
+  actionId: string;
+  beadIds?: string[];
+  reviewBeadId?: string;
+  coordinatorEpoch: number;
+  resolvedAt: string;
+}
+
 export interface ProfileWatchEntry {
   /** Repo-relative POSIX path (normalized, no `..`). */
   path: string;
@@ -689,6 +702,8 @@ export interface FlywheelState {
   coordinatorEpoch?: number;
   /** Recent gate resolutions for hint deduplication (FIFO-capped elsewhere). */
   steeringEvents?: SteeringEvent[];
+  /** Idempotent gate confirm ledger (FIFO-capped at 20 in gate-resolutions.ts). */
+  gateResolutions?: GateResolution[];
   /** Baseline file hashes registered at plan/profile bind time. */
   profileWatch?: ProfileWatchState;
   profileStale?: boolean;

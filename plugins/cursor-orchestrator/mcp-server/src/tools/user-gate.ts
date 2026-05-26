@@ -4,6 +4,11 @@ import {
   wrapUpConfirmActionId,
 } from "../steering-events.js";
 import { getCoordinatorEpoch } from "../coordinator-epoch.js";
+import {
+  appendGateResolution,
+  deriveGateResolutionKey,
+  findReplay,
+} from "../gate-resolutions.js";
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
 import type {
@@ -12,6 +17,8 @@ import type {
   WaveReviewConfirmAction,
   WaveReviewGateArgs,
   WrapUpGateArgs,
+  GateResolution,
+  FlywheelState,
 } from "../types.js";
 import { readBeads } from "../beads.js";
 import {
@@ -145,6 +152,110 @@ type WaveReviewConfirmArgs = WaveReviewGateArgs & {
   confirmAction: WaveReviewConfirmAction;
 };
 
+const REVIEW_REPLAY_NEXT_ACTION =
+  "Review was already routed. Do not spawn duplicate reviewers unless user asks to retry.";
+
+function waveReviewResolutionKey(
+  state: FlywheelState,
+  args: WaveReviewConfirmArgs,
+  reviewBeadId?: string,
+): string {
+  return deriveGateResolutionKey({
+    kind: "wave_review",
+    actionId: args.confirmAction,
+    beadIds: args.beadIds,
+    reviewBeadId,
+    planDocument: state.planDocument,
+    selectedGoal: state.selectedGoal,
+  });
+}
+
+function recordWaveReviewResolution(
+  state: FlywheelState,
+  args: WaveReviewConfirmArgs,
+  reviewBeadId: string | undefined,
+  key: string,
+): void {
+  appendGateResolution(state, {
+    key,
+    kind: "wave_review",
+    actionId: args.confirmAction,
+    ...(args.beadIds.length ? { beadIds: [...args.beadIds] } : {}),
+    ...(reviewBeadId ? { reviewBeadId } : {}),
+    coordinatorEpoch: getCoordinatorEpoch(state),
+    resolvedAt: new Date().toISOString(),
+  });
+}
+
+function buildWaveReviewReplayResult(
+  ctx: ToolContext,
+  args: WaveReviewConfirmArgs,
+  replay: GateResolution,
+  dispatchKey: string,
+  reviewBeadId?: string,
+): McpToolResult {
+  const { state } = ctx;
+  const { confirmAction, beadIds } = args;
+  const baseData: Record<string, unknown> = {
+    kind: "wave_review_confirmed",
+    confirmAction,
+    idempotentReplay: true,
+    dispatchKey,
+    coordinatorEpoch: replay.coordinatorEpoch,
+    beadIds,
+    ...(reviewBeadId ? { reviewBeadId } : {}),
+  };
+
+  switch (confirmAction) {
+    case "looks-good-all":
+      return makeOkToolResult(
+        "flywheel_wave_review_gate",
+        state.phase,
+        `Wave review already accepted (replay, epoch ${replay.coordinatorEpoch}).`,
+        { ...baseData, closedBeadIds: beadIds },
+      );
+    case "fresh-eyes":
+      return makeOkToolResult(
+        "flywheel_wave_review_gate",
+        state.phase,
+        [
+          `Fresh-eyes review already dispatched for ${reviewBeadId} (replay, epoch ${replay.coordinatorEpoch}).`,
+          REVIEW_REPLAY_NEXT_ACTION,
+        ].join("\n"),
+        { ...baseData, nextAction: REVIEW_REPLAY_NEXT_ACTION },
+      );
+    case "self-review":
+      return makeOkToolResult(
+        "flywheel_wave_review_gate",
+        state.phase,
+        [
+          `Self-review already routed for ${reviewBeadId} (replay, epoch ${replay.coordinatorEpoch}).`,
+          REVIEW_REPLAY_NEXT_ACTION,
+        ].join("\n"),
+        { ...baseData, nextAction: REVIEW_REPLAY_NEXT_ACTION },
+      );
+    case "duel-review":
+      return makeOkToolResult(
+        "flywheel_wave_review_gate",
+        state.phase,
+        [
+          `Duel review already routed (replay, epoch ${replay.coordinatorEpoch}).`,
+          REVIEW_REPLAY_NEXT_ACTION,
+        ].join("\n"),
+        { ...baseData, nextAction: REVIEW_REPLAY_NEXT_ACTION },
+      );
+    default: {
+      const _: never = confirmAction;
+      return makeToolError(
+        "flywheel_wave_review_gate",
+        state.phase,
+        "unsupported_action",
+        `Unsupported wave review confirmAction: ${String(_)}`,
+      );
+    }
+  }
+}
+
 async function recordWaveReviewSteering(
   ctx: ToolContext,
   args: WaveReviewConfirmArgs,
@@ -159,6 +270,7 @@ async function recordWaveReviewSteering(
 async function handleLooksGoodAll(
   ctx: ToolContext,
   args: WaveReviewConfirmArgs,
+  resolutionKey: string,
 ): Promise<McpToolResult> {
   const { state } = ctx;
   const { confirmAction, beadIds } = args;
@@ -171,6 +283,7 @@ async function handleLooksGoodAll(
     actionId: confirmAction,
     beadIds,
   });
+  recordWaveReviewResolution(state, args, undefined, resolutionKey);
   await ctx.saveState(ctx.state);
   const epoch = getCoordinatorEpoch(ctx.state);
   const reviewRest = reviewDataFromResult(reviewResult);
@@ -190,6 +303,7 @@ async function handleLooksGoodAll(
       beadIds,
       closedBeadIds: beadIds,
       reviewOutcome: reviewRest,
+      dispatchKey: resolutionKey,
     },
   );
 }
@@ -197,32 +311,27 @@ async function handleLooksGoodAll(
 async function handleFreshEyes(
   ctx: ToolContext,
   args: WaveReviewConfirmArgs,
+  resolutionKey: string,
+  reviewBeadId: string,
 ): Promise<McpToolResult> {
   const { cwd, state } = ctx;
   const { confirmAction, beadIds } = args;
-  const resolved = resolveReviewBeadId(beadIds, args.reviewBeadId);
-  if ("error" in resolved) {
-    return makeToolError(
-      "flywheel_wave_review_gate",
-      state.phase,
-      "invalid_input",
-      resolved.error,
-    );
-  }
   const epoch = await recordWaveReviewSteering(ctx, args);
   const reviewResult = await runReview(ctx, {
     cwd,
-    beadId: resolved.beadId,
+    beadId: reviewBeadId,
     action: "hit-me",
   });
   if (reviewResult.isError) {
     return reviewResult;
   }
+  recordWaveReviewResolution(state, args, reviewBeadId, resolutionKey);
+  await ctx.saveState(state);
   return makeOkToolResult(
     "flywheel_wave_review_gate",
     state.phase,
     [
-      `Fresh-eyes review dispatched for ${resolved.beadId} (epoch ${epoch}).`,
+      `Fresh-eyes review dispatched for ${reviewBeadId} (epoch ${epoch}).`,
       "Spawn parallel review Tasks from reviewOutcome.agentTasks, then flywheel_review looks-good per bead.",
       reviewResult.content[0]?.text ?? "",
     ]
@@ -233,8 +342,9 @@ async function handleFreshEyes(
       confirmAction,
       coordinatorEpoch: epoch,
       beadIds,
-      reviewBeadId: resolved.beadId,
+      reviewBeadId,
       reviewOutcome: reviewDataFromResult(reviewResult),
+      dispatchKey: resolutionKey,
     },
   );
 }
@@ -242,25 +352,19 @@ async function handleFreshEyes(
 async function handleSelfReview(
   ctx: ToolContext,
   args: WaveReviewConfirmArgs,
+  resolutionKey: string,
+  reviewBeadId: string,
 ): Promise<McpToolResult> {
   const { state } = ctx;
   const { confirmAction, beadIds } = args;
-  const resolved = resolveReviewBeadId(beadIds, args.reviewBeadId);
-  if ("error" in resolved) {
-    return makeToolError(
-      "flywheel_wave_review_gate",
-      state.phase,
-      "invalid_input",
-      resolved.error,
-    );
-  }
   const epoch = await recordWaveReviewSteering(ctx, args);
-  const beadId = resolved.beadId;
+  recordWaveReviewResolution(state, args, reviewBeadId, resolutionKey);
+  await ctx.saveState(state);
   return makeOkToolResult(
     "flywheel_wave_review_gate",
     state.phase,
     [
-      `Self-review routed for ${beadId} (epoch ${epoch}).`,
+      `Self-review routed for ${reviewBeadId} (epoch ${epoch}).`,
       "Delegate diff audit to the original implementor (Agent Mail / same Task identity).",
       'After the self-review report arrives, call flywheel_review({ action: "looks-good", beadId }).',
     ].join("\n"),
@@ -269,14 +373,15 @@ async function handleSelfReview(
       confirmAction,
       coordinatorEpoch: epoch,
       beadIds,
-      reviewBeadId: beadId,
+      reviewBeadId,
+      dispatchKey: resolutionKey,
       selfReviewPlaybook: [
-        `## Self-review — ${beadId}`,
+        `## Self-review — ${reviewBeadId}`,
         "",
         "1. Resolve the implementor identity (Agent Mail inbox / impl Task metadata).",
-        `2. Ask them to re-read their diff for bead ${beadId} (bugs, missing tests, style).`,
+        `2. Ask them to re-read their diff for bead ${reviewBeadId} (bugs, missing tests, style).`,
         "3. Wait for the [review] self-review report before closing the bead.",
-        `4. Then: flywheel_review({ cwd, beadId: "${beadId}", action: "looks-good" }).`,
+        `4. Then: flywheel_review({ cwd, beadId: "${reviewBeadId}", action: "looks-good" }).`,
         "",
         "Cursor port: if no live implementor, coordinator runs a focused diff review on that bead's files only.",
       ].join("\n"),
@@ -287,6 +392,7 @@ async function handleSelfReview(
 async function handleDuelReview(
   ctx: ToolContext,
   args: WaveReviewConfirmArgs,
+  resolutionKey: string,
 ): Promise<McpToolResult> {
   const { cwd, state, exec } = ctx;
   const { confirmAction, beadIds } = args;
@@ -303,6 +409,8 @@ async function handleDuelReview(
   }
   const targets = riskyIds.length > 0 ? riskyIds : beadIds;
   const epoch = await recordWaveReviewSteering(ctx, args);
+  recordWaveReviewResolution(state, args, undefined, resolutionKey);
+  await ctx.saveState(state);
   return makeOkToolResult(
     "flywheel_wave_review_gate",
     state.phase,
@@ -316,6 +424,7 @@ async function handleDuelReview(
       coordinatorEpoch: epoch,
       beadIds,
       riskyBeadIds: targets,
+      dispatchKey: resolutionKey,
       duelReviewPlaybook: [
         "## Duel review (risky beads)",
         "",
@@ -334,17 +443,43 @@ async function confirmWaveReviewAction(
   args: WaveReviewConfirmArgs,
 ): Promise<McpToolResult> {
   const { state } = ctx;
-  const { confirmAction } = args;
+  const { confirmAction, beadIds } = args;
+
+  let reviewBeadId: string | undefined;
+  if (confirmAction === "fresh-eyes" || confirmAction === "self-review") {
+    const resolved = resolveReviewBeadId(beadIds, args.reviewBeadId);
+    if ("error" in resolved) {
+      return makeToolError(
+        "flywheel_wave_review_gate",
+        state.phase,
+        "invalid_input",
+        resolved.error,
+      );
+    }
+    reviewBeadId = resolved.beadId;
+  }
+
+  const resolutionKey = waveReviewResolutionKey(state, args, reviewBeadId);
+  const replay = findReplay(state, resolutionKey);
+  if (replay) {
+    return buildWaveReviewReplayResult(
+      ctx,
+      args,
+      replay,
+      resolutionKey,
+      reviewBeadId,
+    );
+  }
 
   switch (confirmAction) {
     case "looks-good-all":
-      return handleLooksGoodAll(ctx, args);
+      return handleLooksGoodAll(ctx, args, resolutionKey);
     case "fresh-eyes":
-      return handleFreshEyes(ctx, args);
+      return handleFreshEyes(ctx, args, resolutionKey, reviewBeadId!);
     case "self-review":
-      return handleSelfReview(ctx, args);
+      return handleSelfReview(ctx, args, resolutionKey, reviewBeadId!);
     case "duel-review":
-      return handleDuelReview(ctx, args);
+      return handleDuelReview(ctx, args, resolutionKey);
     default: {
       const _: never = confirmAction;
       return makeToolError(
@@ -562,6 +697,73 @@ export async function runWrapUpGate(
 ): Promise<McpToolResult> {
   const { cwd, state, saveState } = ctx;
 
+  if (args.confirmWrapUp !== undefined) {
+    const actionId = wrapUpConfirmActionId(args.confirmWrapUp);
+    const resolutionKey = deriveGateResolutionKey({
+      kind: "wrap_up",
+      actionId,
+      planDocument: state.planDocument,
+      selectedGoal: state.selectedGoal,
+    });
+    const replay = findReplay(state, resolutionKey);
+    if (replay) {
+      return makeOkToolResult(
+        "flywheel_wrap_up_gate",
+        state.phase,
+        `Wrap-up path already confirmed: ${args.confirmWrapUp} (replay, epoch ${replay.coordinatorEpoch}).`,
+        {
+          kind: "wrap_up_confirmed",
+          wrapUpConfirmed: true,
+          confirmWrapUp: args.confirmWrapUp,
+          idempotentReplay: true,
+          dispatchKey: resolutionKey,
+          coordinatorEpoch: replay.coordinatorEpoch,
+        },
+      );
+    }
+
+    await recordGateSteering(ctx, {
+      source: "wrap_up",
+      actionId,
+    });
+    appendGateResolution(state, {
+      key: resolutionKey,
+      kind: "wrap_up",
+      actionId,
+      coordinatorEpoch: getCoordinatorEpoch(state),
+      resolvedAt: new Date().toISOString(),
+    });
+    state.wrapUpConfirmed = true;
+    state.phase = state.phase === "complete" ? "complete" : "iterating";
+    saveState(state);
+
+    const uncommitted = await gitPorcelain(cwd);
+    const beadCommitCount = await gitBeadCommitCount(cwd);
+    const gate = buildWrapUpGate({
+      uncommittedCount: uncommitted.length,
+      uncommittedPreview: uncommitted,
+      beadCommitCount,
+    });
+
+    return makeOkToolResult(
+      "flywheel_wrap_up_gate",
+      state.phase,
+      [
+        `Wrap-up path confirmed: ${args.confirmWrapUp}.`,
+        "Map actions via flywheel_get_skill(agent-flywheel:start_wrapup) if needed.",
+        "Sub-gates: AskQuestion only — no commit prompts in prose.",
+      ].join("\n"),
+      {
+        ...toCompactGatePayload(gate),
+        kind: "wrap_up_confirmed",
+        wrapUpConfirmed: true,
+        confirmWrapUp: args.confirmWrapUp,
+        dispatchKey: resolutionKey,
+        coordinatorEpoch: getCoordinatorEpoch(state),
+      },
+    );
+  }
+
   if (state.wrapUpConfirmed && !args.force) {
     const gate = buildWrapUpGate({
       uncommittedCount: 0,
@@ -582,27 +784,6 @@ export async function runWrapUpGate(
     uncommittedPreview: uncommitted,
     beadCommitCount,
   });
-
-  if (args.confirmWrapUp !== undefined) {
-    // E7: wrap-up confirm is user steering
-    await recordGateSteering(ctx, {
-      source: "wrap_up",
-      actionId: wrapUpConfirmActionId(args.confirmWrapUp),
-    });
-    state.wrapUpConfirmed = true;
-    state.phase = state.phase === "complete" ? "complete" : "iterating";
-    saveState(state);
-    return makeOkToolResult(
-      "flywheel_wrap_up_gate",
-      state.phase,
-      [
-        `Wrap-up path confirmed: ${args.confirmWrapUp}.`,
-        "Map actions via flywheel_get_skill(agent-flywheel:start_wrapup) if needed.",
-        "Sub-gates: AskQuestion only — no commit prompts in prose.",
-      ].join("\n"),
-      { ...toCompactGatePayload(gate), wrapUpConfirmed: true },
-    );
-  }
 
   const outcome: WrapUpGateOutcome = toCompactGatePayload(gate);
 
