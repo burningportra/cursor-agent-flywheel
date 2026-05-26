@@ -74,10 +74,21 @@ function reviewDataFromResult(result) {
     const { kind, ...reviewRest } = reviewData;
     return { kind, ...reviewRest };
 }
-async function handleLooksGoodAll(ctx, args, epoch) {
+async function recordWaveReviewSteering(ctx, args) {
+    return recordGateSteering(ctx, {
+        source: "wave_review",
+        actionId: args.confirmAction,
+        beadIds: args.beadIds,
+    });
+}
+async function handleLooksGoodAll(ctx, args) {
     const { state } = ctx;
     const { confirmAction, beadIds } = args;
     const reviewResult = await acceptWaveBeadsAtReview(ctx, beadIds);
+    if (reviewResult.isError) {
+        return reviewResult;
+    }
+    const epoch = await recordWaveReviewSteering(ctx, args);
     const reviewRest = reviewDataFromResult(reviewResult);
     return makeOkToolResult("flywheel_wave_review_gate", state.phase, [
         `Wave review accepted: closed ${beadIds.length} bead(s) (epoch ${epoch}).`,
@@ -93,13 +104,14 @@ async function handleLooksGoodAll(ctx, args, epoch) {
         reviewOutcome: reviewRest,
     });
 }
-async function handleFreshEyes(ctx, args, epoch) {
+async function handleFreshEyes(ctx, args) {
     const { cwd, state } = ctx;
     const { confirmAction, beadIds } = args;
     const resolved = resolveReviewBeadId(beadIds, args.reviewBeadId);
     if ("error" in resolved) {
         return makeToolError("flywheel_wave_review_gate", state.phase, "invalid_input", resolved.error);
     }
+    const epoch = await recordWaveReviewSteering(ctx, args);
     const reviewResult = await runReview(ctx, {
         cwd,
         beadId: resolved.beadId,
@@ -123,13 +135,14 @@ async function handleFreshEyes(ctx, args, epoch) {
         reviewOutcome: reviewDataFromResult(reviewResult),
     });
 }
-async function handleSelfReview(ctx, args, epoch) {
+async function handleSelfReview(ctx, args) {
     const { state } = ctx;
     const { confirmAction, beadIds } = args;
     const resolved = resolveReviewBeadId(beadIds, args.reviewBeadId);
     if ("error" in resolved) {
         return makeToolError("flywheel_wave_review_gate", state.phase, "invalid_input", resolved.error);
     }
+    const epoch = await recordWaveReviewSteering(ctx, args);
     const beadId = resolved.beadId;
     return makeOkToolResult("flywheel_wave_review_gate", state.phase, [
         `Self-review routed for ${beadId} (epoch ${epoch}).`,
@@ -153,7 +166,7 @@ async function handleSelfReview(ctx, args, epoch) {
         ].join("\n"),
     });
 }
-async function handleDuelReview(ctx, args, epoch) {
+async function handleDuelReview(ctx, args) {
     const { cwd, state, exec } = ctx;
     const { confirmAction, beadIds } = args;
     let riskyIds = beadIds;
@@ -169,6 +182,7 @@ async function handleDuelReview(ctx, args, epoch) {
         // fall back to full wave list
     }
     const targets = riskyIds.length > 0 ? riskyIds : beadIds;
+    const epoch = await recordWaveReviewSteering(ctx, args);
     return makeOkToolResult("flywheel_wave_review_gate", state.phase, [
         `Duel review routed for ${targets.join(", ")} (epoch ${epoch}).`,
         "Invoke flywheel_duel or /dueling-idea-wizards per skills/start/_review.md §8.0a.",
@@ -189,18 +203,18 @@ async function handleDuelReview(ctx, args, epoch) {
         ].join("\n"),
     });
 }
-async function confirmWaveReviewAction(ctx, args, epoch) {
+async function confirmWaveReviewAction(ctx, args) {
     const { state } = ctx;
     const { confirmAction } = args;
     switch (confirmAction) {
         case "looks-good-all":
-            return handleLooksGoodAll(ctx, args, epoch);
+            return handleLooksGoodAll(ctx, args);
         case "fresh-eyes":
-            return handleFreshEyes(ctx, args, epoch);
+            return handleFreshEyes(ctx, args);
         case "self-review":
-            return handleSelfReview(ctx, args, epoch);
+            return handleSelfReview(ctx, args);
         case "duel-review":
-            return handleDuelReview(ctx, args, epoch);
+            return handleDuelReview(ctx, args);
         default: {
             const _ = confirmAction;
             return makeToolError("flywheel_wave_review_gate", state.phase, "unsupported_action", `Unsupported wave review confirmAction: ${String(_)}`);
@@ -216,12 +230,10 @@ export async function runWaveReviewGate(ctx, args) {
         if (!Array.isArray(args.beadIds) || args.beadIds.length === 0) {
             return waveReviewEmptyBeadIdsError(ctx);
         }
-        const epoch = await recordGateSteering(ctx, {
-            source: "wave_review",
-            actionId: args.confirmAction,
-            beadIds: args.beadIds,
+        return confirmWaveReviewAction(ctx, {
+            ...args,
+            confirmAction: args.confirmAction,
         });
-        return confirmWaveReviewAction(ctx, { ...args, confirmAction: args.confirmAction }, epoch);
     }
     if (!Array.isArray(args.beadIds) || args.beadIds.length === 0) {
         return waveReviewEmptyBeadIdsError(ctx);

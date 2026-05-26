@@ -127,10 +127,8 @@ describe.each([
       expect(result.isError).toBe(true);
       const err = (result.structuredContent as { data: { error: { code: string } } }).data.error;
       expect(err.code).toBe(expectedKind);
-      if (expectedKind === 'invalid_input' && n === 0) {
-        expect(ctx.state.coordinatorEpoch).toBe(initialEpoch);
-        expect(ctx.state.steeringEvents ?? []).toHaveLength(0);
-      }
+      expect(ctx.state.coordinatorEpoch).toBe(initialEpoch);
+      expect(ctx.state.steeringEvents ?? []).toHaveLength(0);
       return;
     }
 

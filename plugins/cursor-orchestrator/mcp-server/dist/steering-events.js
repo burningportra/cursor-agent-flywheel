@@ -68,8 +68,10 @@ export function wrapUpConfirmActionId(confirmWrapUp) {
             return 'wrap-up-commit-only';
         case 'skip':
             return 'wrap-up-skip';
-        default:
+        default: {
+            const _ = confirmWrapUp;
             return confirmWrapUp;
+        }
     }
 }
 //# sourceMappingURL=steering-events.js.map

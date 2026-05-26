@@ -105,7 +105,9 @@ export function wrapUpConfirmActionId(
       return 'wrap-up-commit-only';
     case 'skip':
       return 'wrap-up-skip';
-    default:
+    default: {
+      const _: never = confirmWrapUp;
       return confirmWrapUp;
+    }
   }
 }

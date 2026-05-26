@@ -143,14 +143,28 @@ type WaveReviewConfirmArgs = WaveReviewGateArgs & {
   confirmAction: WaveReviewConfirmAction;
 };
 
+async function recordWaveReviewSteering(
+  ctx: ToolContext,
+  args: WaveReviewConfirmArgs,
+): Promise<number> {
+  return recordGateSteering(ctx, {
+    source: "wave_review",
+    actionId: args.confirmAction,
+    beadIds: args.beadIds,
+  });
+}
+
 async function handleLooksGoodAll(
   ctx: ToolContext,
   args: WaveReviewConfirmArgs,
-  epoch: number,
 ): Promise<McpToolResult> {
   const { state } = ctx;
   const { confirmAction, beadIds } = args;
   const reviewResult = await acceptWaveBeadsAtReview(ctx, beadIds);
+  if (reviewResult.isError) {
+    return reviewResult;
+  }
+  const epoch = await recordWaveReviewSteering(ctx, args);
   const reviewRest = reviewDataFromResult(reviewResult);
   return makeOkToolResult(
     "flywheel_wave_review_gate",
@@ -175,7 +189,6 @@ async function handleLooksGoodAll(
 async function handleFreshEyes(
   ctx: ToolContext,
   args: WaveReviewConfirmArgs,
-  epoch: number,
 ): Promise<McpToolResult> {
   const { cwd, state } = ctx;
   const { confirmAction, beadIds } = args;
@@ -188,6 +201,7 @@ async function handleFreshEyes(
       resolved.error,
     );
   }
+  const epoch = await recordWaveReviewSteering(ctx, args);
   const reviewResult = await runReview(ctx, {
     cwd,
     beadId: resolved.beadId,
@@ -220,7 +234,6 @@ async function handleFreshEyes(
 async function handleSelfReview(
   ctx: ToolContext,
   args: WaveReviewConfirmArgs,
-  epoch: number,
 ): Promise<McpToolResult> {
   const { state } = ctx;
   const { confirmAction, beadIds } = args;
@@ -233,6 +246,7 @@ async function handleSelfReview(
       resolved.error,
     );
   }
+  const epoch = await recordWaveReviewSteering(ctx, args);
   const beadId = resolved.beadId;
   return makeOkToolResult(
     "flywheel_wave_review_gate",
@@ -265,7 +279,6 @@ async function handleSelfReview(
 async function handleDuelReview(
   ctx: ToolContext,
   args: WaveReviewConfirmArgs,
-  epoch: number,
 ): Promise<McpToolResult> {
   const { cwd, state, exec } = ctx;
   const { confirmAction, beadIds } = args;
@@ -281,6 +294,7 @@ async function handleDuelReview(
     // fall back to full wave list
   }
   const targets = riskyIds.length > 0 ? riskyIds : beadIds;
+  const epoch = await recordWaveReviewSteering(ctx, args);
   return makeOkToolResult(
     "flywheel_wave_review_gate",
     state.phase,
@@ -310,20 +324,19 @@ async function handleDuelReview(
 async function confirmWaveReviewAction(
   ctx: ToolContext,
   args: WaveReviewConfirmArgs,
-  epoch: number,
 ): Promise<McpToolResult> {
   const { state } = ctx;
   const { confirmAction } = args;
 
   switch (confirmAction) {
     case "looks-good-all":
-      return handleLooksGoodAll(ctx, args, epoch);
+      return handleLooksGoodAll(ctx, args);
     case "fresh-eyes":
-      return handleFreshEyes(ctx, args, epoch);
+      return handleFreshEyes(ctx, args);
     case "self-review":
-      return handleSelfReview(ctx, args, epoch);
+      return handleSelfReview(ctx, args);
     case "duel-review":
-      return handleDuelReview(ctx, args, epoch);
+      return handleDuelReview(ctx, args);
     default: {
       const _: never = confirmAction;
       return makeToolError(
@@ -356,17 +369,10 @@ export async function runWaveReviewGate(
       return waveReviewEmptyBeadIdsError(ctx);
     }
 
-    const epoch = await recordGateSteering(ctx, {
-      source: "wave_review",
-      actionId: args.confirmAction,
-      beadIds: args.beadIds,
+    return confirmWaveReviewAction(ctx, {
+      ...args,
+      confirmAction: args.confirmAction,
     });
-
-    return confirmWaveReviewAction(
-      ctx,
-      { ...args, confirmAction: args.confirmAction },
-      epoch,
-    );
   }
 
   if (!Array.isArray(args.beadIds) || args.beadIds.length === 0) {
