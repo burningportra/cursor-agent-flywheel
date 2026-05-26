@@ -6,6 +6,23 @@ _No plugin-only changes beyond monorepo root._
 
 ---
 
+## [3.20.0] — 2026-05-26
+
+### Fixed
+
+- **Wave review** — `flywheel_wave_review_gate` `confirmAction: looks-good-all` closes every bead; fresh-eyes / self-review / duel-review dispatch from confirm (optional `reviewBeadId`).
+- **Commit-batch fresh-eyes** — threshold from config/env, persisted at impl pre-flight; `impl_tick` reads snake_case YAML keys.
+- **Compliance audit** — Cursor-native defer (`compliance_audit_deferred` + `afterTask`); per-bead `FW_COMPLIANCE_OVERRIDE`.
+- **`FW_MAX_OUTCOME_ITERATIONS`** — env fallback when checkpoint cap unset.
+- **`profile.staleAction: auto_refresh`** — debounced background refresh on `flywheel_impl_tick`.
+
+### Changed
+
+- Capabilities docs for compliance/grader env vars; `AGENTS.md` log level → `FW_LOG_LEVEL`.
+- `recover-gates.md`, `_implement.cursor.md` — wave gate confirmAction flow.
+
+---
+
 ## [3.19.0] — 2026-05-20
 
 ### Added

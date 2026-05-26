@@ -22,6 +22,7 @@ Sections are grouped by **capability waves**. The **version timeline** keeps chr
 | Label | Date (landed) | Summary |
 |-------|---------------|---------|
 | **[Unreleased]** | — | No open beads |
+| **3.20.0** | 2026-05-26 | Flywheel doc-vs-code audit: wave gate bead close, commit-batch fresh-eyes, compliance Cursor defer |
 | **3.19.0** | 2026-05-20 | pi-prompt-suggester integration: coordinator epoch, profile staleness, next-action hints |
 | **3.18.1+visual** | 2026-05-20 | Planning browser companion + changelog rebuild ([89397cc](https://github.com/burningportra/cursor-agent-flywheel/commit/89397cc)) |
 | **3.18.1+gates** | 2026-05-20 | Upstream skills sync, native bead/impl gates, install + command parity |
@@ -34,6 +35,12 @@ There are **no git tags** and **no GitHub Releases** in this repository yet.
 ## [Unreleased]
 
 _No pending release items._
+
+---
+
+## 3.20.0 — flywheel audit fixes (2026-05-26)
+
+Coordinator/review reliability batch: wave gate closes beads on accept-all; commit-batch fresh-eyes wired end-to-end; compliance audit defers to Cursor Task; wave review confirm routes fresh-eyes/self-review/duel; `FW_MAX_OUTCOME_ITERATIONS` and profile `auto_refresh` honored. See [plugins/cursor-orchestrator/CHANGELOG.md](plugins/cursor-orchestrator/CHANGELOG.md).
 
 ---
 

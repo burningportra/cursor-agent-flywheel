@@ -1,6 +1,6 @@
 # Agent orientation (cursor-agent-flywheel monorepo)
 
-Marketplace template + **cursor-orchestrator** plugin (Agent Flywheel v3.18 for Cursor).
+Marketplace template + **cursor-orchestrator** plugin (Agent Flywheel v3.20 for Cursor).
 
 This file orients agents at the **repository root**. For MCP server constraints, bead lifecycle, and Cursor coordination rules, see **[plugins/cursor-orchestrator/AGENTS.md](plugins/cursor-orchestrator/AGENTS.md)**.
 
