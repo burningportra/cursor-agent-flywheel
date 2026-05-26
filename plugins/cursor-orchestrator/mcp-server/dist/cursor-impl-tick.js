@@ -13,6 +13,7 @@ import { getCoordinatorEpoch, persistCoordinatorEpochBump } from './coordinator-
 import { areEpochGuardsEnabled, areNextActionHintsEnabled, loadFlywheelConfigWithWarnings } from './flywheel-config.js';
 import { buildNextActionHint } from './next-action-hint.js';
 import { probeProfileStale } from './profile-staleness.js';
+import { scheduleProfileAutoRefresh } from './tools/profile.js';
 import { runAdvanceWave } from './tools/advance-wave.js';
 import { runReview } from './tools/review.js';
 const DEFAULT_TICK_INTERVAL_SEC = 240;
@@ -150,6 +151,7 @@ export async function runImplTickCore(ctx, args) {
     const epochGuards = areEpochGuardsEnabled(cwd);
     const cfg = resolveImplTickConfig(cwd);
     const { config } = loadFlywheelConfigWithWarnings(cwd);
+    scheduleProfileAutoRefresh(ctx, config.profile);
     const tickAt = new Date().toISOString();
     state.lastImplTickAt = tickAt;
     await saveState(state);

@@ -19,7 +19,11 @@
     },
     "confirmAction": {
       "type": "string",
-      "description": "User AskQuestion selection — records steering and bumps coordinator epoch (E8). For looks-good-all, also closes every beadId in br. Re-call after user picks."
+      "description": "User AskQuestion selection — records steering and bumps coordinator epoch (E8). looks-good-all closes beads; fresh-eyes/self-review dispatch review (pass reviewBeadId for multi-bead waves). Re-call after user picks."
+    },
+    "reviewBeadId": {
+      "type": "string",
+      "description": "Bead to review when confirmAction is fresh-eyes or self-review and beadIds has more than one entry."
     }
   },
   "required": [

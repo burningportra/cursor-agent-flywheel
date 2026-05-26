@@ -3,6 +3,13 @@ import { join } from 'node:path';
 import { z } from 'zod';
 
 import { storeComplianceScore } from '../cass-helpers.js';
+import {
+  buildComplianceAuditSkillPrompt,
+  buildComplianceCoordinatorPlaybook,
+  parseComplianceOverride,
+  resolveCursorComplianceModel,
+  useCursorComplianceBackend,
+} from '../cursor-compliance-audit.js';
 import { recordErrorCode } from '../telemetry.js';
 import type { McpToolResult, ToolContext } from '../types.js';
 import { makeOkToolResult, makeToolError } from './shared.js';
@@ -14,6 +21,8 @@ export const ComplianceAuditArgsSchema = z.object({
   threshold: z.number().optional(),
   parallelism: z.number().optional(),
   skipEnv: z.string().optional(),
+  /** Re-call after Cursor Task completes — reads latest pass dir without spawning claude. */
+  afterTask: z.boolean().optional(),
 });
 
 export type ComplianceAuditArgs = z.infer<typeof ComplianceAuditArgsSchema>;
@@ -467,9 +476,14 @@ export async function runComplianceAudit(
     return okComplianceResult('No beads to audit.', startedAt);
   }
 
-  // Skip-env override (emergency unblock).
   const overrideEnv = args.skipEnv ?? process.env.FW_COMPLIANCE_OVERRIDE;
-  if (overrideEnv && overrideEnv.length > 0) {
+  const override = overrideEnv ? parseComplianceOverride(overrideEnv) : null;
+  const beadIdsToAudit =
+    override && !override.skipAll
+      ? args.beadIds.filter((id) => !override.beadIds.has(id))
+      : args.beadIds;
+
+  if (override?.skipAll) {
     return okComplianceResult(
       `Compliance audit skipped via FW_COMPLIANCE_OVERRIDE=${overrideEnv}.`,
       startedAt,
@@ -477,19 +491,58 @@ export async function runComplianceAudit(
     );
   }
 
+  if (beadIdsToAudit.length === 0) {
+    return okComplianceResult(
+      `Compliance audit skipped for all ${args.beadIds.length} bead(s) via FW_COMPLIANCE_OVERRIDE.`,
+      startedAt,
+      { status: 'skipped' },
+    );
+  }
+
   const threshold = args.threshold ?? 700;
   const parallelism = Math.max(1, Math.min(args.parallelism ?? 5, 5));
-  const skillPrompt = [
-    '/beads-compliance-and-completion-verification',
-    '--mode',
-    'flywheel-gate',
-    '--beads',
-    args.beadIds.join(','),
-    '--threshold',
-    String(threshold),
-    '--parallelism',
-    String(parallelism),
-  ].join(' ');
+  const auditArgs = { ...args, beadIds: beadIdsToAudit };
+
+  if (useCursorComplianceBackend() && !args.afterTask) {
+    const model = resolveCursorComplianceModel(args.cwd);
+    const prompt = buildComplianceAuditSkillPrompt({
+      beadIds: beadIdsToAudit,
+      threshold,
+      parallelism,
+    });
+    const skippedNote =
+      beadIdsToAudit.length < args.beadIds.length
+        ? ` (${args.beadIds.length - beadIdsToAudit.length} bead(s) skipped via override)`
+        : '';
+    return makeOkToolResult(
+      'flywheel_compliance_audit',
+      ctx.state.phase ?? 'reviewing',
+      `Compliance audit deferred to Cursor Task (model ${model})${skippedNote}. Spawn Task, then re-call with afterTask: true.`,
+      {
+        kind: 'compliance_audit_deferred',
+        model,
+        beadIds: beadIdsToAudit,
+        skippedBeadIds: args.beadIds.filter((id) => !beadIdsToAudit.includes(id)),
+        threshold,
+        parallelism,
+        complianceTask: {
+          model,
+          subagent_type: 'generalPurpose',
+          description: 'Beads compliance audit',
+          prompt,
+        },
+        coordinatorPlaybook: buildComplianceCoordinatorPlaybook(model),
+        instructions:
+          'Spawn one Task with data.complianceTask.prompt, then flywheel_compliance_audit({ cwd, beadIds, afterTask: true }).',
+      },
+    );
+  }
+
+  const skillPrompt = buildComplianceAuditSkillPrompt({
+    beadIds: beadIdsToAudit,
+    threshold,
+    parallelism,
+  });
 
   try {
     const spawnResult = await ctx.exec(
@@ -523,10 +576,10 @@ export async function runComplianceAudit(
       }
 
       const parsedBeadIds = new Set(latestResult.value.parsedResult.beads.map((bead) => bead.id));
-      const timeoutMissingBeadIds = args.beadIds.filter((beadId) => !parsedBeadIds.has(beadId));
+      const timeoutMissingBeadIds = auditArgs.beadIds.filter((beadId) => !parsedBeadIds.has(beadId));
       return finalizeComplianceAudit(
         ctx,
-        args,
+        auditArgs,
         threshold,
         startedAt,
         latestResult.value.parsedResult,
@@ -551,7 +604,7 @@ export async function runComplianceAudit(
 
   return finalizeComplianceAudit(
     ctx,
-    args,
+    auditArgs,
     threshold,
     startedAt,
     latestResult.value.parsedResult,

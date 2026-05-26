@@ -33,7 +33,7 @@ import {
   planSlugFromIdentifier,
 } from './convergence-tool.js';
 import { loadFlywheelConfig } from '../flywheel-config.js';
-import { probeProfileStale } from '../profile-staleness.js';
+import { probeProfileStale, profileStaleNextAction } from '../profile-staleness.js';
 import type {
   DoctorReport,
   McpToolResult,
@@ -616,6 +616,7 @@ async function getCachedOrFreshDoctor(
 function deriveHints(
   report: Omit<FlywheelObserveReport, 'hints'>,
   profileStale?: { stale: boolean; reason?: string },
+  profileConfig?: import('../flywheel-config.js').FlywheelConfigProfile,
 ): ObserveHint[] {
   const hints: ObserveHint[] = [];
 
@@ -623,7 +624,7 @@ function deriveHints(
     hints.push({
       severity: 'warn',
       message: `repo profile stale (${profileStale.reason ?? 'intent file drift'})`,
-      nextAction: 'call flywheel_profile({ force: true }) to refresh',
+      nextAction: profileStaleNextAction(profileConfig),
     });
   }
 
@@ -880,7 +881,7 @@ export async function runObserve(
       convergence,
       convergenceGated,
     };
-    const hints = [...deriveHints(partial, profileStaleStatus), ...convergenceHints];
+    const hints = [...deriveHints(partial, profileStaleStatus, config?.profile), ...convergenceHints];
     const report: FlywheelObserveReport = { ...partial, hints };
 
     const validated = FlywheelObserveReportSchema.safeParse(report);

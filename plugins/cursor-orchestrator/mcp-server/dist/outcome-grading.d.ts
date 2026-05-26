@@ -68,11 +68,12 @@ export declare const MIN_OUTCOME_ITERATIONS = 1;
 export declare const MAX_OUTCOME_ITERATIONS = 5;
 /** Fallback when `state.maxOutcomeIterations` is unset. Matches MA's documented default. */
 export declare const DEFAULT_OUTCOME_ITERATIONS = 3;
+/** Read optional env override (bounded [1,5]). Used when checkpoint omits maxOutcomeIterations. */
+export declare function resolveMaxOutcomeIterationsFromEnv(): number | undefined;
 /**
  * Read the active iteration cap from session state, clamped to
- * `[MIN_OUTCOME_ITERATIONS, MAX_OUTCOME_ITERATIONS]`. Operators may set
- * `FW_MAX_OUTCOME_ITERATIONS` env to seed a different default at the call
- * site that writes to state (caller's responsibility).
+ * `[MIN_OUTCOME_ITERATIONS, MAX_OUTCOME_ITERATIONS]`. When checkpoint omits
+ * the field, falls back to `FW_MAX_OUTCOME_ITERATIONS` then default 3.
  */
 export declare function getMaxOutcomeIterations(state: Pick<FlywheelState, 'maxOutcomeIterations'>): number;
 declare const RubricCriterionSchemaV1: z.ZodObject<{

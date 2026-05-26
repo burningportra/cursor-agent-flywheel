@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://agent-flywheel.dev/schemas/inputs/flywheel_compliance_audit.json",
   "title": "flywheel: flywheel_compliance_audit input",
-  "description": "Audit a wave of closed beads for compliance with their acceptance criteria via the standalone /beads-compliance-and-completion-verification skill. Returns per-bead scores; reopens false-closed beads; bumps telemetry; persists scores to CASS. Default mode is single-bead parallel (~5-10 min for 5 beads). Honors FW_COMPLIANCE_OVERRIDE env for emergency skip.",
+  "description": "Audit a wave of closed beads for compliance with their acceptance criteria via the standalone /beads-compliance-and-completion-verification skill. Returns per-bead scores; reopens false-closed beads; bumps telemetry; persists scores to CASS. Cursor port: defers to Task + afterTask re-call (default). Legacy: spawns claude CLI when FW_COMPLIANCE_BACKEND=claude. FW_COMPLIANCE_OVERRIDE: \"1\"/\"true\" skips all; comma-separated bead ids skip only those beads.",
   "type": "object",
   "properties": {
     "cwd": {
@@ -34,7 +34,11 @@
     },
     "skipEnv": {
       "type": "string",
-      "description": "Comma-separated bead IDs to skip; if any provided, audit is short-circuited"
+      "description": "Override list: \"1\"/\"true\" skips entire audit; comma-separated bead ids skip only those beads"
+    },
+    "afterTask": {
+      "type": "boolean",
+      "description": "Cursor port: re-call after compliance Task completes — reads latest pass dir without spawning claude"
     }
   },
   "required": [

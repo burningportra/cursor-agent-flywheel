@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { applyProfileStalenessToState, checkProfileStaleness, clearProfileStaleFlags, hashFile, normalizeWatchPath, registerProfileWatch, } from '../profile-staleness.js';
+import { applyProfileStalenessToState, checkProfileStaleness, clearProfileStaleFlags, hashFile, normalizeWatchPath, profileStaleNextAction, registerProfileWatch, shouldScheduleProfileAutoRefresh, } from '../profile-staleness.js';
 import { createInitialState } from '../types.js';
 let testDir;
 afterEach(() => {
@@ -80,6 +80,18 @@ describe('profile-staleness', () => {
         const debounced = checkProfileStaleness(cwd, state, { debounceSeconds: 300 }, { respectDebounce: true });
         expect(debounced.stale).toBe(true);
         expect(debounced.reason).toBe('drift: docs/plans/test-plan.md');
+    });
+    it('profileStaleNextAction differs for auto_refresh vs nudge', () => {
+        expect(profileStaleNextAction({ staleAction: 'nudge' })).toContain('flywheel_profile');
+        expect(profileStaleNextAction({ staleAction: 'auto_refresh' })).toContain('auto_refresh');
+    });
+    it('shouldScheduleProfileAutoRefresh respects debounce', () => {
+        const state = {
+            ...createInitialState(),
+            profileStale: true,
+            lastProfileRefreshAt: new Date().toISOString(),
+        };
+        expect(shouldScheduleProfileAutoRefresh(state, { staleAction: 'auto_refresh', debounceSeconds: 300 })).toBe(false);
     });
 });
 //# sourceMappingURL=profile-staleness.test.js.map

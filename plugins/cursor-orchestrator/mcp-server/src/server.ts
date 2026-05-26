@@ -269,7 +269,8 @@ const PRIMARY_TOOLS = [
     description:
       'Audit a wave of closed beads for compliance with their acceptance criteria via the standalone /beads-compliance-and-completion-verification skill. ' +
       'Returns per-bead scores; reopens false-closed beads; bumps telemetry; persists scores to CASS. ' +
-      'Default mode is single-bead parallel (~5-10 min for 5 beads). Honors FW_COMPLIANCE_OVERRIDE env for emergency skip.',
+      'Cursor port: defers to Task + afterTask re-call (default). Legacy: spawns claude CLI when FW_COMPLIANCE_BACKEND=claude. ' +
+      'FW_COMPLIANCE_OVERRIDE: "1"/"true" skips all; comma-separated bead ids skip only those beads.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -294,7 +295,13 @@ const PRIMARY_TOOLS = [
         },
         skipEnv: {
           type: 'string',
-          description: 'Comma-separated bead IDs to skip; if any provided, audit is short-circuited',
+          description:
+            'Override list: "1"/"true" skips entire audit; comma-separated bead ids skip only those beads',
+        },
+        afterTask: {
+          type: 'boolean',
+          description:
+            'Cursor port: re-call after compliance Task completes — reads latest pass dir without spawning claude',
         },
       },
       required: ['cwd', 'beadIds'],
@@ -346,7 +353,12 @@ const PRIMARY_TOOLS = [
         confirmAction: {
           type: 'string',
           description:
-            'User AskQuestion selection — records steering and bumps coordinator epoch (E8). For looks-good-all, also closes every beadId in br. Re-call after user picks.',
+            'User AskQuestion selection — records steering and bumps coordinator epoch (E8). looks-good-all closes beads; fresh-eyes/self-review dispatch review (pass reviewBeadId for multi-bead waves). Re-call after user picks.',
+        },
+        reviewBeadId: {
+          type: 'string',
+          description:
+            'Bead to review when confirmAction is fresh-eyes or self-review and beadIds has more than one entry.',
         },
       },
       required: ['cwd', 'beadIds'],

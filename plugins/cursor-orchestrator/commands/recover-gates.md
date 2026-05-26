@@ -14,10 +14,10 @@ Parse `$ARGUMENTS`: bead ids; `--wrap-up-only` | `--review-only` | `--gates-only
 
 | action | Do |
 |--------|-----|
-| `looks-good-all` | `flywheel_review({ action: "looks-good", beadId })` per bead |
-| `self-review` | user gives one bead id → self-review path in `_review.md` |
-| `fresh-eyes` | user gives one bead id → `flywheel_review({ action: "hit-me", beadId })` |
-| `duel-review` | dueling review for risky beads |
+| `looks-good-all` | `flywheel_wave_review_gate({ confirmAction: "looks-good-all", beadIds })` — closes all beads |
+| `self-review` | `flywheel_wave_review_gate({ confirmAction: "self-review", beadIds, reviewBeadId? })` — follow `selfReviewPlaybook` |
+| `fresh-eyes` | `flywheel_wave_review_gate({ confirmAction: "fresh-eyes", beadIds, reviewBeadId? })` — spawn Tasks from `reviewOutcome` |
+| `duel-review` | `flywheel_wave_review_gate({ confirmAction: "duel-review", beadIds })` — follow `duelReviewPlaybook` |
 
 ## Wrap-up (unless `--review-only`)
 

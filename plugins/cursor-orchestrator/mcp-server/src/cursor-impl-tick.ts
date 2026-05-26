@@ -32,6 +32,7 @@ import { getCoordinatorEpoch, persistCoordinatorEpochBump } from './coordinator-
 import { areEpochGuardsEnabled, areNextActionHintsEnabled, loadFlywheelConfigWithWarnings } from './flywheel-config.js';
 import { buildNextActionHint } from './next-action-hint.js';
 import { probeProfileStale } from './profile-staleness.js';
+import { scheduleProfileAutoRefresh } from './tools/profile.js';
 import type { AdvanceWaveOutcome, AdvanceWavePrompt } from './tools/advance-wave.js';
 import { runAdvanceWave } from './tools/advance-wave.js';
 import { runReview } from './tools/review.js';
@@ -290,6 +291,7 @@ export async function runImplTickCore(
   const epochGuards = areEpochGuardsEnabled(cwd);
   const cfg = resolveImplTickConfig(cwd);
   const { config } = loadFlywheelConfigWithWarnings(cwd);
+  scheduleProfileAutoRefresh(ctx, config.profile);
   const tickAt = new Date().toISOString();
   state.lastImplTickAt = tickAt;
   await saveState(state);

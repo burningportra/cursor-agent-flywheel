@@ -177,4 +177,23 @@ export function clearProfileStaleFlags(state) {
         lastProfileRefreshAt: new Date().toISOString(),
     };
 }
+/** Hint text for observe / impl_tick when profile intent files drift. */
+export function profileStaleNextAction(config) {
+    if (config?.staleAction === 'auto_refresh') {
+        return 'profile auto_refresh scheduled — flywheel_observe refreshes in background when debounce allows';
+    }
+    return 'call flywheel_profile({ force: true }) to refresh';
+}
+/** Whether a debounced background refresh should run (auto_refresh mode only). */
+export function shouldScheduleProfileAutoRefresh(state, config) {
+    if (config?.staleAction !== 'auto_refresh')
+        return false;
+    if (!state.profileStale)
+        return false;
+    const debounceMs = (config.debounceSeconds ?? 60) * 1000;
+    const last = state.lastProfileRefreshAt ? Date.parse(state.lastProfileRefreshAt) : 0;
+    if (Number.isNaN(last))
+        return true;
+    return Date.now() - last >= debounceMs;
+}
 //# sourceMappingURL=profile-staleness.js.map

@@ -65,7 +65,7 @@ describe('runComplianceAudit', () => {
     expect(exec).not.toHaveBeenCalled();
   });
 
-  it('returns skipped when skipEnv argument is set', async () => {
+  it('returns skipped when skipEnv lists every bead in the wave', async () => {
     const exec = vi.fn();
     const result = await runComplianceAudit(stubCtx({ exec }), {
       cwd: '/tmp',
@@ -74,6 +74,19 @@ describe('runComplianceAudit', () => {
     });
     const data = (result.structuredContent as any).data;
     expect(data.status).toBe('skipped');
+    expect(exec).not.toHaveBeenCalled();
+  });
+
+  it('defers to Cursor Task by default (no claude spawn)', async () => {
+    delete process.env.FW_COMPLIANCE_BACKEND;
+    const exec = vi.fn();
+    const result = await runComplianceAudit(stubCtx({ exec }), {
+      cwd: '/tmp',
+      beadIds: ['agent-flywheel-001'],
+    });
+    const data = (result.structuredContent as any).data;
+    expect(data.kind).toBe('compliance_audit_deferred');
+    expect(data.complianceTask?.prompt).toContain('agent-flywheel-001');
     expect(exec).not.toHaveBeenCalled();
   });
 });
@@ -110,12 +123,14 @@ describe('runComplianceAudit - skill spawn + parse', () => {
   beforeEach(() => {
     delete process.env.FW_COMPLIANCE_OVERRIDE;
     delete process.env.FW_SESSION_ID;
+    process.env.FW_COMPLIANCE_BACKEND = 'claude';
     _resetTelemetryForTest();
     vi.mocked(storeComplianceScore).mockReset();
     tmp = mkdtempSync(join(tmpdir(), 'fw-comp-'));
   });
 
   afterEach(() => {
+    delete process.env.FW_COMPLIANCE_BACKEND;
     rmSync(tmp, { recursive: true, force: true });
   });
 
@@ -217,6 +232,7 @@ describe('runComplianceAudit - skill spawn + parse', () => {
     const result = await runComplianceAudit(stubCtx({ exec }), {
       cwd: tmp,
       beadIds: ['agent-flywheel-001', 'agent-flywheel-002'],
+      afterTask: true,
     });
 
     const data = (result.structuredContent as any).data;
@@ -682,6 +698,7 @@ describe('runComplianceAudit - skill spawn + parse', () => {
     const result = await runComplianceAudit(stubCtx({ exec }), {
       cwd: tmp,
       beadIds: ['agent-flywheel-001', 'agent-flywheel-002'],
+      afterTask: true,
     });
 
     const data = (result.structuredContent as any).data;
@@ -842,6 +859,7 @@ describe('runComplianceAudit - side effects', () => {
     const result = await runComplianceAudit(stubCtx({ exec }), {
       cwd: tmp,
       beadIds: ['agent-flywheel-001', 'agent-flywheel-002'],
+      afterTask: true,
     });
 
     const data = (result.structuredContent as any).data;
@@ -871,7 +889,7 @@ describe('runComplianceAudit - side effects', () => {
       stderr: '',
     }));
 
-    await runComplianceAudit(stubCtx({ exec }), { cwd: tmp, beadIds: ['agent-flywheel-001'] });
+    await runComplianceAudit(stubCtx({ exec }), { cwd: tmp, beadIds: ['agent-flywheel-001'], afterTask: true });
 
     const brCalls = exec.mock.calls.filter((call) => call[0] === 'br');
     expect(brCalls).toEqual([]);
@@ -889,6 +907,7 @@ describe('runComplianceAudit - side effects', () => {
     const result = await runComplianceAudit(stubCtx({ exec }), {
       cwd: tmp,
       beadIds: ['agent-flywheel-001', 'agent-flywheel-002'],
+      afterTask: true,
     });
 
     const data = (result.structuredContent as any).data;
@@ -937,6 +956,7 @@ describe('runComplianceAudit - side effects', () => {
     await runComplianceAudit(stubCtx({ exec }), {
       cwd: tmp,
       beadIds: ['agent-flywheel-001', 'agent-flywheel-002', 'agent-flywheel-003'],
+      afterTask: true,
     });
     await flushTelemetry({ cwd: tmp });
 
@@ -957,6 +977,7 @@ describe('runComplianceAudit - side effects', () => {
       cwd: tmp,
       beadIds: ['agent-flywheel-001', 'agent-flywheel-002'],
       threshold: 750,
+      afterTask: true,
     });
 
     expect(storeComplianceScore).toHaveBeenCalledTimes(2);

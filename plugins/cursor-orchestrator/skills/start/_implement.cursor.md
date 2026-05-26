@@ -74,7 +74,7 @@ Task({
 
 ### Wave end (queue drained)
 
-`flywheel_impl_tick` returns `wave_complete` → `flywheel_wave_review_gate` → **AskQuestion** → `flywheel_review` per outcome. Then `flywheel_wrap_up_gate` → `_wrapup.md`.
+`flywheel_impl_tick` returns `wave_complete` → `flywheel_wave_review_gate` → **AskQuestion** → re-call gate with `confirmAction` (+ `reviewBeadId` when needed). Then `flywheel_wrap_up_gate` → `_wrapup.md`.
 
 ### Coordinator duties
 

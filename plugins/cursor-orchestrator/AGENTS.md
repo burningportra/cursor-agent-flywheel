@@ -432,7 +432,7 @@ log.warn("something odd", { detail: value });
 log.error("failed", { err: String(err) });
 ```
 
-Log level is controlled by the `ORCH_LOG_LEVEL` env var (default: `"warn"`). Levels: `debug < info < warn < error`.
+Log level is controlled by the `FW_LOG_LEVEL` env var (default: `"warn"`). Levels: `debug < info < warn < error`.
 
 ## Testing
 

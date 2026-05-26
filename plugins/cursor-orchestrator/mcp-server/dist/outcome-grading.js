@@ -81,14 +81,25 @@ export const MIN_OUTCOME_ITERATIONS = 1;
 export const MAX_OUTCOME_ITERATIONS = 5;
 /** Fallback when `state.maxOutcomeIterations` is unset. Matches MA's documented default. */
 export const DEFAULT_OUTCOME_ITERATIONS = 3;
+/** Read optional env override (bounded [1,5]). Used when checkpoint omits maxOutcomeIterations. */
+export function resolveMaxOutcomeIterationsFromEnv() {
+    const raw = process.env.FW_MAX_OUTCOME_ITERATIONS?.trim();
+    if (!raw)
+        return undefined;
+    const n = Number.parseInt(raw, 10);
+    if (!Number.isFinite(n))
+        return undefined;
+    return Math.min(MAX_OUTCOME_ITERATIONS, Math.max(MIN_OUTCOME_ITERATIONS, n));
+}
 /**
  * Read the active iteration cap from session state, clamped to
- * `[MIN_OUTCOME_ITERATIONS, MAX_OUTCOME_ITERATIONS]`. Operators may set
- * `FW_MAX_OUTCOME_ITERATIONS` env to seed a different default at the call
- * site that writes to state (caller's responsibility).
+ * `[MIN_OUTCOME_ITERATIONS, MAX_OUTCOME_ITERATIONS]`. When checkpoint omits
+ * the field, falls back to `FW_MAX_OUTCOME_ITERATIONS` then default 3.
  */
 export function getMaxOutcomeIterations(state) {
-    const raw = state.maxOutcomeIterations ?? DEFAULT_OUTCOME_ITERATIONS;
+    const raw = state.maxOutcomeIterations ??
+        resolveMaxOutcomeIterationsFromEnv() ??
+        DEFAULT_OUTCOME_ITERATIONS;
     return Math.min(MAX_OUTCOME_ITERATIONS, Math.max(MIN_OUTCOME_ITERATIONS, raw));
 }
 // ─── RubricSchemaV1 ──────────────────────────────────────────────────────

@@ -238,5 +238,52 @@ describe('flywheel user gate tools', () => {
         expect(ctx.state.beadResults['tb-a']?.status).toBe('success');
         expect(ctx.state.beadResults['tb-b']?.status).toBe('success');
     });
+    it('confirmAction fresh-eyes dispatches hit-me review for single-bead wave', async () => {
+        const bead = makeBead('tb-9');
+        bead.status = 'in_progress';
+        const { ctx } = {
+            ctx: {
+                exec: createMockExec([
+                    {
+                        cmd: 'br',
+                        args: ['show', 'tb-9', '--json'],
+                        result: { code: 0, stdout: JSON.stringify(bead), stderr: '' },
+                    },
+                ]),
+                cwd: '/fake/project',
+                state: makeState({ phase: 'implementing' }),
+                saveState: (_s) => { },
+                clearState: () => { },
+            },
+        };
+        const result = await runWaveReviewGate(ctx, {
+            cwd: '/fake/project',
+            beadIds: ['tb-9'],
+            confirmAction: 'fresh-eyes',
+        });
+        const data = result.structuredContent.data;
+        expect(data.confirmAction).toBe('fresh-eyes');
+        expect(data.reviewBeadId).toBe('tb-9');
+        expect(data.reviewOutcome?.kind).toBe('review_tasks');
+        expect(data.reviewOutcome?.agentTasks?.length).toBe(5);
+    });
+    it('confirmAction self-review returns playbook for target bead', async () => {
+        const { ctx } = {
+            ctx: {
+                exec: createMockExec([]),
+                cwd: '/fake/project',
+                state: makeState({ phase: 'implementing' }),
+                saveState: (_s) => { },
+                clearState: () => { },
+            },
+        };
+        const result = await runWaveReviewGate(ctx, {
+            cwd: '/fake/project',
+            beadIds: ['tb-9'],
+            confirmAction: 'self-review',
+        });
+        const data = result.structuredContent.data;
+        expect(data.selfReviewPlaybook).toContain('tb-9');
+    });
 });
 //# sourceMappingURL=user-gate.test.js.map

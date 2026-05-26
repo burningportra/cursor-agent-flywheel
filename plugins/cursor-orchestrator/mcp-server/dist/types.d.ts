@@ -754,6 +754,8 @@ export interface WaveReviewGateArgs {
     beadIds: string[];
     /** User's AskQuestion selection — records steering and bumps coordinator epoch (E8). */
     confirmAction?: string;
+    /** Target bead for fresh-eyes / self-review when the wave has multiple beads. */
+    reviewBeadId?: string;
 }
 export interface WrapUpGateArgs {
     cwd: string;

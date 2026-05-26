@@ -27,7 +27,9 @@ export const CAPABILITIES_CONTRACT_VERSION = 1;
  */
 export const FLYWHEEL_ENV_VARS = {
     FW_ATTESTATION_REQUIRED: '"1" | "true" — when set, flywheel_advance_wave hard-blocks instead of warning when a closed bead lacks an attestation file.',
-    FW_COMPLIANCE_OVERRIDE: '"1" | "true" — bypass the compliance audit gate in flywheel_compliance_audit. Only used during emergencies; logged to telemetry.',
+    FW_COMPLIANCE_OVERRIDE: '"1" | "true" — skip the entire compliance audit. Comma-separated bead ids skip only those beads (audit runs on the rest). Emergency use only.',
+    FW_COMPLIANCE_BACKEND: '"cursor" (default in Cursor plugin) — defer to Task + afterTask re-call. "claude" — legacy claude -p skill spawn from MCP.',
+    FW_COMPLIANCE_MODEL: 'Cursor Task model for compliance audit (default opus-4.6).',
     FW_COMMIT_BATCH_THRESHOLD: 'Commits since last batch-review baseline before flywheel_impl_tick dispatches fresh-eyes review (0 = off). Overridden by checkpoint state.commitBatchThreshold when set. Also configurable via flywheel.config.yaml impl_tick.commit_batch_threshold.',
     FW_IMPL_TICK_INTERVAL_SECONDS: 'Seconds between coordinator flywheel_impl_tick calls (default 240). Overrides flywheel.config.yaml impl_tick.interval_seconds.',
     FW_IMPL_TICK_REVIEW_MODEL: 'Cursor Task model for commit-batch fresh-eyes review (default opus-4.6). Overrides impl_tick.review_model.',
@@ -48,7 +50,7 @@ export const FLYWHEEL_ENV_VARS = {
     FW_GRADER_MODEL_DEFAULT: 'Default grader model id used when FW_GRADER_MODEL is not set.',
     FW_GRADER_TIMEOUT_MS: 'Legacy CLI grader timeout in milliseconds. Default: 120000. Cursor port uses Task + graderStdout instead.',
     FW_LOG_LEVEL: '"debug" | "info" | "warn" | "error" — server log verbosity. Set to "debug" when triaging tool failures.',
-    FW_MAX_OUTCOME_ITERATIONS: 'Server-side cap on outcome-grading iterations per cycle. Read from state.maxOutcomeIterations only (default 3); env is not yet wired — set via checkpoint or flywheel_select.',
+    FW_MAX_OUTCOME_ITERATIONS: 'Cap on outcome-grading iterations per cycle (1–5, default 3). Used when checkpoint maxOutcomeIterations is unset.',
     FW_RUBRIC_SYNTH_TIMEOUT_MS: 'Per-call timeout for flywheel_synthesize_rubric. Default: 60000.',
     FW_SESSION_ID: 'Session id used for telemetry correlation; auto-generated if unset.',
     FW_SKILL_BUNDLE: 'Override path to the skills bundle used by flywheel_get_skill. When unset the server reads from the plugin install root.',

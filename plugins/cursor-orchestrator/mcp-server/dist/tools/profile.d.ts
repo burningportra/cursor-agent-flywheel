@@ -1,4 +1,10 @@
 import type { ToolContext, McpToolResult, ProfileArgs } from '../types.js';
+import { type FlywheelConfigProfile } from '../flywheel-config.js';
+/**
+ * Debounced background profile refresh when profile.staleAction is auto_refresh.
+ * Fire-and-forget — does not block the caller.
+ */
+export declare function scheduleProfileAutoRefresh(ctx: ToolContext, config?: FlywheelConfigProfile): void;
 /**
  * flywheel_profile — Scan the current repo and build a profile.
  *

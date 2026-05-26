@@ -6,8 +6,28 @@ import { runOpeningCeremony } from '../opening-ceremony.js';
 import { VERSION } from '../version.js';
 import { errMsg, makeFlywheelErrorResult } from '../errors.js';
 import { loadFlywheelConfig } from '../flywheel-config.js';
-import { applyProfileStalenessToState, checkProfileStaleness, clearProfileStaleFlags, registerProfileWatch, resolveDefaultWatchPaths, } from '../profile-staleness.js';
+import { applyProfileStalenessToState, checkProfileStaleness, clearProfileStaleFlags, registerProfileWatch, resolveDefaultWatchPaths, shouldScheduleProfileAutoRefresh, } from '../profile-staleness.js';
 const log = createLogger('profile');
+/**
+ * Debounced background profile refresh when profile.staleAction is auto_refresh.
+ * Fire-and-forget — does not block the caller.
+ */
+export function scheduleProfileAutoRefresh(ctx, config) {
+    if (!shouldScheduleProfileAutoRefresh(ctx.state, config))
+        return;
+    const { exec, cwd, state, saveState } = ctx;
+    void (async () => {
+        try {
+            const profile = await profileRepo(exec, cwd);
+            await saveCachedProfile(exec, cwd, profile);
+            Object.assign(state, registerProfileWatch(clearProfileStaleFlags({ ...state, repoProfile: profile }), cwd, resolveDefaultWatchPaths(state, cwd)));
+            await saveState(state);
+        }
+        catch (err) {
+            log.warn('profile auto_refresh failed', { err: errMsg(err) });
+        }
+    })();
+}
 /**
  * flywheel_profile — Scan the current repo and build a profile.
  *

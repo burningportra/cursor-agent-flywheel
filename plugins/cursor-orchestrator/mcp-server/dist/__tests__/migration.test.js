@@ -77,5 +77,18 @@ describe('v3.12.x → v3.13.0 checkpoint migration', () => {
         expect(getMaxOutcomeIterations({ maxOutcomeIterations: 4 })).toBe(4);
         expect(getMaxOutcomeIterations({})).toBe(DEFAULT_OUTCOME_ITERATIONS);
     });
+    it('getMaxOutcomeIterations reads FW_MAX_OUTCOME_ITERATIONS when state unset', () => {
+        const prev = process.env.FW_MAX_OUTCOME_ITERATIONS;
+        process.env.FW_MAX_OUTCOME_ITERATIONS = '4';
+        try {
+            expect(getMaxOutcomeIterations({})).toBe(4);
+        }
+        finally {
+            if (prev === undefined)
+                delete process.env.FW_MAX_OUTCOME_ITERATIONS;
+            else
+                process.env.FW_MAX_OUTCOME_ITERATIONS = prev;
+        }
+    });
 });
 //# sourceMappingURL=migration.test.js.map

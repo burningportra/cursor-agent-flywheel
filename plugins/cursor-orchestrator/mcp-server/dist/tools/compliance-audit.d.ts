@@ -10,6 +10,7 @@ export declare const ComplianceAuditArgsSchema: z.ZodObject<{
     threshold: z.ZodOptional<z.ZodNumber>;
     parallelism: z.ZodOptional<z.ZodNumber>;
     skipEnv: z.ZodOptional<z.ZodString>;
+    afterTask: z.ZodOptional<z.ZodBoolean>;
 }, z.core.$strip>;
 export type ComplianceAuditArgs = z.infer<typeof ComplianceAuditArgsSchema>;
 export interface ComplianceAuditOutcome {

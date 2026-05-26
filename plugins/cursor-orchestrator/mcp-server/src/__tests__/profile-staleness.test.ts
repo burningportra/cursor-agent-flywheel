@@ -10,7 +10,9 @@ import {
   hashFile,
   normalizeWatchPath,
   probeProfileStale,
+  profileStaleNextAction,
   registerProfileWatch,
+  shouldScheduleProfileAutoRefresh,
 } from '../profile-staleness.js';
 import { createInitialState } from '../types.js';
 import type { FlywheelState } from '../types.js';
@@ -131,5 +133,19 @@ describe('profile-staleness', () => {
     const debounced = checkProfileStaleness(cwd, state, { debounceSeconds: 300 }, { respectDebounce: true });
     expect(debounced.stale).toBe(true);
     expect(debounced.reason).toBe('drift: docs/plans/test-plan.md');
+  });
+
+  it('profileStaleNextAction differs for auto_refresh vs nudge', () => {
+    expect(profileStaleNextAction({ staleAction: 'nudge' })).toContain('flywheel_profile');
+    expect(profileStaleNextAction({ staleAction: 'auto_refresh' })).toContain('auto_refresh');
+  });
+
+  it('shouldScheduleProfileAutoRefresh respects debounce', () => {
+    const state: FlywheelState = {
+      ...createInitialState(),
+      profileStale: true,
+      lastProfileRefreshAt: new Date().toISOString(),
+    };
+    expect(shouldScheduleProfileAutoRefresh(state, { staleAction: 'auto_refresh', debounceSeconds: 300 })).toBe(false);
   });
 });

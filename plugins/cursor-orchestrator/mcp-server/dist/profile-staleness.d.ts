@@ -42,4 +42,8 @@ export declare function probeProfileStale(cwd: string, state: FlywheelState | un
 export declare function applyProfileStalenessToState(state: FlywheelState, result: ProfileStalenessResult): FlywheelState;
 /** Clear stale flags after a forced profile refresh. */
 export declare function clearProfileStaleFlags(state: FlywheelState): FlywheelState;
+/** Hint text for observe / impl_tick when profile intent files drift. */
+export declare function profileStaleNextAction(config?: FlywheelConfigProfile): string;
+/** Whether a debounced background refresh should run (auto_refresh mode only). */
+export declare function shouldScheduleProfileAutoRefresh(state: FlywheelState, config?: FlywheelConfigProfile): boolean;
 //# sourceMappingURL=profile-staleness.d.ts.map
