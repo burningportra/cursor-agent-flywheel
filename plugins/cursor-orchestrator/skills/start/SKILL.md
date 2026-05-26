@@ -33,4 +33,13 @@ Run the agent-flywheel for this project. `$ARGUMENTS` (optional: initial goal or
 3. When ceremony routes to scan/discover/goal → `start_discover` (not before).
 4. At Step 5+ boundaries → the matching `start_<phase>` skill only.
 
-Recover-gates / mid-loop: gate MCP + `start_review` or `start_wrapup` only — not ceremony or discover.
+## Recovery quick index (minimal context)
+
+| Situation | Slash | MCP | Skill (`flywheel_get_skill`) |
+|-----------|-------|-----|------------------------------|
+| Skipped wave review | `/recover-gates [ids]` | `flywheel_wave_review_gate` | `start_review` if spawning reviewers |
+| Skipped wrap-up | `/recover-gates --wrap-up-only` | `flywheel_wrap_up_gate` | `start_wrapup` after confirm |
+| Skipped __gates__ checklist | `/recover-gates --gates-only` | `flywheel_review` `__gates__` | `start_review` |
+| Skipped bead launch | `/flywheel-beads-review` | `flywheel_bead_approval_gate` | `_beads.cursor.md` via `start_beads` |
+
+Do **not** load `start_ceremony` or `start_discover` for any row above.

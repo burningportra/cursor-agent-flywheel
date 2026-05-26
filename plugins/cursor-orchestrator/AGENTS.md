@@ -14,6 +14,7 @@ When coordinating from **Cursor** (`program: "cursor"` in Agent Mail):
 | Bead approval gates | **`flywheel_bead_approval_gate`** — after `br create`: review / score / polish / launch **AskQuestion** menus ([`_beads.cursor.md`](skills/start/_beads.cursor.md), slash: **`/flywheel-beads-review`**) |
 | Impl supervision | **`flywheel_impl_tick`** — ~4 min loop: commits → fresh-eyes Task → beads → next wave ([`_implement.cursor.md`](skills/start/_implement.cursor.md)) |
 | Resume in-flight beads | [`commands/flywheel-resume.md`](commands/flywheel-resume.md) — not `_inflight_prompt.md` |
+| Post-implement gate recovery | **`/recover-gates`** — [`commands/recover-gates.md`](commands/recover-gates.md); full playbook [`flywheel-recover-gates.md`](commands/flywheel-recover-gates.md) |
 | Context budget | [`rules/context-budget.mdc`](rules/context-budget.mdc) — `observe` → `start_ceremony` → phase skills one at a time |
 
 **NTM / tmux / Codex CLI** are **opt-in** only: set `FW_IMPL_BACKEND=ntm` or `FW_DUEL_BACKEND=ntm` and read `skills/legacy/ntm/*` from disk. Do not treat NTM as the default in this plugin.
