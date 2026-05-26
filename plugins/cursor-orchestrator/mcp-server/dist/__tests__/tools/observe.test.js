@@ -13,7 +13,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync, } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { runObserve, FlywheelObserveReportSchema, _resetDoctorCache, } from '../../tools/observe.js';
+import { runObserve, FlywheelObserveReportSchema, _resetDoctorCache, shouldEmitPendingGateHint, PENDING_GATE_HINT_MAX_CHARS, } from '../../tools/observe.js';
 import { TOOLS, createCallToolHandler } from '../../server.js';
 import { createInitialState } from '../../types.js';
 // Mock writeCheckpoint so we can assert observe never mutates it.
@@ -54,6 +54,22 @@ function gracefulDegradeStubs() {
     return [
         { match: (cmd) => cmd === 'git', respond: { code: 1, stdout: '', stderr: 'not a repo' } },
         { match: (cmd) => cmd === 'br', respond: { code: 1, stdout: '', stderr: 'br not installed' } },
+        { match: (cmd) => cmd === 'curl', respond: { code: 7, stdout: '', stderr: 'connect refused' } },
+        { match: (cmd) => cmd === 'which', respond: { code: 1, stdout: '', stderr: '' } },
+    ];
+}
+/** br list/ready succeed with an empty bead set — beads probe initialized. */
+function beadsAvailableStubs() {
+    return [
+        { match: (cmd) => cmd === 'git', respond: { code: 1, stdout: '', stderr: 'not a repo' } },
+        {
+            match: (cmd, args) => cmd === 'br' && args[0] === 'list',
+            respond: ok('[]'),
+        },
+        {
+            match: (cmd, args) => cmd === 'br' && args[0] === 'ready',
+            respond: ok('[]'),
+        },
         { match: (cmd) => cmd === 'curl', respond: { code: 7, stdout: '', stderr: 'connect refused' } },
         { match: (cmd) => cmd === 'which', respond: { code: 1, stdout: '', stderr: '' } },
     ];
@@ -338,12 +354,14 @@ describe('flywheel_observe — hard rules', () => {
 import { computeStateHash } from '../../checkpoint.js';
 import { registerProfileWatch } from '../../profile-staleness.js';
 function writeCheckpointFixture(cwd, activeBeadIds) {
-    mkdirSync(join(cwd, '.pi-flywheel'), { recursive: true });
-    const state = {
+    writeCheckpointStateFixture(cwd, {
         ...createInitialState(),
         phase: 'implementing',
         activeBeadIds,
-    };
+    });
+}
+function writeCheckpointStateFixture(cwd, state) {
+    mkdirSync(join(cwd, '.pi-flywheel'), { recursive: true });
     const envelope = {
         schemaVersion: 1,
         writtenAt: new Date().toISOString(),
@@ -353,6 +371,14 @@ function writeCheckpointFixture(cwd, activeBeadIds) {
         stateHash: computeStateHash(state),
     };
     writeFileSync(join(cwd, '.pi-flywheel', 'checkpoint.json'), JSON.stringify(envelope, null, 2));
+}
+function steeringEvent(source, actionId) {
+    return {
+        at: new Date().toISOString(),
+        source,
+        actionId,
+        normalizedKey: `${source}:${actionId}`,
+    };
 }
 function writeAttestationFixture(cwd, beadId, createdAt) {
     mkdirSync(join(cwd, '.pi-flywheel', 'completion'), { recursive: true });
@@ -488,6 +514,127 @@ describe('flywheel_observe — profile intent staleness', () => {
         finally {
             cleanup(cwd);
         }
+    });
+});
+describe('flywheel_observe — pending gate hint (recover-gates P5)', () => {
+    function pendingGateState(overrides = {}) {
+        return {
+            ...createInitialState(),
+            phase: 'implementing',
+            beadResults: {
+                'bead-a': {
+                    beadId: 'bead-a',
+                    status: 'success',
+                    summary: 'done',
+                },
+            },
+            ...overrides,
+        };
+    }
+    it('emits warn pending-gate hint when successful beads lack recent gate steering', async () => {
+        const cwd = makeTmpCwd();
+        try {
+            writeCheckpointStateFixture(cwd, pendingGateState());
+            const exec = makeStubbedExec(beadsAvailableStubs());
+            const result = await runObserve(makeCtx(cwd, exec), { cwd });
+            const sc = result.structuredContent;
+            expect(result.isError).toBeFalsy();
+            expect(sc.data.report.beads.unavailable).toBeUndefined();
+            const hint = sc.data.report.hints.find((h) => h.message.includes('flywheel_wave_review_gate'));
+            expect(hint).toMatchObject({
+                severity: 'warn',
+                nextAction: 'flywheel_wave_review_gate({ cwd, beadIds: [...] })',
+            });
+            expect(hint.message.length).toBeLessThanOrEqual(PENDING_GATE_HINT_MAX_CHARS);
+        }
+        finally {
+            cleanup(cwd);
+        }
+    });
+    it('suppresses pending-gate hint when recent wave_review steering exists', async () => {
+        const cwd = makeTmpCwd();
+        try {
+            writeCheckpointStateFixture(cwd, pendingGateState({
+                steeringEvents: [steeringEvent('wave_review', 'looks-good-all')],
+            }));
+            const exec = makeStubbedExec(gracefulDegradeStubs());
+            const result = await runObserve(makeCtx(cwd, exec), { cwd });
+            const sc = result.structuredContent;
+            const hint = sc.data.report.hints.find((h) => h.message.includes('flywheel_wave_review_gate'));
+            expect(hint).toBeUndefined();
+        }
+        finally {
+            cleanup(cwd);
+        }
+    });
+    it('suppresses pending-gate hint when recent wrap_up steering exists', async () => {
+        const cwd = makeTmpCwd();
+        try {
+            writeCheckpointStateFixture(cwd, pendingGateState({
+                steeringEvents: [steeringEvent('wrap_up', 'wrap-up-skip')],
+            }));
+            const exec = makeStubbedExec(gracefulDegradeStubs());
+            const result = await runObserve(makeCtx(cwd, exec), { cwd });
+            const sc = result.structuredContent;
+            const hint = sc.data.report.hints.find((h) => h.message.includes('flywheel_wave_review_gate'));
+            expect(hint).toBeUndefined();
+        }
+        finally {
+            cleanup(cwd);
+        }
+    });
+    it('suppresses pending-gate hint when wrapUpConfirmed is true', async () => {
+        const cwd = makeTmpCwd();
+        try {
+            writeCheckpointStateFixture(cwd, pendingGateState({ wrapUpConfirmed: true }));
+            const exec = makeStubbedExec(gracefulDegradeStubs());
+            const result = await runObserve(makeCtx(cwd, exec), { cwd });
+            const sc = result.structuredContent;
+            const hint = sc.data.report.hints.find((h) => h.message.includes('flywheel_wave_review_gate'));
+            expect(hint).toBeUndefined();
+        }
+        finally {
+            cleanup(cwd);
+        }
+    });
+    it('suppresses pending-gate hint when br is unavailable', async () => {
+        const cwd = makeTmpCwd();
+        try {
+            writeCheckpointStateFixture(cwd, pendingGateState());
+            const exec = makeStubbedExec(gracefulDegradeStubs());
+            const result = await runObserve(makeCtx(cwd, exec), { cwd });
+            const sc = result.structuredContent;
+            expect(result.isError).toBeFalsy();
+            expect(sc.data.report.beads.unavailable).toBe(true);
+            const hint = sc.data.report.hints.find((h) => h.message.includes('flywheel_wave_review_gate'));
+            expect(hint).toBeUndefined();
+            expect(shouldEmitPendingGateHint(pendingGateState(), { beadsUnavailable: true })).toBe(false);
+        }
+        finally {
+            cleanup(cwd);
+        }
+    });
+    it('only inspects the last three steering events for suppression', () => {
+        const state = pendingGateState({
+            steeringEvents: [
+                steeringEvent('wave_review', 'looks-good-all'),
+                steeringEvent('bead_launch', 'launch'),
+                steeringEvent('bead_launch', 'launch-2'),
+                steeringEvent('bead_launch', 'launch-3'),
+            ],
+        });
+        expect(shouldEmitPendingGateHint(state)).toBe(true);
+    });
+    it('accepts legacy closed beadResults as successful', () => {
+        expect(shouldEmitPendingGateHint(pendingGateState({
+            beadResults: {
+                'bead-closed': {
+                    beadId: 'bead-closed',
+                    status: 'closed',
+                    summary: 'legacy',
+                },
+            },
+        }))).toBe(true);
     });
 });
 //# sourceMappingURL=observe.test.js.map

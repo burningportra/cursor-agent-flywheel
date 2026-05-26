@@ -29,6 +29,7 @@ import { ConvergenceStateSchema } from '../convergence.js';
 import { readConvergenceFromDisk, planSlugFromIdentifier, } from './convergence-tool.js';
 import { loadFlywheelConfig } from '../flywheel-config.js';
 import { probeProfileStale, profileStaleNextAction } from '../profile-staleness.js';
+import { STEERING_SUPPRESS_WINDOW } from '../steering-events.js';
 const log = createLogger('observe');
 // ─── Constants ────────────────────────────────────────────────────────────
 /** Per-probe timeout budget. Keeps the tool inside the 1.5s wall-clock target. */
@@ -41,6 +42,16 @@ const ARTIFACT_HARD_CAP = 50;
 const ATTESTATION_STALE_MS = 24 * 60 * 60 * 1000;
 /** Hard cap on attestation probes so a runaway activeBeadIds list can't blow the budget. */
 const ATTESTATION_PROBE_CAP = 50;
+/** Pending-gate observe hint max message length (recover-gates P5). */
+export const PENDING_GATE_HINT_MAX_CHARS = 120;
+const PENDING_GATE_PHASES = new Set([
+    'implementing',
+    'iterating',
+]);
+const PENDING_GATE_STEERING_SOURCES = new Set([
+    'wave_review',
+    'wrap_up',
+]);
 // ─── Schema ───────────────────────────────────────────────────────────────
 const SeveritySchema = z.enum(['info', 'warn', 'red']);
 const HintSchema = z.object({
@@ -519,7 +530,47 @@ async function getCachedOrFreshDoctor(ctx, now) {
     }
 }
 // ─── Hints derivation ─────────────────────────────────────────────────────
-function deriveHints(report, profileStale, profileConfig) {
+function isSuccessfulBeadResultStatus(status) {
+    return status === 'success' || status === 'closed';
+}
+function countSuccessfulBeadResults(state) {
+    return Object.values(state.beadResults ?? {}).filter((result) => isSuccessfulBeadResultStatus(result.status)).length;
+}
+function hasRecentGateSteering(state) {
+    const tail = (state.steeringEvents ?? []).slice(-STEERING_SUPPRESS_WINDOW);
+    return tail.some((event) => PENDING_GATE_STEERING_SOURCES.has(event.source));
+}
+/** recover-gates P5 — pending wave-review / wrap-up gate nudge for recovery agents. */
+export function shouldEmitPendingGateHint(state, opts) {
+    if (!state || opts?.beadsUnavailable)
+        return false;
+    if (!PENDING_GATE_PHASES.has(state.phase))
+        return false;
+    if (state.wrapUpConfirmed)
+        return false;
+    if (countSuccessfulBeadResults(state) === 0)
+        return false;
+    if (hasRecentGateSteering(state))
+        return false;
+    return true;
+}
+function truncatePendingGateHintMessage(message) {
+    if (message.length <= PENDING_GATE_HINT_MAX_CHARS)
+        return message;
+    return `${message.slice(0, PENDING_GATE_HINT_MAX_CHARS - 1)}…`;
+}
+function buildPendingGateHint(state) {
+    const successCount = countSuccessfulBeadResults(state);
+    const message = truncatePendingGateHintMessage(successCount === 1
+        ? '1 bead done — run flywheel_wave_review_gate before wrap-up.'
+        : `${successCount} beads done — run flywheel_wave_review_gate before wrap-up.`);
+    return {
+        severity: 'warn',
+        message,
+        nextAction: 'flywheel_wave_review_gate({ cwd, beadIds: [...] })',
+    };
+}
+function deriveHints(report, profileStale, profileConfig, checkpointState) {
     const hints = [];
     if (profileStale?.stale) {
         hints.push({
@@ -604,6 +655,11 @@ function deriveHints(report, profileStale, profileConfig) {
             message: `attestation for ${id} failed schema validation`,
             nextAction: 'rewrite .pi-flywheel/completion/' + id + '.json against CompletionReportSchemaV1',
         });
+    }
+    if (shouldEmitPendingGateHint(checkpointState, {
+        beadsUnavailable: report.beads.unavailable,
+    })) {
+        hints.push(buildPendingGateHint(checkpointState));
     }
     return hints;
 }
@@ -729,7 +785,10 @@ export async function runObserve(ctx, args) {
             convergence,
             convergenceGated,
         };
-        const hints = [...deriveHints(partial, profileStaleStatus, config?.profile), ...convergenceHints];
+        const hints = [
+            ...deriveHints(partial, profileStaleStatus, config?.profile, ckptResult?.envelope.state),
+            ...convergenceHints,
+        ];
         const report = { ...partial, hints };
         const validated = FlywheelObserveReportSchema.safeParse(report);
         if (!validated.success) {

@@ -16,7 +16,9 @@
  *      `unavailable: true` rather than failing the whole call.
  */
 import { z } from 'zod';
-import type { McpToolResult, ToolContext } from '../types.js';
+import type { FlywheelState, McpToolResult, ToolContext } from '../types.js';
+/** Pending-gate observe hint max message length (recover-gates P5). */
+export declare const PENDING_GATE_HINT_MAX_CHARS = 120;
 declare const HintSchema: z.ZodObject<{
     severity: z.ZodEnum<{
         info: "info";
@@ -161,6 +163,10 @@ export type FlywheelObserveReport = z.infer<typeof FlywheelObserveReportSchema>;
 export type ObserveHint = z.infer<typeof HintSchema>;
 /** Test/internal hook — flush the cache. Not exported via the tool envelope. */
 export declare function _resetDoctorCache(): void;
+/** recover-gates P5 — pending wave-review / wrap-up gate nudge for recovery agents. */
+export declare function shouldEmitPendingGateHint(state: FlywheelState | undefined, opts?: {
+    beadsUnavailable?: boolean;
+}): boolean;
 export interface ObserveArgs {
     cwd: string;
 }

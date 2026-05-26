@@ -34,9 +34,12 @@ import {
 } from './convergence-tool.js';
 import { loadFlywheelConfig } from '../flywheel-config.js';
 import { probeProfileStale, profileStaleNextAction } from '../profile-staleness.js';
+import { STEERING_SUPPRESS_WINDOW } from '../steering-events.js';
 import type {
   DoctorReport,
+  FlywheelState,
   McpToolResult,
+  SteeringEventSource,
   ToolContext,
 } from '../types.js';
 
@@ -54,6 +57,16 @@ const ARTIFACT_HARD_CAP = 50;
 const ATTESTATION_STALE_MS = 24 * 60 * 60 * 1000;
 /** Hard cap on attestation probes so a runaway activeBeadIds list can't blow the budget. */
 const ATTESTATION_PROBE_CAP = 50;
+/** Pending-gate observe hint max message length (recover-gates P5). */
+export const PENDING_GATE_HINT_MAX_CHARS = 120;
+const PENDING_GATE_PHASES = new Set<FlywheelState['phase']>([
+  'implementing',
+  'iterating',
+]);
+const PENDING_GATE_STEERING_SOURCES = new Set<SteeringEventSource>([
+  'wave_review',
+  'wrap_up',
+]);
 
 // ─── Schema ───────────────────────────────────────────────────────────────
 
@@ -613,10 +626,58 @@ async function getCachedOrFreshDoctor(
 
 // ─── Hints derivation ─────────────────────────────────────────────────────
 
+function isSuccessfulBeadResultStatus(status: unknown): boolean {
+  return status === 'success' || status === 'closed';
+}
+
+function countSuccessfulBeadResults(state: FlywheelState): number {
+  return Object.values(state.beadResults ?? {}).filter((result) =>
+    isSuccessfulBeadResultStatus(result.status),
+  ).length;
+}
+
+function hasRecentGateSteering(state: FlywheelState): boolean {
+  const tail = (state.steeringEvents ?? []).slice(-STEERING_SUPPRESS_WINDOW);
+  return tail.some((event) => PENDING_GATE_STEERING_SOURCES.has(event.source));
+}
+
+/** recover-gates P5 — pending wave-review / wrap-up gate nudge for recovery agents. */
+export function shouldEmitPendingGateHint(
+  state: FlywheelState | undefined,
+  opts?: { beadsUnavailable?: boolean },
+): boolean {
+  if (!state || opts?.beadsUnavailable) return false;
+  if (!PENDING_GATE_PHASES.has(state.phase)) return false;
+  if (state.wrapUpConfirmed) return false;
+  if (countSuccessfulBeadResults(state) === 0) return false;
+  if (hasRecentGateSteering(state)) return false;
+  return true;
+}
+
+function truncatePendingGateHintMessage(message: string): string {
+  if (message.length <= PENDING_GATE_HINT_MAX_CHARS) return message;
+  return `${message.slice(0, PENDING_GATE_HINT_MAX_CHARS - 1)}…`;
+}
+
+function buildPendingGateHint(state: FlywheelState): ObserveHint {
+  const successCount = countSuccessfulBeadResults(state);
+  const message = truncatePendingGateHintMessage(
+    successCount === 1
+      ? '1 bead done — run flywheel_wave_review_gate before wrap-up.'
+      : `${successCount} beads done — run flywheel_wave_review_gate before wrap-up.`,
+  );
+  return {
+    severity: 'warn',
+    message,
+    nextAction: 'flywheel_wave_review_gate({ cwd, beadIds: [...] })',
+  };
+}
+
 function deriveHints(
   report: Omit<FlywheelObserveReport, 'hints'>,
   profileStale?: { stale: boolean; reason?: string },
   profileConfig?: import('../flywheel-config.js').FlywheelConfigProfile,
+  checkpointState?: FlywheelState,
 ): ObserveHint[] {
   const hints: ObserveHint[] = [];
 
@@ -710,6 +771,14 @@ function deriveHints(
       message: `attestation for ${id} failed schema validation`,
       nextAction: 'rewrite .pi-flywheel/completion/' + id + '.json against CompletionReportSchemaV1',
     });
+  }
+
+  if (
+    shouldEmitPendingGateHint(checkpointState, {
+      beadsUnavailable: report.beads.unavailable,
+    })
+  ) {
+    hints.push(buildPendingGateHint(checkpointState!));
   }
 
   return hints;
@@ -881,7 +950,15 @@ export async function runObserve(
       convergence,
       convergenceGated,
     };
-    const hints = [...deriveHints(partial, profileStaleStatus, config?.profile), ...convergenceHints];
+    const hints = [
+      ...deriveHints(
+        partial,
+        profileStaleStatus,
+        config?.profile,
+        ckptResult?.envelope.state,
+      ),
+      ...convergenceHints,
+    ];
     const report: FlywheelObserveReport = { ...partial, hints };
 
     const validated = FlywheelObserveReportSchema.safeParse(report);
