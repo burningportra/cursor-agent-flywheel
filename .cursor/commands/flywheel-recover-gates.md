@@ -12,6 +12,8 @@ argument-hint: "[bead-id ...] [--wrap-up-only] [--review-only] [--gates-only]"
 - `--review-only` → call `flywheel_wave_review_gate` only (no wrap-up this turn).
 - `--gates-only` → call `flywheel_review` with `beadId="__gates__"` (guided review gates after all beads closed — different from wave review).
 
+**Mutually exclusive flags:** `--gates-only` and `--wrap-up-only` cannot combine. If `$ARGUMENTS` contains both, stop and surface: "These flags target different gates; pick one and re-invoke."
+
 Default `cwd` = workspace root (absolute path for MCP).
 
 ## Step 1: Snapshot context
@@ -61,8 +63,6 @@ flywheel_review({ cwd, beadId: "__gates__", action: "looks-good" })
 
 Repeat until the tool returns `review_gates_complete` with `nextStep.kind: "wrap_up_gate"`, or the user chooses `hit-me` / `skip` per tool text.
 
-Do **not** combine `--gates-only` with `--wrap-up-only` in one invocation.
-
 ## Step 5: Wrap-up gate (Step 9.5) — unless `--review-only`
 
 Skip when `--review-only`.
@@ -92,6 +92,21 @@ If neither flag is set, run in order **when each precondition holds**:
 | Checkpoint shows review gates incomplete | Offer `--gates-only` or run Step 4 if user confirms |
 
 Prefer **one gate per user message** unless they ask for the full chain in one go.
+
+## On error
+
+| Code | Cause | Recovery |
+|------|-------|----------|
+| `invalid_input` | `beadIds` empty / `confirmAction` typo / extra args | Re-call with corrected args; do not retry blindly |
+| `unsupported_action` | `confirmAction` not in {looks-good-all, self-review, fresh-eyes, duel-review} | Surface to user; map only via `data.actions` |
+| `not_found` | A bead id no longer exists in `br list` | Drop it; re-call with remaining; do not bump epoch |
+| `cli_failure` | `br update --status closed` failed mid-loop | Read `partiallyClosed: string[]`; resume with remaining |
+| `wave_review_bead_pick_required` | Multi-bead self/fresh-eyes without `reviewBeadId` | Forward `nextAskQuestion` via AskQuestion; re-call with `reviewBeadId` |
+| `idempotentReplay: true` | Duplicate confirm | Report "already resolved"; do **not** re-spawn reviewers |
+| `wrap_up_already_confirmed` | Wrap-up choice already recorded | Surface state; load `start_wrapup` only if user asks for details |
+| `recoverySource: "manual_required"` / `confidence: "degraded"` | Resolver could not infer | Ask user to paste bead ids; never auto-select stale candidates |
+
+**Mutually exclusive flags:** `--gates-only` and `--wrap-up-only` cannot combine.
 
 ## Recovery one-liner (for the user)
 
