@@ -12,6 +12,7 @@ import {
   RECOVER_BEAD_SCAN_TIMEOUT_MS,
   RECOVER_CANDIDATE_CAP,
   RECOVER_CHECKPOINT_STALE_MS,
+  RECOVER_WARNING_CAP,
   classifyCheckpointTrust,
   degradeToManual,
   extractCheckpointCandidateIds,
@@ -160,14 +161,29 @@ describe("recover-gates", () => {
     });
   });
 
+  describe("load-degradation caps", () => {
+    it("exports RECOVER_* constants at the observe budget", () => {
+      expect(RECOVER_BEAD_SCAN_TIMEOUT_MS).toBe(1500);
+      expect(RECOVER_CANDIDATE_CAP).toBe(25);
+      expect(RECOVER_WARNING_CAP).toBe(5);
+    });
+  });
+
   describe("degradeToManual", () => {
     it("returns manual_required with capped warnings and nextAction", () => {
       const warnings = Array.from({ length: 8 }, (_, i) => `warn-${i}`);
-      const result = degradeToManual(warnings, { warningCap: 5 });
+      const result = degradeToManual(warnings, { warningCap: RECOVER_WARNING_CAP });
       expect(result.source).toBe("manual_required");
       expect(result.confidence).toBe("degraded");
-      expect(result.warnings.length).toBeLessThanOrEqual(6);
+      expect(result.warnings).toHaveLength(RECOVER_WARNING_CAP + 1);
+      expect(result.warnings.at(-1)).toContain("warnings truncated");
       expect(result.nextAction?.type).toBe("ask_for_bead_ids");
+    });
+
+    it("defaults warning cap to RECOVER_WARNING_CAP", () => {
+      const warnings = Array.from({ length: 8 }, (_, i) => `warn-${i}`);
+      const result = degradeToManual(warnings);
+      expect(result.warnings).toHaveLength(RECOVER_WARNING_CAP + 1);
     });
   });
 
@@ -203,6 +219,23 @@ describe("recover-gates", () => {
       const result = await pending;
       expect(result.beadIds).toEqual([]);
       expect(result.warnings.some((w) => w.includes("Could not read beads"))).toBe(true);
+    });
+
+    it("defaults timeout and cap to RECOVER_* constants", async () => {
+      const beads = Array.from({ length: 30 }, (_, i) =>
+        makeBead(`tb-default-${i}`, "closed"),
+      );
+      const ctx = makeCtx([
+        {
+          cmd: "br",
+          args: BR_LIST_ARGS,
+          result: { code: 0, stdout: JSON.stringify({ issues: beads }), stderr: "" },
+        },
+      ]);
+
+      const result = await scanBeadCandidates(ctx);
+      expect(result.beadIds).toHaveLength(RECOVER_CANDIDATE_CAP);
+      expect(result.truncated).toBe(true);
     });
   });
 
@@ -334,6 +367,66 @@ describe("recover-gates", () => {
       expect(result.confidence).toBe("degraded");
       expect(result.beadIds).toEqual([]);
       expect(result.nextAction?.type).toBe("ask_for_bead_ids");
+    });
+
+    it("caps bead_scan candidates at RECOVER_CANDIDATE_CAP via resolveRecoveryContext", async () => {
+      tempDir = mkdtempSync(join(tmpdir(), "recover-gates-scan-cap-"));
+      const beads = Array.from({ length: 30 }, (_, i) =>
+        makeBead(`tb-cap-${i}`, "closed"),
+      );
+      const ctx = makeCtx(
+        [
+          {
+            cmd: "br",
+            args: BR_LIST_ARGS,
+            result: { code: 0, stdout: JSON.stringify({ issues: beads }), stderr: "" },
+          },
+          {
+            cmd: "git",
+            args: ["rev-parse", "HEAD"],
+            result: { code: 0, stdout: "abc\n", stderr: "" },
+          },
+        ],
+        {},
+        tempDir,
+      );
+
+      const result = await resolveRecoveryContext(ctx, { beadIds: [] });
+      expect(result.source).toBe("bead_scan");
+      expect(result.beadIds).toHaveLength(RECOVER_CANDIDATE_CAP);
+      expect(result.truncated).toBe(true);
+      expect(result.warnings.some((w) => w.includes("truncated"))).toBe(true);
+    });
+
+    it("caps resolveRecoveryContext warnings at RECOVER_WARNING_CAP", async () => {
+      tempDir = mkdtempSync(join(tmpdir(), "recover-gates-warn-cap-"));
+      const dir = join(tempDir, CHECKPOINT_DIR);
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(join(dir, CHECKPOINT_FILE), "{not-json", "utf8");
+
+      const ctx = makeCtx(
+        [
+          {
+            cmd: "br",
+            args: BR_LIST_ARGS,
+            result: { code: 1, stdout: "", stderr: "br down" },
+          },
+          {
+            cmd: "git",
+            args: ["rev-parse", "HEAD"],
+            result: { code: 1, stdout: "", stderr: "not a repo" },
+          },
+        ],
+        {},
+        tempDir,
+      );
+
+      const result = await resolveRecoveryContext(ctx, { beadIds: [] });
+      expect(result.source).toBe("manual_required");
+      expect(result.warnings.length).toBeLessThanOrEqual(RECOVER_WARNING_CAP + 1);
+      if (result.warnings.length === RECOVER_WARNING_CAP + 1) {
+        expect(result.warnings.at(-1)).toContain("warnings truncated");
+      }
     });
   });
 });
