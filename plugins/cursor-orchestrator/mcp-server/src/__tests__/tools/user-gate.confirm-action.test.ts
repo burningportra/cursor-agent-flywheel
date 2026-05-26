@@ -74,6 +74,16 @@ function execCallsForWave(n: number, action: string): ExecCall[] {
     return calls;
   }
 
+  if ((action === 'fresh-eyes' || action === 'self-review') && n > 1) {
+    const beads = ids.map((id) => makeBead(id));
+    calls.push({
+      cmd: 'br',
+      args: BR_LIST_ARGS,
+      result: { code: 0, stdout: JSON.stringify({ issues: beads }), stderr: '' },
+    });
+    return calls;
+  }
+
   return calls;
 }
 
@@ -101,10 +111,10 @@ describe.each([
   ['looks-good-all', 3, 'wave_review_confirmed'],
   ['fresh-eyes', 0, 'invalid_input'],
   ['fresh-eyes', 1, 'wave_review_confirmed'],
-  ['fresh-eyes', 3, 'invalid_input'],
+  ['fresh-eyes', 3, 'wave_review_bead_pick_required'],
   ['self-review', 0, 'invalid_input'],
   ['self-review', 1, 'wave_review_confirmed'],
-  ['self-review', 3, 'invalid_input'],
+  ['self-review', 3, 'wave_review_bead_pick_required'],
   ['duel-review', 0, 'invalid_input'],
   ['duel-review', 1, 'wave_review_confirmed'],
   ['duel-review', 3, 'wave_review_confirmed'],
@@ -141,6 +151,12 @@ describe.each([
     const data = (result.structuredContent as { data: Record<string, unknown> }).data;
     expect(data.kind).toBe(expectedKind);
     expect(data.confirmAction).toBe(action);
+    if (expectedKind === 'wave_review_bead_pick_required') {
+      expect(data.coordinatorEpoch).toBe(initialEpoch);
+      expect(data.nextAskQuestion).toBeDefined();
+      expect(ctx.state.steeringEvents ?? []).toHaveLength(0);
+      return;
+    }
     expect(data.coordinatorEpoch).toBe(initialEpoch + 1);
   });
 });

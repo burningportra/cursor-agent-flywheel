@@ -4,7 +4,7 @@ import { appendGateResolution, deriveGateResolutionKey, findReplay, } from "../g
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
 import { readBeads } from "../beads.js";
-import { buildBeadCoverageGate, buildBeadDedupGate, buildBeadHotspotGate, buildBeadLaunchGate, buildBeadLowQualityGate, buildBeadReviewGate, buildWaveReviewGate, buildWrapUpAlreadyConfirmedPayload, buildWrapUpGate, toCompactGatePayload, WRAP_UP_ALREADY_CONFIRMED_FORCE_HINT, isRiskyBead, } from "../cursor-user-gates.js";
+import { buildBeadCoverageGate, buildBeadDedupGate, buildBeadHotspotGate, buildBeadLaunchGate, buildBeadLowQualityGate, buildBeadReviewGate, buildWaveReviewGate, buildWaveReviewBeadPickGate, buildAskQuestionFromGate, buildWrapUpAlreadyConfirmedPayload, buildWrapUpGate, toCompactGatePayload, WRAP_UP_ALREADY_CONFIRMED_FORCE_HINT, isRiskyBead, } from "../cursor-user-gates.js";
 import { computeBeadApprovalMetrics, formatQualityLine, loadOpenBeadsForGate, } from "../bead-approval-metrics.js";
 import { makeOkToolResult, makeToolError } from "./shared.js";
 import { acceptWaveBeadsAtReview, runReview } from "./review.js";
@@ -263,6 +263,23 @@ async function handleSelfReview(ctx, args, resolutionKey, reviewBeadId) {
         ].join("\n"),
     });
 }
+function buildWaveReviewBeadPickResult(ctx, args, beads) {
+    const { state } = ctx;
+    const { confirmAction, beadIds } = args;
+    const gate = buildWaveReviewBeadPickGate(beads, confirmAction);
+    const epoch = getCoordinatorEpoch(state);
+    return makeOkToolResult("flywheel_wave_review_gate", state.phase, [
+        "flywheel_wave_review_gate: wave_review_bead_pick_required",
+        `confirmAction=${confirmAction} | beads=${beadIds.length}`,
+        "AskQuestion(nextAskQuestion) → re-call confirm with reviewBeadId from selection.",
+    ].join("\n"), {
+        kind: "wave_review_bead_pick_required",
+        confirmAction,
+        beadIds,
+        nextAskQuestion: buildAskQuestionFromGate(gate),
+        coordinatorEpoch: epoch,
+    });
+}
 async function handleDuelReview(ctx, args, resolutionKey) {
     const { cwd, state, exec } = ctx;
     const { confirmAction, beadIds } = args;
@@ -304,13 +321,34 @@ async function handleDuelReview(ctx, args, resolutionKey) {
     });
 }
 async function confirmWaveReviewAction(ctx, args) {
-    const { state } = ctx;
+    const { cwd, state, exec } = ctx;
     const { confirmAction, beadIds } = args;
     let reviewBeadId;
     if (confirmAction === "fresh-eyes" || confirmAction === "self-review") {
         const resolved = resolveReviewBeadId(beadIds, args.reviewBeadId);
         if ("error" in resolved) {
-            return makeToolError("flywheel_wave_review_gate", state.phase, "invalid_input", resolved.error);
+            if (args.reviewBeadId) {
+                return makeToolError("flywheel_wave_review_gate", state.phase, "invalid_input", resolved.error);
+            }
+            let beads;
+            try {
+                const allBeads = await readBeads(exec, cwd);
+                const picked = resolveBeadsFromIds(allBeads, beadIds);
+                if (picked.missing.length > 0) {
+                    return makeToolError("flywheel_wave_review_gate", state.phase, "invalid_input", `Unknown bead id(s): ${picked.missing.join(", ")}`);
+                }
+                beads = picked.beads;
+            }
+            catch {
+                beads = beadIds.map((id) => ({
+                    id,
+                    title: id,
+                    description: "",
+                    status: "closed",
+                    priority: 2,
+                }));
+            }
+            return buildWaveReviewBeadPickResult(ctx, { ...args, confirmAction }, beads);
         }
         reviewBeadId = resolved.beadId;
     }

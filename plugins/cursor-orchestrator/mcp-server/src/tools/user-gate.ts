@@ -19,6 +19,7 @@ import type {
   WrapUpGateArgs,
   GateResolution,
   FlywheelState,
+  Bead,
 } from "../types.js";
 import { readBeads } from "../beads.js";
 import {
@@ -29,6 +30,8 @@ import {
   buildBeadLowQualityGate,
   buildBeadReviewGate,
   buildWaveReviewGate,
+  buildWaveReviewBeadPickGate,
+  buildAskQuestionFromGate,
   buildWrapUpAlreadyConfirmedPayload,
   buildWrapUpGate,
   toCompactGatePayload,
@@ -423,6 +426,35 @@ async function handleSelfReview(
   );
 }
 
+function buildWaveReviewBeadPickResult(
+  ctx: ToolContext,
+  args: WaveReviewConfirmArgs & {
+    confirmAction: "fresh-eyes" | "self-review";
+  },
+  beads: Bead[],
+): McpToolResult {
+  const { state } = ctx;
+  const { confirmAction, beadIds } = args;
+  const gate = buildWaveReviewBeadPickGate(beads, confirmAction);
+  const epoch = getCoordinatorEpoch(state);
+  return makeOkToolResult(
+    "flywheel_wave_review_gate",
+    state.phase,
+    [
+      "flywheel_wave_review_gate: wave_review_bead_pick_required",
+      `confirmAction=${confirmAction} | beads=${beadIds.length}`,
+      "AskQuestion(nextAskQuestion) → re-call confirm with reviewBeadId from selection.",
+    ].join("\n"),
+    {
+      kind: "wave_review_bead_pick_required",
+      confirmAction,
+      beadIds,
+      nextAskQuestion: buildAskQuestionFromGate(gate),
+      coordinatorEpoch: epoch,
+    },
+  );
+}
+
 async function handleDuelReview(
   ctx: ToolContext,
   args: WaveReviewConfirmArgs,
@@ -476,18 +508,47 @@ async function confirmWaveReviewAction(
   ctx: ToolContext,
   args: WaveReviewConfirmArgs,
 ): Promise<McpToolResult> {
-  const { state } = ctx;
+  const { cwd, state, exec } = ctx;
   const { confirmAction, beadIds } = args;
 
   let reviewBeadId: string | undefined;
   if (confirmAction === "fresh-eyes" || confirmAction === "self-review") {
     const resolved = resolveReviewBeadId(beadIds, args.reviewBeadId);
     if ("error" in resolved) {
-      return makeToolError(
-        "flywheel_wave_review_gate",
-        state.phase,
-        "invalid_input",
-        resolved.error,
+      if (args.reviewBeadId) {
+        return makeToolError(
+          "flywheel_wave_review_gate",
+          state.phase,
+          "invalid_input",
+          resolved.error,
+        );
+      }
+      let beads: Bead[];
+      try {
+        const allBeads = await readBeads(exec, cwd);
+        const picked = resolveBeadsFromIds(allBeads, beadIds);
+        if (picked.missing.length > 0) {
+          return makeToolError(
+            "flywheel_wave_review_gate",
+            state.phase,
+            "invalid_input",
+            `Unknown bead id(s): ${picked.missing.join(", ")}`,
+          );
+        }
+        beads = picked.beads;
+      } catch {
+        beads = beadIds.map((id) => ({
+          id,
+          title: id,
+          description: "",
+          status: "closed" as const,
+          priority: 2,
+        }));
+      }
+      return buildWaveReviewBeadPickResult(
+        ctx,
+        { ...args, confirmAction },
+        beads,
       );
     }
     reviewBeadId = resolved.beadId;

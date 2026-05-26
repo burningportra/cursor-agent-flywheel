@@ -775,12 +775,13 @@ export type WrapUpConfirmAction = (typeof WRAP_UP_CONFIRM_ACTIONS)[number];
  */
 export declare const ACTION_KEYS: readonly ["looks-good-all", "self-review", "fresh-eyes", "duel-review", "wrap-up-full", "wrap-up-commit-only", "wrap-up-skip", "iterate-remediate", "continue-wrap-up", "abort", "bead-score-and-launch-gate", "bead-polish", "bead-launch", "bead-launch-anyway", "bead-back-to-plan", "bead-coordinator-serial", "bead-swarm-launch", "bead-coverage-create", "bead-coverage-defer", "bead-dedup-merge-all", "bead-dedup-review-pairs", "bead-dedup-keep", "synthesized-approve-all", "synthesized-approve-subset", "synthesized-reject-all", "synthesized-regress-plan"];
 export type ActionKey = (typeof ACTION_KEYS)[number];
-export declare const FLYWHEEL_USER_GATE_KINDS: readonly ["wave_review", "wrap_up", "wrap_up_verdict", "wrap_up_already_confirmed", "review_mode", "bead_review", "bead_launch", "bead_low_quality", "bead_hotspot", "bead_coverage", "bead_dedup"];
+export declare const FLYWHEEL_USER_GATE_KINDS: readonly ["wave_review", "wave_review_bead_pick_required", "wrap_up", "wrap_up_verdict", "wrap_up_already_confirmed", "review_mode", "bead_review", "bead_launch", "bead_low_quality", "bead_hotspot", "bead_coverage", "bead_dedup"];
 export type FlywheelUserGateKind = (typeof FLYWHEEL_USER_GATE_KINDS)[number];
 export declare const CompactGatePayloadSchema: z.ZodObject<{
     gateMeta: z.ZodObject<{
         kind: z.ZodEnum<{
             wave_review: "wave_review";
+            wave_review_bead_pick_required: "wave_review_bead_pick_required";
             wrap_up: "wrap_up";
             wrap_up_verdict: "wrap_up_verdict";
             wrap_up_already_confirmed: "wrap_up_already_confirmed";

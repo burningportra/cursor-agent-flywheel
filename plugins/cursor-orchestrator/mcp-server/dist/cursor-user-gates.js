@@ -155,6 +155,32 @@ export function buildWaveReviewGate(beads, state) {
         ].join(" "),
     };
 }
+/** Follow-up when multi-bead wave needs a bead id for self-review or fresh-eyes. */
+export function buildWaveReviewBeadPickGate(beads, confirmAction) {
+    const ids = beads.map((b) => b.id);
+    const modeLabel = confirmAction === "fresh-eyes" ? "Fresh-eyes review" : "Self review";
+    return {
+        kind: "wave_review_bead_pick_required",
+        title: `Pick a bead — ${modeLabel}`,
+        rationale: [
+            `This wave has ${beads.length} beads (${ids.join(", ")}).`,
+            `Choose which bead to ${confirmAction === "fresh-eyes" ? "send to fresh-eyes reviewers" : "route to self-review"}.`,
+            "After AskQuestion, re-call flywheel_wave_review_gate with the same confirmAction and reviewBeadId set to the selected option id.",
+        ].join(" "),
+        options: beads.map((b) => ({
+            id: b.id,
+            label: b.title?.trim() ? b.title : b.id,
+            detail: b.id,
+            action: confirmAction,
+            coordinatorAction: `flywheel_wave_review_gate({ confirmAction: "${confirmAction}", reviewBeadId: "${b.id}", beadIds: [${ids.map((id) => `"${id}"`).join(", ")}] })`,
+        })),
+        beadIds: ids,
+        instructions: [
+            "Cursor: AskQuestion with structuredContent.data.nextAskQuestion (not askQuestion on the initial wave menu).",
+            "Map the selected option id to reviewBeadId; do not ask for a bead id in free text.",
+        ].join(" "),
+    };
+}
 export const WRAP_UP_ALREADY_CONFIRMED_NEXT_SKILL = "agent-flywheel:start_wrapup";
 export const WRAP_UP_ALREADY_CONFIRMED_FORCE_HINT = "Pass force=true to re-open the wrap-up menu.";
 /** Idempotent retry — no AskQuestion; coordinator loads start_wrapup if needed. */

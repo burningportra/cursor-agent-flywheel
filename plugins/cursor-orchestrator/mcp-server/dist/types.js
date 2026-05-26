@@ -79,6 +79,7 @@ export const ACTION_KEYS = [
 ];
 export const FLYWHEEL_USER_GATE_KINDS = [
     'wave_review',
+    'wave_review_bead_pick_required',
     'wrap_up',
     'wrap_up_verdict',
     'wrap_up_already_confirmed',

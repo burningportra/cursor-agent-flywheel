@@ -20,6 +20,7 @@ import {
   buildBeadLowQualityGate,
   buildBeadReviewGate,
   buildWaveReviewGate,
+  buildWaveReviewBeadPickGate,
   buildWrapUpAlreadyConfirmedPayload,
   buildWrapUpGate,
   buildWrapUpVerdictGate,
@@ -84,6 +85,15 @@ describe('CompactGatePayloadSchema round-trip', () => {
       ),
       'wave_review multi risky',
     );
+
+    expectRoundTrip(
+      buildWaveReviewBeadPickGate(
+        [bead('tb-1', 'Task one'), bead('tb-2', 'Task two')],
+        'fresh-eyes',
+      ),
+      'wave_review_bead_pick_required fresh-eyes',
+    );
+    covered.add('wave_review_bead_pick_required');
 
     expectRoundTrip(
       buildWrapUpGate({

@@ -3,7 +3,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { CompactGatePayloadSchema, FLYWHEEL_USER_GATE_KINDS, createInitialState, } from '../types.js';
-import { buildBatchReviewSynthesizedGate, buildBeadCoverageGate, buildBeadDedupGate, buildBeadHotspotGate, buildBeadLaunchGate, buildBeadLowQualityGate, buildBeadReviewGate, buildWaveReviewGate, buildWrapUpAlreadyConfirmedPayload, buildWrapUpGate, buildWrapUpVerdictGate, toCompactGatePayload, } from '../cursor-user-gates.js';
+import { buildBatchReviewSynthesizedGate, buildBeadCoverageGate, buildBeadDedupGate, buildBeadHotspotGate, buildBeadLaunchGate, buildBeadLowQualityGate, buildBeadReviewGate, buildWaveReviewGate, buildWaveReviewBeadPickGate, buildWrapUpAlreadyConfirmedPayload, buildWrapUpGate, buildWrapUpVerdictGate, toCompactGatePayload, } from '../cursor-user-gates.js';
 import { buildStartMenu } from '../cursor-start-menu.js';
 function bead(id, title, description = '') {
     return {
@@ -47,6 +47,8 @@ describe('CompactGatePayloadSchema round-trip', () => {
             bead('tb-1', 'Auth migration', 'security authentication'),
             bead('tb-2', 'Task two'),
         ], state), 'wave_review multi risky');
+        expectRoundTrip(buildWaveReviewBeadPickGate([bead('tb-1', 'Task one'), bead('tb-2', 'Task two')], 'fresh-eyes'), 'wave_review_bead_pick_required fresh-eyes');
+        covered.add('wave_review_bead_pick_required');
         expectRoundTrip(buildWrapUpGate({
             uncommittedCount: 2,
             uncommittedPreview: ['README.md'],

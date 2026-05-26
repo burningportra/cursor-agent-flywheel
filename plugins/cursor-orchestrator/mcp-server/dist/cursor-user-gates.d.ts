@@ -14,7 +14,7 @@ export interface FlywheelUserGateOption {
     coordinatorAction?: string;
 }
 export interface FlywheelUserGate {
-    kind: "wave_review" | "wrap_up" | "wrap_up_verdict" | "wrap_up_already_confirmed" | "review_mode" | "bead_review" | "bead_launch" | "bead_low_quality" | "bead_hotspot" | "bead_coverage" | "bead_dedup";
+    kind: "wave_review" | "wave_review_bead_pick_required" | "wrap_up" | "wrap_up_verdict" | "wrap_up_already_confirmed" | "review_mode" | "bead_review" | "bead_launch" | "bead_low_quality" | "bead_hotspot" | "bead_coverage" | "bead_dedup";
     title: string;
     rationale: string;
     options: FlywheelUserGateOption[];
@@ -45,6 +45,8 @@ export declare function buildAskQuestionFromGate(gate: FlywheelUserGate): Cursor
 export declare function isRiskyBead(bead: Bead, state: FlywheelState): boolean;
 /** Step 8 wave-completion gate (after all impl agents in a wave report back). */
 export declare function buildWaveReviewGate(beads: Bead[], state: FlywheelState): FlywheelUserGate;
+/** Follow-up when multi-bead wave needs a bead id for self-review or fresh-eyes. */
+export declare function buildWaveReviewBeadPickGate(beads: Bead[], confirmAction: "fresh-eyes" | "self-review"): FlywheelUserGate;
 export declare const WRAP_UP_ALREADY_CONFIRMED_NEXT_SKILL = "agent-flywheel:start_wrapup";
 export declare const WRAP_UP_ALREADY_CONFIRMED_FORCE_HINT = "Pass force=true to re-open the wrap-up menu.";
 export type WrapUpAlreadyConfirmedPayload = CompactGatePayload & {

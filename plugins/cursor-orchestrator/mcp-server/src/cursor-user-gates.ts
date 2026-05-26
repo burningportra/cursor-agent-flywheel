@@ -30,6 +30,7 @@ export interface FlywheelUserGateOption {
 export interface FlywheelUserGate {
   kind:
     | "wave_review"
+    | "wave_review_bead_pick_required"
     | "wrap_up"
     | "wrap_up_verdict"
     | "wrap_up_already_confirmed"
@@ -225,6 +226,37 @@ export function buildWaveReviewGate(
       "Cursor: call AskQuestion with outcome.askQuestion (clickable UI). Do not ask the user to type 1/2/3 in prose.",
       "After the user submits AskQuestion, map option id to coordinatorAction. Never ask 'want to commit?' in free text.",
       "When the bead queue is empty after review, call flywheel_wrap_up_gate({ cwd }).",
+    ].join(" "),
+  };
+}
+
+/** Follow-up when multi-bead wave needs a bead id for self-review or fresh-eyes. */
+export function buildWaveReviewBeadPickGate(
+  beads: Bead[],
+  confirmAction: "fresh-eyes" | "self-review",
+): FlywheelUserGate {
+  const ids = beads.map((b) => b.id);
+  const modeLabel =
+    confirmAction === "fresh-eyes" ? "Fresh-eyes review" : "Self review";
+  return {
+    kind: "wave_review_bead_pick_required",
+    title: `Pick a bead — ${modeLabel}`,
+    rationale: [
+      `This wave has ${beads.length} beads (${ids.join(", ")}).`,
+      `Choose which bead to ${confirmAction === "fresh-eyes" ? "send to fresh-eyes reviewers" : "route to self-review"}.`,
+      "After AskQuestion, re-call flywheel_wave_review_gate with the same confirmAction and reviewBeadId set to the selected option id.",
+    ].join(" "),
+    options: beads.map((b) => ({
+      id: b.id,
+      label: b.title?.trim() ? b.title : b.id,
+      detail: b.id,
+      action: confirmAction,
+      coordinatorAction: `flywheel_wave_review_gate({ confirmAction: "${confirmAction}", reviewBeadId: "${b.id}", beadIds: [${ids.map((id) => `"${id}"`).join(", ")}] })`,
+    })),
+    beadIds: ids,
+    instructions: [
+      "Cursor: AskQuestion with structuredContent.data.nextAskQuestion (not askQuestion on the initial wave menu).",
+      "Map the selected option id to reviewBeadId; do not ask for a bead id in free text.",
     ].join(" "),
   };
 }
