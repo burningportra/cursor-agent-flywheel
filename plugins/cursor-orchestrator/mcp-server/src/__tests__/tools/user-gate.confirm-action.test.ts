@@ -1,7 +1,8 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import type { Bead, FlywheelState, WaveReviewConfirmAction } from '../../types.js';
 import { runWaveReviewGate } from '../../tools/user-gate.js';
 import { createMockExec, makeState, type ExecCall } from '../helpers/mocks.js';
+import { invalidateBeadCache } from '../../beads.js';
 
 function makeBead(id: string): Bead {
   return {
@@ -32,13 +33,13 @@ function execCallsForWave(n: number, action: string): ExecCall[] {
   const calls: ExecCall[] = [];
 
   if (action === 'looks-good-all' && n > 0) {
+    const beads = ids.map((id) => makeBead(id));
+    calls.push({
+      cmd: 'br',
+      args: BR_LIST_ARGS,
+      result: { code: 0, stdout: JSON.stringify({ issues: beads }), stderr: '' },
+    });
     for (const id of ids) {
-      const bead = makeBead(id);
-      calls.push({
-        cmd: 'br',
-        args: ['show', id, '--json'],
-        result: { code: 0, stdout: JSON.stringify(bead), stderr: '' },
-      });
       calls.push({
         cmd: 'br',
         args: ['update', id, '--status', 'closed'],
@@ -94,8 +95,6 @@ function makeCtx(initialEpoch: number, execCalls: ExecCall[]) {
   };
 }
 
-const ERROR_KINDS = new Set(['invalid_input', 'unsupported_action']);
-
 describe.each([
   ['looks-good-all', 0, 'invalid_input'],
   ['looks-good-all', 1, 'wave_review_confirmed'],
@@ -113,6 +112,12 @@ describe.each([
   ['LOOKS-GOOD-ALL', 1, 'unsupported_action'],
   ['', 1, 'unsupported_action'],
 ] as const)('runWaveReviewGate(%s, beads=%i)', (action, n, expectedKind) => {
+  beforeEach(() => {
+    invalidateBeadCache();
+  });
+
+  const ERROR_KINDS = new Set(['invalid_input', 'unsupported_action']);
+
   it(`returns ${expectedKind}`, async () => {
     const { ctx, initialEpoch } = makeCtx(2, execCallsForWave(n, action));
     const beadIds = beadIdsForCount(n);

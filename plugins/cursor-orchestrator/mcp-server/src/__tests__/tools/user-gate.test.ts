@@ -1,8 +1,17 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import type { FlywheelState } from '../../types.js';
 import { runBeadApprovalGate, runWaveReviewGate, runWrapUpGate } from '../../tools/user-gate.js';
 import { createMockExec, makeState } from '../helpers/mocks.js';
 import type { Bead } from '../../types.js';
+import { invalidateBeadCache } from '../../beads.js';
+
+const BR_LIST_ARGS = [
+  'list',
+  '--json',
+  '--fields',
+  'id,title,description,status,priority,issue_type,labels,estimate,parent,created_at,updated_at,closed_at',
+  '--deferred',
+];
 
 function makeBead(id: string): Bead {
   return {
@@ -17,6 +26,10 @@ function makeBead(id: string): Bead {
 }
 
 describe('flywheel user gate tools', () => {
+  beforeEach(() => {
+    invalidateBeadCache();
+  });
+
   it('flywheel_wave_review_gate returns userGate', async () => {
     const bead = makeBead('tb-9');
     const { ctx } = {
@@ -178,8 +191,8 @@ describe('flywheel user gate tools', () => {
         exec: createMockExec([
           {
             cmd: 'br',
-            args: ['show', 'tb-9', '--json'],
-            result: { code: 0, stdout: JSON.stringify(bead), stderr: '' },
+            args: BR_LIST_ARGS,
+            result: { code: 0, stdout: JSON.stringify({ issues: [bead] }), stderr: '' },
           },
           {
             cmd: 'br',
@@ -238,11 +251,30 @@ describe('flywheel user gate tools', () => {
     const { ctx } = {
       ctx: {
         exec: createMockExec([
-          { cmd: 'br', args: ['show', 'tb-a', '--json'], result: { code: 0, stdout: JSON.stringify(beadA), stderr: '' } },
-          { cmd: 'br', args: ['update', 'tb-a', '--status', 'closed'], result: { code: 0, stdout: '', stderr: '' } },
-          { cmd: 'br', args: ['show', 'tb-b', '--json'], result: { code: 0, stdout: JSON.stringify(beadB), stderr: '' } },
-          { cmd: 'br', args: ['update', 'tb-b', '--status', 'closed'], result: { code: 0, stdout: '', stderr: '' } },
-          { cmd: 'br', args: ['ready', '--json'], result: { code: 0, stdout: '[]', stderr: '' } },
+          {
+            cmd: 'br',
+            args: BR_LIST_ARGS,
+            result: {
+              code: 0,
+              stdout: JSON.stringify({ issues: [beadA, beadB] }),
+              stderr: '',
+            },
+          },
+          {
+            cmd: 'br',
+            args: ['update', 'tb-a', '--status', 'closed'],
+            result: { code: 0, stdout: '', stderr: '' },
+          },
+          {
+            cmd: 'br',
+            args: ['update', 'tb-b', '--status', 'closed'],
+            result: { code: 0, stdout: '', stderr: '' },
+          },
+          {
+            cmd: 'br',
+            args: ['ready', '--json'],
+            result: { code: 0, stdout: '[]', stderr: '' },
+          },
         ]),
         cwd: '/fake/project',
         state: makeState({ phase: 'implementing', beadResults: {} }),

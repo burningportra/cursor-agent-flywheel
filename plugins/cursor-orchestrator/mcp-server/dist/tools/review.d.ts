@@ -5,6 +5,9 @@ export declare const HEADLESS_EXIT_HINT = "Headless mode returns error code \"re
  * Accept every bead in a wave review gate (`looks-good-all`) — closes each bead
  * in br and advances once. Used by flywheel_wave_review_gate confirmAction so
  * coordinators are not required to re-call flywheel_review per bead.
+ *
+ * Two-phase: validate-all (readBeads) → single epoch bump → mutate-all (close).
+ * Returns `partiallyClosed` on mid-loop close failure after the epoch bump.
  */
 export declare function acceptWaveBeadsAtReview(ctx: ToolContext, beadIds: string[]): Promise<McpToolResult>;
 /**

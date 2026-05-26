@@ -36,12 +36,13 @@ vi.mock('../../memory.js', () => ({
 }));
 
 import { promises as fsPromises } from 'node:fs';
-import { runReview } from '../../tools/review.js';
+import { runReview, acceptWaveBeadsAtReview } from '../../tools/review.js';
 import { createMockExec, makeState } from '../helpers/mocks.js';
 import type { FlywheelState, Bead, Finding } from '../../types.js';
 import type { ExecCall } from '../helpers/mocks.js';
 import { synthesizeBeadsFromFindings, rollbackSynthesizedBeads } from '../../commit-batch.js';
 import { appendMemory, readMemory } from '../../memory.js';
+import { invalidateBeadCache } from '../../beads.js';
 
 // ─── Helpers ──────────────────────────────────────────────────
 
@@ -111,6 +112,20 @@ function brListCall(beads: Bead[]): ExecCall {
   return {
     cmd: 'br',
     args: ['list', '--json'],
+    result: { code: 0, stdout: JSON.stringify(beads), stderr: '' },
+  };
+}
+
+function brReadBeadsListCall(beads: Bead[]): ExecCall {
+  return {
+    cmd: 'br',
+    args: [
+      'list',
+      '--json',
+      '--fields',
+      'id,title,description,status,priority,issue_type,labels,estimate,parent,created_at,updated_at,closed_at',
+      '--deferred',
+    ],
     result: { code: 0, stdout: JSON.stringify(beads), stderr: '' },
   };
 }
@@ -1028,6 +1043,68 @@ describe('runReview', () => {
       });
 
       expect(state.coordinatorEpoch).toBe(1);
+    });
+  });
+
+  describe('acceptWaveBeadsAtReview (two-phase validate → bump → close)', () => {
+    beforeEach(() => {
+      invalidateBeadCache();
+    });
+
+    it('returns not_found with missing ids before epoch bump', async () => {
+      const bead = makeBead({ id: 'tb-1' });
+      const { ctx, state } = makeCtx({ coordinatorEpoch: 2 }, [brReadBeadsListCall([bead])]);
+
+      const result = await acceptWaveBeadsAtReview(ctx, ['tb-1', 'tb-missing']);
+
+      expect(result.isError).toBe(true);
+      const err = (result.structuredContent as { data: { error: { code: string; details: { missing: string[] } } } }).data.error;
+      expect(err.code).toBe('not_found');
+      expect(err.details.missing).toEqual(['tb-missing']);
+      expect(state.coordinatorEpoch).toBe(2);
+    });
+
+    it('bumps epoch once then closes all beads', async () => {
+      const beadA = makeBead({ id: 'tb-a' });
+      const beadB = makeBead({ id: 'tb-b' });
+      const { ctx, state } = makeCtx({ coordinatorEpoch: 1 }, [
+        brReadBeadsListCall([beadA, beadB]),
+        brUpdateCall('tb-a', 'closed'),
+        brUpdateCall('tb-b', 'closed'),
+        brReadyCall([]),
+      ]);
+
+      const result = await acceptWaveBeadsAtReview(ctx, ['tb-a', 'tb-b']);
+
+      expect(result.isError).toBeFalsy();
+      expect(state.coordinatorEpoch).toBe(2);
+      expect(state.beadResults!['tb-a']?.status).toBe('success');
+      expect(state.beadResults!['tb-b']?.status).toBe('success');
+    });
+
+    it('returns cli_failure with partiallyClosed on mid-loop close failure', async () => {
+      const beadA = makeBead({ id: 'tb-a' });
+      const beadB = makeBead({ id: 'tb-b' });
+      const { ctx, state } = makeCtx({ coordinatorEpoch: 0 }, [
+        brReadBeadsListCall([beadA, beadB]),
+        brUpdateCall('tb-a', 'closed'),
+        {
+          cmd: 'br',
+          args: ['update', 'tb-b', '--status', 'closed'],
+          result: { code: 1, stdout: '', stderr: 'disk full' },
+        },
+      ]);
+
+      const result = await acceptWaveBeadsAtReview(ctx, ['tb-a', 'tb-b']);
+
+      expect(result.isError).toBe(true);
+      const err = (result.structuredContent as { data: { error: { code: string; details: { partiallyClosed: string[]; beadId: string } } } }).data.error;
+      expect(err.code).toBe('cli_failure');
+      expect(err.details.partiallyClosed).toEqual(['tb-a']);
+      expect(err.details.beadId).toBe('tb-b');
+      expect(state.coordinatorEpoch).toBe(1);
+      expect(state.beadResults!['tb-a']?.status).toBe('success');
+      expect(state.beadResults!['tb-b']).toBeUndefined();
     });
   });
 });

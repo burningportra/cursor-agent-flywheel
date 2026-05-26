@@ -16,6 +16,8 @@ import {
 } from '../commit-batch.js';
 import { prepareBatchReviewDispatch } from '../batch-review-dispatch.js';
 import { readMemory, appendMemory } from '../memory.js';
+import { readBeads } from '../beads.js';
+import { persistCoordinatorEpochBump } from '../coordinator-epoch.js';
 
 const log = createLogger('review');
 
@@ -128,7 +130,7 @@ async function finalizeBeadLooksGood(
   ctx: ToolContext,
   beadId: string,
   bead: Bead,
-): Promise<void> {
+): Promise<{ ok: true } | { ok: false; stderr: string }> {
   const { exec, cwd, state, signal } = ctx;
 
   if (bead.status !== 'closed') {
@@ -143,6 +145,7 @@ async function finalizeBeadLooksGood(
         code: updateResult.code,
         stderr: updateResult.stderr,
       });
+      return { ok: false, stderr: updateResult.stderr };
     }
   }
 
@@ -187,18 +190,23 @@ async function finalizeBeadLooksGood(
       }
     }
   }
+
+  return { ok: true };
 }
 
 /**
  * Accept every bead in a wave review gate (`looks-good-all`) — closes each bead
  * in br and advances once. Used by flywheel_wave_review_gate confirmAction so
  * coordinators are not required to re-call flywheel_review per bead.
+ *
+ * Two-phase: validate-all (readBeads) → single epoch bump → mutate-all (close).
+ * Returns `partiallyClosed` on mid-loop close failure after the epoch bump.
  */
 export async function acceptWaveBeadsAtReview(
   ctx: ToolContext,
   beadIds: string[],
 ): Promise<McpToolResult> {
-  const { exec, cwd, state, saveState, signal } = ctx;
+  const { exec, cwd, state, saveState } = ctx;
 
   if (beadIds.length === 0) {
     return errorResult(
@@ -208,40 +216,41 @@ export async function acceptWaveBeadsAtReview(
     );
   }
 
+  const allBeads = await readBeads(exec, cwd);
+  const beadMap = new Map(allBeads.map((b) => [b.id, b]));
+  const missing = beadIds.filter((id) => !beadMap.has(id));
+  if (missing.length > 0) {
+    return errorResult(
+      state.phase,
+      'not_found',
+      `Bead(s) not found while accepting wave review: ${missing.join(', ')}.`,
+      { missing, beadIds },
+    );
+  }
+
+  await persistCoordinatorEpochBump({ state, saveState });
+
   let lastBeadId = beadIds[beadIds.length - 1]!;
   let lastTitle = lastBeadId;
+  const partiallyClosed: string[] = [];
 
   for (const beadId of beadIds) {
-    const brShowResult = await exec('br', ['show', beadId, '--json'], {
-      cwd,
-      timeout: 8000,
-      signal,
-    });
-    if (brShowResult.code !== 0) {
+    const bead = beadMap.get(beadId)!;
+    const result = await finalizeBeadLooksGood(ctx, beadId, bead);
+    if (!result.ok) {
+      saveState(state);
       return errorResult(
         state.phase,
-        'not_found',
-        `Bead ${beadId} not found while accepting wave review.`,
-        { beadId, stderr: brShowResult.stderr },
+        'cli_failure',
+        `Failed to close bead ${beadId} while accepting wave review.`,
+        { beadId, partiallyClosed, stderr: result.stderr },
       );
     }
-
-    const bead = parseBrShowBead(brShowResult.stdout);
-    if (!bead) {
-      return errorResult(
-        state.phase,
-        'parse_failure',
-        `Error parsing bead ${beadId} from br show output.`,
-        { beadId },
-      );
-    }
-
-    await finalizeBeadLooksGood(ctx, beadId, bead);
+    partiallyClosed.push(beadId);
     lastBeadId = beadId;
     lastTitle = bead.title;
   }
 
-  // E3: wave accept closes beads before advancing
   saveState(state);
   return nextBeadOrGates(ctx, lastBeadId, lastTitle, 'Passed');
 }
@@ -407,7 +416,15 @@ export async function runReview(ctx: ToolContext, args: ReviewArgs): Promise<Mcp
 
   // ── action: looks-good ────────────────────────────────────────
   if (args.action === 'looks-good') {
-    await finalizeBeadLooksGood(ctx, beadId, bead);
+    const closeResult = await finalizeBeadLooksGood(ctx, beadId, bead);
+    if (!closeResult.ok) {
+      return errorResult(
+        state.phase,
+        'cli_failure',
+        `Failed to close bead ${beadId} during review accept.`,
+        { beadId, stderr: closeResult.stderr },
+      );
+    }
 
     // E3: successful looks-good closes bead and advances
     await recordGateSteering(ctx, {

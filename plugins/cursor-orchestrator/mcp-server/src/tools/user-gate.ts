@@ -1,7 +1,9 @@
 import {
+  appendSteeringEvent,
   recordGateSteering,
   wrapUpConfirmActionId,
 } from "../steering-events.js";
+import { getCoordinatorEpoch } from "../coordinator-epoch.js";
 import { promisify } from "node:util";
 import { execFile } from "node:child_process";
 import type {
@@ -164,7 +166,13 @@ async function handleLooksGoodAll(
   if (reviewResult.isError) {
     return reviewResult;
   }
-  const epoch = await recordWaveReviewSteering(ctx, args);
+  appendSteeringEvent(ctx.state, {
+    source: "wave_review",
+    actionId: confirmAction,
+    beadIds,
+  });
+  await ctx.saveState(ctx.state);
+  const epoch = getCoordinatorEpoch(ctx.state);
   const reviewRest = reviewDataFromResult(reviewResult);
   return makeOkToolResult(
     "flywheel_wave_review_gate",
