@@ -8,6 +8,7 @@ import { buildBeadCoverageGate, buildBeadDedupGate, buildBeadHotspotGate, buildB
 import { computeBeadApprovalMetrics, formatQualityLine, loadOpenBeadsForGate, } from "../bead-approval-metrics.js";
 import { makeOkToolResult, makeToolError } from "./shared.js";
 import { acceptWaveBeadsAtReview, runReview } from "./review.js";
+import { resolveRecoveryContext } from "../recover-gates.js";
 const execFileAsync = promisify(execFile);
 const GIT_TIMEOUT_MS = 8_000;
 function gateResultText(tool, compact) {
@@ -348,6 +349,35 @@ export async function runWaveReviewGate(ctx, args) {
         });
     }
     if (!Array.isArray(args.beadIds) || args.beadIds.length === 0) {
+        const recovery = await resolveRecoveryContext(ctx, {
+            beadIds: args.beadIds,
+        });
+        if (recovery.source === "manual_required" && recovery.beadIds.length === 0) {
+            return makeToolError("flywheel_wave_review_gate", state.phase, "invalid_input", recovery.nextAction?.prompt ??
+                "beadIds must be a non-empty array of beads that finished in this wave.", {
+                details: {
+                    recovery,
+                    suggestedBeadIds: [],
+                },
+            });
+        }
+        if (recovery.beadIds.length > 0) {
+            const requiresConfirmation = recovery.requiresConfirmation ?? recovery.confidence !== "trusted";
+            return makeOkToolResult("flywheel_wave_review_gate", state.phase, [
+                "flywheel_wave_review_gate: recover_gate_context",
+                `suggestedBeadIds=${recovery.beadIds.length}${recovery.truncated ? " (truncated)" : ""}`,
+                requiresConfirmation
+                    ? "Stale or inferred candidates — confirm before re-calling with explicit beadIds."
+                    : "Re-call with explicit beadIds to open the wave review gate.",
+            ].join("\n"), {
+                kind: "recover_gate_context",
+                suggestedBeadIds: recovery.beadIds,
+                recovery,
+                requiresConfirmation,
+                recoverySource: recovery.source,
+                recoveryConfidence: recovery.confidence,
+            });
+        }
         return waveReviewEmptyBeadIdsError(ctx);
     }
     let allBeads;

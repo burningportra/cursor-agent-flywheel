@@ -53,7 +53,7 @@ const log = createLogger('server');
 export const WaveReviewGateArgsSchema = z
   .object({
     cwd: z.string().min(1),
-    beadIds: z.array(z.string().min(1)).min(1, 'beadIds must be non-empty'),
+    beadIds: z.array(z.string().min(1)),
     confirmAction: z.enum(WAVE_REVIEW_CONFIRM_ACTIONS).optional(),
     reviewBeadId: z.string().min(1).optional(),
   })

@@ -111,6 +111,10 @@ export const CompactGatePayloadSchema = z.object({
         rationale: z.string(),
         beadIds: z.array(z.string()).optional(),
         riskyBeadIds: z.array(z.string()).optional(),
+        recoverySource: z
+            .enum(["explicit_args", "checkpoint", "bead_scan", "manual_required"])
+            .optional(),
+        recoveryConfidence: z.enum(["trusted", "stale", "degraded"]).optional(),
     }),
     askQuestion: CursorAskQuestionPayloadSchema.nullable(),
     actions: z.record(z.string(), z.enum(ACTION_KEYS)),

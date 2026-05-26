@@ -72,12 +72,12 @@ describe('WaveReviewGateArgsSchema', () => {
     expect(result.success).toBe(false);
   });
 
-  it('rejects empty beadIds array', () => {
+  it('accepts empty beadIds array for recovery resolution', () => {
     const result = WaveReviewGateArgsSchema.safeParse({
       cwd: CWD,
       beadIds: [],
     });
-    expect(result.success).toBe(false);
+    expect(result.success).toBe(true);
   });
 
   it('rejects missing beadIds', () => {
@@ -163,13 +163,12 @@ describe('validateToolArgs gate boundary', () => {
     expect(err?.reason).toBe('invalid_enum_value');
   });
 
-  it('rejects empty beadIds before dispatch', () => {
+  it('accepts empty beadIds for recovery resolution before dispatch', () => {
     const err = validateToolArgs('flywheel_wave_review_gate', {
       cwd: CWD,
       beadIds: [],
     });
-    expect(err).not.toBeNull();
-    expect(err?.field).toBe('beadIds');
+    expect(err).toBeNull();
   });
 
   it('rejects unknown wrap-up confirm before dispatch', () => {

@@ -1042,12 +1042,49 @@ export const CompactGatePayloadSchema = z.object({
     rationale: z.string(),
     beadIds: z.array(z.string()).optional(),
     riskyBeadIds: z.array(z.string()).optional(),
+    recoverySource: z
+      .enum(["explicit_args", "checkpoint", "bead_scan", "manual_required"])
+      .optional(),
+    recoveryConfidence: z.enum(["trusted", "stale", "degraded"]).optional(),
   }),
   askQuestion: CursorAskQuestionPayloadSchema.nullable(),
   actions: z.record(z.string(), z.enum(ACTION_KEYS)),
 });
 
 export type CompactGatePayload = z.infer<typeof CompactGatePayloadSchema>;
+
+export type RecoverGateMode = "review" | "wrap_up" | "gates_only" | "auto";
+
+export type RecoverGateSource =
+  | "explicit_args"
+  | "checkpoint"
+  | "bead_scan"
+  | "manual_required";
+
+export type RecoverGateConfidence = "trusted" | "stale" | "degraded";
+
+export interface RecoverGateNextAction {
+  type: "ask_for_bead_ids";
+  prompt: string;
+}
+
+export interface RecoverGateContext {
+  mode: RecoverGateMode;
+  beadIds: string[];
+  source: RecoverGateSource;
+  confidence: RecoverGateConfidence;
+  warnings: string[];
+  truncated?: boolean;
+  requiresConfirmation?: boolean;
+  nextAction?: RecoverGateNextAction;
+  checkpoint?: {
+    exists: boolean;
+    trusted: boolean;
+    phase?: string;
+    ageMs?: number;
+    branchMismatch?: boolean;
+  };
+}
 
 export interface WaveReviewGateArgs {
   cwd: string;

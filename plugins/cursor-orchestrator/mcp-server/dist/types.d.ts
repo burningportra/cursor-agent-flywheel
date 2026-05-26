@@ -796,6 +796,17 @@ export declare const CompactGatePayloadSchema: z.ZodObject<{
         rationale: z.ZodString;
         beadIds: z.ZodOptional<z.ZodArray<z.ZodString>>;
         riskyBeadIds: z.ZodOptional<z.ZodArray<z.ZodString>>;
+        recoverySource: z.ZodOptional<z.ZodEnum<{
+            checkpoint: "checkpoint";
+            explicit_args: "explicit_args";
+            bead_scan: "bead_scan";
+            manual_required: "manual_required";
+        }>>;
+        recoveryConfidence: z.ZodOptional<z.ZodEnum<{
+            trusted: "trusted";
+            stale: "stale";
+            degraded: "degraded";
+        }>>;
     }, z.core.$strip>;
     askQuestion: z.ZodNullable<z.ZodObject<{
         title: z.ZodOptional<z.ZodString>;
@@ -840,6 +851,30 @@ export declare const CompactGatePayloadSchema: z.ZodObject<{
     }>>;
 }, z.core.$strip>;
 export type CompactGatePayload = z.infer<typeof CompactGatePayloadSchema>;
+export type RecoverGateMode = "review" | "wrap_up" | "gates_only" | "auto";
+export type RecoverGateSource = "explicit_args" | "checkpoint" | "bead_scan" | "manual_required";
+export type RecoverGateConfidence = "trusted" | "stale" | "degraded";
+export interface RecoverGateNextAction {
+    type: "ask_for_bead_ids";
+    prompt: string;
+}
+export interface RecoverGateContext {
+    mode: RecoverGateMode;
+    beadIds: string[];
+    source: RecoverGateSource;
+    confidence: RecoverGateConfidence;
+    warnings: string[];
+    truncated?: boolean;
+    requiresConfirmation?: boolean;
+    nextAction?: RecoverGateNextAction;
+    checkpoint?: {
+        exists: boolean;
+        trusted: boolean;
+        phase?: string;
+        ageMs?: number;
+        branchMismatch?: boolean;
+    };
+}
 export interface WaveReviewGateArgs {
     cwd: string;
     /** Bead IDs that finished in the current wave (from Agent Mail / swarm). */
