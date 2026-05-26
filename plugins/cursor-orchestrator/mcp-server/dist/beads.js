@@ -233,7 +233,11 @@ function parseBead(raw) {
         description: typeof obj.description === "string" ? obj.description : "",
         status: validateBeadStatus(obj.status) ?? "open",
         priority: typeof obj.priority === "number" ? obj.priority : 0,
-        type: typeof obj.type === "string" ? obj.type : "task",
+        type: typeof obj.type === "string"
+            ? obj.type
+            : typeof obj.issue_type === "string"
+                ? obj.issue_type
+                : "task",
         labels: Array.isArray(obj.labels) ? obj.labels.filter((l) => typeof l === "string") : [],
         estimate: typeof obj.estimate === "number" ? obj.estimate : undefined,
         parent: typeof obj.parent === "string" ? obj.parent : undefined,
@@ -252,6 +256,7 @@ export async function readBeads(exec, cwd) {
     const result = await brExecJson(exec, [
         "list",
         "--json",
+        "--all", // default list excludes closed; orchestrator needs full graph for review/recovery
         "--fields", "id,title,description,status,priority,issue_type,labels,estimate,parent,created_at,updated_at,closed_at",
         "--deferred", // include deferred beads
     ], { timeout: 10000, cwd });

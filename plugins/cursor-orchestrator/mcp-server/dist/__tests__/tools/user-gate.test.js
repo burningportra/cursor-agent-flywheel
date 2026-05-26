@@ -9,6 +9,7 @@ import { invalidateBeadCache } from '../../beads.js';
 const BR_LIST_ARGS = [
     'list',
     '--json',
+    '--all',
     '--fields',
     'id,title,description,status,priority,issue_type,labels,estimate,parent,created_at,updated_at,closed_at',
     '--deferred',
@@ -63,6 +64,7 @@ describe('flywheel user gate tools', () => {
                         args: [
                             'list',
                             '--json',
+                            '--all',
                             '--fields',
                             'id,title,description,status,priority,issue_type,labels,estimate,parent,created_at,updated_at,closed_at',
                             '--deferred',

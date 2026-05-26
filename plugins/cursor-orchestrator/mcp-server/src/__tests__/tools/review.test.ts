@@ -122,6 +122,7 @@ function brReadBeadsListCall(beads: Bead[]): ExecCall {
     args: [
       'list',
       '--json',
+      '--all',
       '--fields',
       'id,title,description,status,priority,issue_type,labels,estimate,parent,created_at,updated_at,closed_at',
       '--deferred',
