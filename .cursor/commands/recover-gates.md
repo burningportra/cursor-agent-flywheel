@@ -4,6 +4,8 @@ description: "Recover post-implement gates (wave review + wrap-up) — compact M
 argument-hint: "[bead-id ...] [--wrap-up-only] [--review-only] [--gates-only]"
 ---
 
+**Compact agent contract.** Full playbook (decision tree, naming matrix, anti-patterns, bead-resolution priority): [`flywheel-recover-gates.md`](flywheel-recover-gates.md).
+
 **Context:** Use compact gate MCP + `AskQuestion` only. Do **not** load `start_bootstrap` or phase skills here. For review routing: `flywheel_get_skill({ name: "agent-flywheel:start_review" })` only if the action needs `_review.md`.
 
 Parse `$ARGUMENTS`: bead ids; `--wrap-up-only` | `--review-only` | `--gates-only`. If both `--gates-only` and `--wrap-up-only`, stop and surface: "These flags target different gates; pick one and re-invoke." `cwd` = workspace root.
