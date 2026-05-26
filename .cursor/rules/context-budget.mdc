@@ -25,6 +25,9 @@ alwaysApply: true
 - `flywheel_wave_review_gate` → AskQuestion → execute action → optional `flywheel_wrap_up_gate`.
 - Skip `br list` if bead ids are already in `gateMeta.beadIds`.
 - Skip reading `.pi-flywheel/checkpoint.json` unless phase/beads are unknown.
+- On empty `beadIds`, use `suggestedBeadIds` from the gate error payload before asking the user.
+- When `wrap_up_already_confirmed`, surface `confirmedAction` / `nextSkill` — do **not** re-open the wrap-up menu unless the user asks.
+- **Never** load `start_ceremony`, `start_discover`, or the full `start` / `/start` body for recovery — only `start_review` / `start_wrapup` on demand after a gate action.
 
 ## Avoid unless necessary
 

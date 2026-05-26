@@ -40,6 +40,7 @@ async function loadLintModules() {
     const reserveMod = (await import(`${lintBase}/rules/reserve001.js`));
     const paneMod = (await import(`${lintBase}/rules/pane001.js`));
     const curMod = (await import(`${lintBase}/rules/cursorNative.js`));
+    const recovMod = (await import(`${lintBase}/rules/recoverGates.js`));
     const rules = {
         rules: [
             ...auq.auqRules,
@@ -50,6 +51,7 @@ async function loadLintModules() {
             reserveMod.reserve001,
             paneMod.pane001,
             ...curMod.cursorNativeRules,
+            ...recovMod.recoverGatesRules,
         ],
     };
     return { lintMod, registryMod, baselineMod, manifestMod, reportersMod, rules };
@@ -186,6 +188,8 @@ function helpText(version) {
         "  IMPL001  Implicit-decision phrases that should be AskUserQuestion calls.",
         "  ERR001   String-matching on error text; branch on data.error.code instead.",
         "  RESERVE001 Direct agentMailRPC(\"file_reservation_paths\") calls outside agent-mail-helpers.ts.",
+        "  RECOV001 Recovery commands: no prose commit/continue prompts (use gate MCP + AskQuestion).",
+        "  RECOV002 Recovery commands: do not load start_ceremony/start_discover/start body.",
         "",
         "Exit codes:",
         "  0  Clean (no error-severity findings).",

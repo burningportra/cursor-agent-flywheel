@@ -17,6 +17,12 @@ When a flywheel command or `skills/start/SKILL.md` asks for a user decision:
 
 **After implement:** `flywheel_wave_review_gate` → **AskQuestion** → `flywheel_review`. **When queue empty:** `flywheel_wrap_up_gate` → **AskQuestion** → `_wrapup.md`.
 
+**After `confirmAction` / `confirmWrapUp`:** check the response `kind`. If `wave_review_confirmed` (or the expected wrap-up kind) is absent, surface the error — do **not** retry the same payload blindly.
+
+**Multi-bead self/fresh-eyes:** when the gate returns `wave_review_bead_pick_required`, forward `nextAskQuestion` via **AskQuestion**, then re-call with `reviewBeadId`.
+
+**Idempotent replay:** when `idempotentReplay: true`, report already resolved — do **not** re-spawn reviewers or bump epoch again.
+
 **Dropped out of the flow?** `/recover-gates` or `/flywheel-recover-gates`.
 
 **Model note:** Some Cursor models skip `AskQuestion` in Agent mode; if the user only sees text choices, switch model or add a user rule: "Use AskQuestion for every flywheel gate menu."
