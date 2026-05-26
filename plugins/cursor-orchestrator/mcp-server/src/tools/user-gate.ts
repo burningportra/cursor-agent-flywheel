@@ -48,9 +48,11 @@ import { makeOkToolResult, makeToolError } from "./shared.js";
 import type { BeadApprovalGateArgs } from "../types.js";
 import { acceptWaveBeadsAtReview, runReview } from "./review.js";
 import { resolveRecoveryContext } from "../recover-gates.js";
+import { createLogger } from "../logger.js";
 
 const execFileAsync = promisify(execFile);
 const GIT_TIMEOUT_MS = 8_000;
+const log = createLogger("recover-gates");
 
 export type WaveReviewGateOutcome = ReturnType<typeof toCompactGatePayload> & {
   confirmed?: boolean;
@@ -557,6 +559,14 @@ async function confirmWaveReviewAction(
   const resolutionKey = waveReviewResolutionKey(state, args, reviewBeadId);
   const replay = findReplay(state, resolutionKey);
   if (replay) {
+    log.info("duplicate confirm replayed", {
+      kind: "wave_review",
+      actionId: args.confirmAction,
+      dispatchKey: resolutionKey,
+      coordinatorEpoch: replay.coordinatorEpoch,
+      beadCount: beadIds.length,
+      ...(reviewBeadId ? { reviewBeadId } : {}),
+    });
     return buildWaveReviewReplayResult(
       ctx,
       args,
@@ -846,6 +856,12 @@ export async function runWrapUpGate(
     });
     const replay = findReplay(state, resolutionKey);
     if (replay) {
+      log.info("duplicate confirm replayed", {
+        kind: "wrap_up",
+        actionId,
+        dispatchKey: resolutionKey,
+        coordinatorEpoch: replay.coordinatorEpoch,
+      });
       return makeOkToolResult(
         "flywheel_wrap_up_gate",
         state.phase,
@@ -905,6 +921,10 @@ export async function runWrapUpGate(
   }
 
   if (state.wrapUpConfirmed && !args.force) {
+    log.info("wrap up already confirmed", {
+      confirmedAction: state.wrapUpConfirmedAction,
+      coordinatorEpoch: getCoordinatorEpoch(state),
+    });
     const outcome = buildWrapUpAlreadyConfirmedPayload({
       confirmedAction: state.wrapUpConfirmedAction,
     });

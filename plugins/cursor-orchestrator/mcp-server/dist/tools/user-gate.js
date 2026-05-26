@@ -9,8 +9,10 @@ import { computeBeadApprovalMetrics, formatQualityLine, loadOpenBeadsForGate, } 
 import { makeOkToolResult, makeToolError } from "./shared.js";
 import { acceptWaveBeadsAtReview, runReview } from "./review.js";
 import { resolveRecoveryContext } from "../recover-gates.js";
+import { createLogger } from "../logger.js";
 const execFileAsync = promisify(execFile);
 const GIT_TIMEOUT_MS = 8_000;
+const log = createLogger("recover-gates");
 function gateResultText(tool, compact) {
     const beads = compact.gateMeta.beadIds?.length ?? 0;
     return [
@@ -355,6 +357,14 @@ async function confirmWaveReviewAction(ctx, args) {
     const resolutionKey = waveReviewResolutionKey(state, args, reviewBeadId);
     const replay = findReplay(state, resolutionKey);
     if (replay) {
+        log.info("duplicate confirm replayed", {
+            kind: "wave_review",
+            actionId: args.confirmAction,
+            dispatchKey: resolutionKey,
+            coordinatorEpoch: replay.coordinatorEpoch,
+            beadCount: beadIds.length,
+            ...(reviewBeadId ? { reviewBeadId } : {}),
+        });
         return buildWaveReviewReplayResult(ctx, args, replay, resolutionKey, reviewBeadId);
     }
     switch (confirmAction) {
@@ -532,6 +542,12 @@ export async function runWrapUpGate(ctx, args) {
         });
         const replay = findReplay(state, resolutionKey);
         if (replay) {
+            log.info("duplicate confirm replayed", {
+                kind: "wrap_up",
+                actionId,
+                dispatchKey: resolutionKey,
+                coordinatorEpoch: replay.coordinatorEpoch,
+            });
             return makeOkToolResult("flywheel_wrap_up_gate", state.phase, `Wrap-up path already confirmed: ${args.confirmWrapUp} (replay, epoch ${replay.coordinatorEpoch}).`, {
                 kind: "wrap_up_confirmed",
                 wrapUpConfirmed: true,
@@ -577,6 +593,10 @@ export async function runWrapUpGate(ctx, args) {
         });
     }
     if (state.wrapUpConfirmed && !args.force) {
+        log.info("wrap up already confirmed", {
+            confirmedAction: state.wrapUpConfirmedAction,
+            coordinatorEpoch: getCoordinatorEpoch(state),
+        });
         const outcome = buildWrapUpAlreadyConfirmedPayload({
             confirmedAction: state.wrapUpConfirmedAction,
         });

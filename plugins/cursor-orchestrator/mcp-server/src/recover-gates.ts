@@ -8,6 +8,7 @@ import { execFile } from "node:child_process";
 
 import { readBeads } from "./beads.js";
 import { readCheckpoint, type ReadCheckpointResult } from "./checkpoint.js";
+import { createLogger } from "./logger.js";
 import type {
   Bead,
   CheckpointEnvelope,
@@ -19,6 +20,7 @@ import type {
 } from "./types.js";
 
 const execFileAsync = promisify(execFile);
+const log = createLogger("recover-gates");
 
 export const RECOVER_CHECKPOINT_STALE_MS = 24 * 60 * 60 * 1000;
 export const RECOVER_BEAD_SCAN_TIMEOUT_MS = 1500;
@@ -220,6 +222,12 @@ export async function scanBeadCandidates(
 
   const { ids, truncated } = capCandidateIds(closedIds, cap);
   if (truncated) {
+    log.info("candidate cap hit", {
+      source: "bead_scan",
+      cap,
+      totalClosed: closedIds.length,
+      candidateCount: ids.length,
+    });
     warnings.push(
       `bead scan truncated to ${cap} candidates (${closedIds.length} closed beads)`,
     );
@@ -380,9 +388,23 @@ export async function resolveRecoveryContext(
       resolvedCaps.candidateCap,
     );
     if (truncated) {
+      log.info("candidate cap hit", {
+        source: "checkpoint",
+        cap: resolvedCaps.candidateCap,
+        totalCandidates: filteredCandidates.length,
+        candidateCount: ids.length,
+      });
       warnings.push(
         `checkpoint candidates truncated to ${resolvedCaps.candidateCap}`,
       );
+    }
+
+    if (trust.confidence === "stale") {
+      log.info("stale checkpoint classified", {
+        ageMs: trust.ageMs,
+        candidateCount: ids.length,
+        branchMismatch: trust.branchMismatch,
+      });
     }
 
     if (ids.length > 0) {
@@ -419,6 +441,10 @@ export async function resolveRecoveryContext(
   warnings.push(...scan.warnings);
 
   if (scan.beadIds.length > 0) {
+    log.info("bead scan degraded", {
+      candidateCount: scan.beadIds.length,
+      truncated: scan.truncated,
+    });
     return {
       mode,
       beadIds: scan.beadIds,
