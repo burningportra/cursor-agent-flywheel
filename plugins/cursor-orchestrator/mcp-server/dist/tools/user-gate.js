@@ -21,14 +21,45 @@ function gateResultText(tool, compact) {
         .filter(Boolean)
         .join("\n");
 }
+function isRenameOrCopyPorcelain(xy) {
+    return (xy[0] === "R" ||
+        xy[0] === "C" ||
+        xy[1] === "R" ||
+        xy[1] === "C");
+}
+/** Parse NUL-terminated `git status --porcelain=v1 -z` output into path entries. */
+export function parseGitPorcelainZ(raw) {
+    if (!raw)
+        return [];
+    const paths = [];
+    const parts = raw.split("\0");
+    let i = 0;
+    while (i < parts.length) {
+        const line = parts[i];
+        i++;
+        if (!line || line.length < 4)
+            continue;
+        const xy = line.slice(0, 2);
+        const firstPath = line.slice(3);
+        if (isRenameOrCopyPorcelain(xy)) {
+            if (firstPath)
+                paths.push(firstPath);
+            const secondPath = parts[i];
+            if (secondPath) {
+                paths.push(secondPath);
+                i++;
+            }
+        }
+        else if (firstPath) {
+            paths.push(firstPath);
+        }
+    }
+    return paths;
+}
 async function gitPorcelain(cwd) {
     try {
-        const r = await execFileAsync("git", ["status", "--porcelain"], { cwd, timeout: GIT_TIMEOUT_MS });
-        return r.stdout
-            .split("\n")
-            .map((l) => l.trim())
-            .filter(Boolean)
-            .map((l) => l.slice(3).trim());
+        const r = await execFileAsync("git", ["status", "--porcelain=v1", "-z"], { cwd, timeout: GIT_TIMEOUT_MS, maxBuffer: 10 * 1024 * 1024 });
+        return parseGitPorcelainZ(r.stdout);
     }
     catch {
         return [];
