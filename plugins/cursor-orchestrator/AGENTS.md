@@ -290,6 +290,8 @@ Applies to every `ntm spawn` and `ntm --robot-send` invocation in this plugin's 
 
 ## Bead Lifecycle
 
+**`readBeads()` uses `br list --json --all`.** The default `br list` omits closed issues; the orchestrator needs the full graph for wave review, `/recover-gates` trust checks, and verify/reconcile paths. Do not drop `--all` when changing bead reads.
+
 After running an implementation, ALWAYS close the bead and verify the close took effect:
 
 ```

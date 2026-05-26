@@ -6,6 +6,26 @@ _No plugin-only changes beyond monorepo root._
 
 ---
 
+## [3.21.0] — 2026-05-26
+
+### Added
+
+- **Recover-gates** — `resolveRecoveryContext` (checkpoint trust, bead scan, manual degrade), bead-pick gate, gate-resolution ledger (FIFO 20, idempotent replay), compact gate payloads with `option.action` routing, RECOV001/RECOV002 skill lint, contract tests.
+- **`observe` pending-gate hint** — suppressed after wrap-up confirm or recent steering; capped message for implement/iterate phases.
+- **Outcome grading** — Cursor Task grader path; verdict persistence under `.pi-flywheel/plans/<slug>/grading/`.
+
+### Fixed
+
+- **`readBeads`** — `br list --json --all` so closed beads resolve in wave review and recovery (fixes "Unknown bead id(s)" after implement).
+- **Wave/wrap-up gates** — strict Zod args, exhaustive `confirmWaveReviewAction`, `wrap_up_already_confirmed` with `askQuestion: null`, git porcelain `-z` rename handling.
+
+### Changed
+
+- **`/recover-gates`** and **`/flywheel-recover-gates`** — On-error tables, context-budget playbook (no ceremony/discover on recovery).
+- **Commands/skills** — recover-gates quick index and full playbook in plugin + workspace symlinks.
+
+---
+
 ## [3.20.0] — 2026-05-26
 
 ### Fixed

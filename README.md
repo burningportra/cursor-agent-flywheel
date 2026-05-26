@@ -171,6 +171,8 @@ Primary names use the **`flywheel_`** prefix (`orch_*` aliases are deprecated).
 | `flywheel_approve_beads` | Start implementation **after** launch gate |
 | `flywheel_impl_tick` | Poll during implement (~240s default) |
 | `flywheel_review` / `flywheel_advance_wave` | Review + wave progression |
+| `flywheel_wave_review_gate` / `flywheel_wrap_up_gate` | Post-implement menus (`/recover-gates`) |
+| `flywheel_grade_outcome` | Rubric verdict before wrap-up (Step 9.5.0) |
 | `flywheel_doctor` | 23-check triage |
 
 Machine-readable catalog: `flywheel_capabilities` / `flywheel_robot_docs`.
