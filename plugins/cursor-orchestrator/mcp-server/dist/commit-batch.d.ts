@@ -8,20 +8,24 @@ import type { FlywheelState, Finding, BatchReviewVerdict } from "./types.js";
  */
 export declare function countCommitsSinceLastBatchReview(cwd: string, sha: string | undefined): Promise<number>;
 /**
+ * Resolve commit-batch fresh-eyes threshold for this session.
+ *
+ * Priority: checkpoint `state.commitBatchThreshold` (incl. explicit `0` to
+ * disable) → `FW_COMMIT_BATCH_THRESHOLD` env → `flywheel.config.yaml`
+ * `impl_tick.commit_batch_threshold` → `0` (off).
+ */
+export declare function resolveCommitBatchThreshold(cwd: string, state: FlywheelState): number;
+/**
  * Pure check: should the coordinator dispatch a batch review now? Returns
- * true iff the feature is enabled (`commitBatchThreshold` is a positive
- * integer) AND the live commit count has reached the threshold. 0/undefined
- * threshold disables the feature — the existing post-wave gate flow is
- * unchanged.
+ * true iff the feature is enabled (`threshold` is a positive integer) AND
+ * the live commit count has reached the threshold.
  *
  * The caller MUST compute `count` from `countCommitsSinceLastBatchReview(cwd,
- * state.lastBatchReviewSha)` and pass it in. This intentionally keeps the
- * boolean check pure-synchronous: callers handle the I/O for testability and
- * to make the data-flow visible in `advance-wave.ts` (we count commits at
- * gate-time, not from a stored counter — `state.commitBatchCounter` is
- * deprecated and unused by this function).
+ * state.lastBatchReviewSha)` and pass it in.
  */
-export declare function shouldTriggerBatchReview(state: FlywheelState, count: number): boolean;
+export declare function shouldTriggerBatchReview(threshold: number, count: number): boolean;
+/** Seed batch-review baseline from cycle start when impl begins counting commits. */
+export declare function ensureBatchReviewBaseline(state: FlywheelState, headSha: string): FlywheelState;
 /**
  * Record a dispatched batch review against the state. Returns a NEW state
  * object — the input is not mutated. Sets `lastBatchReviewSha` to the

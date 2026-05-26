@@ -97,6 +97,100 @@ function looksLikeBead(value) {
         && typeof value.description === 'string'
         && typeof value.status === 'string');
 }
+/** Close one bead after review accept — br update, state sync, optional parent auto-close. */
+async function finalizeBeadLooksGood(ctx, beadId, bead) {
+    const { exec, cwd, state, signal } = ctx;
+    if (bead.status !== 'closed') {
+        const updateResult = await exec('br', ['update', beadId, '--status', 'closed'], {
+            cwd,
+            timeout: 5000,
+            signal,
+        });
+        if (updateResult.code !== 0) {
+            log.warn('br update --status closed failed during review accept', {
+                beadId,
+                code: updateResult.code,
+                stderr: updateResult.stderr,
+            });
+        }
+    }
+    if (!state.beadResults)
+        state.beadResults = {};
+    state.beadResults[beadId] = {
+        beadId,
+        status: 'success',
+        summary: bead.status === 'closed' ? 'Auto-closed by impl agent' : 'Passed review',
+    };
+    if (!state.beadReviewPassCounts)
+        state.beadReviewPassCounts = {};
+    state.beadReviewPassCounts[beadId] = (state.beadReviewPassCounts[beadId] ?? 0) + 1;
+    if (bead.parent) {
+        const brListResult = await exec('br', ['list', '--json'], { cwd, timeout: 8000, signal });
+        if (brListResult.code === 0) {
+            try {
+                const allBeads = JSON.parse(brListResult.stdout);
+                const siblings = allBeads.filter((b) => b.parent === bead.parent);
+                const allDone = siblings.every((b) => b.status === 'closed' || b.id === beadId);
+                if (allDone && bead.parent) {
+                    await exec('br', ['update', bead.parent, '--status', 'closed'], {
+                        cwd,
+                        timeout: 5000,
+                        signal,
+                    });
+                    if (!state.beadResults)
+                        state.beadResults = {};
+                    state.beadResults[bead.parent] = {
+                        beadId: bead.parent,
+                        status: 'success',
+                        summary: 'All subtasks complete',
+                    };
+                }
+            }
+            catch (err) {
+                log.warn('Failed to parse sibling beads for parent auto-close', {
+                    code: 'parse_failure',
+                    tool: 'flywheel_review',
+                    phase: state.phase,
+                    cause: errMsg(err),
+                    parentId: bead.parent,
+                });
+            }
+        }
+    }
+}
+/**
+ * Accept every bead in a wave review gate (`looks-good-all`) — closes each bead
+ * in br and advances once. Used by flywheel_wave_review_gate confirmAction so
+ * coordinators are not required to re-call flywheel_review per bead.
+ */
+export async function acceptWaveBeadsAtReview(ctx, beadIds) {
+    const { exec, cwd, state, saveState, signal } = ctx;
+    if (beadIds.length === 0) {
+        return errorResult(state.phase, 'invalid_input', 'beadIds must be a non-empty array to accept wave review.');
+    }
+    let lastBeadId = beadIds[beadIds.length - 1];
+    let lastTitle = lastBeadId;
+    for (const beadId of beadIds) {
+        const brShowResult = await exec('br', ['show', beadId, '--json'], {
+            cwd,
+            timeout: 8000,
+            signal,
+        });
+        if (brShowResult.code !== 0) {
+            return errorResult(state.phase, 'not_found', `Bead ${beadId} not found while accepting wave review.`, { beadId, stderr: brShowResult.stderr });
+        }
+        const bead = parseBrShowBead(brShowResult.stdout);
+        if (!bead) {
+            return errorResult(state.phase, 'parse_failure', `Error parsing bead ${beadId} from br show output.`, { beadId });
+        }
+        await finalizeBeadLooksGood(ctx, beadId, bead);
+        lastBeadId = beadId;
+        lastTitle = bead.title;
+    }
+    // E3: wave accept closes beads before advancing
+    saveState(state);
+    return nextBeadOrGates(ctx, lastBeadId, lastTitle, 'Passed');
+}
 /**
  * flywheel_review — Submit implementation work for review.
  *
@@ -219,49 +313,14 @@ export async function runReview(ctx, args) {
     }
     // ── action: looks-good ────────────────────────────────────────
     if (args.action === 'looks-good') {
-        // Mark bead closed
-        await exec('br', ['update', beadId, '--status', 'closed'], { cwd, timeout: 5000, signal });
-        if (!state.beadResults)
-            state.beadResults = {};
-        state.beadResults[beadId] = {
-            beadId,
-            status: 'success',
-            summary: 'Passed review',
-        };
-        // Track review pass count
-        if (!state.beadReviewPassCounts)
-            state.beadReviewPassCounts = {};
-        state.beadReviewPassCounts[beadId] = (state.beadReviewPassCounts[beadId] ?? 0) + 1;
-        // Auto-close parent if all siblings are done
-        if (bead.parent) {
-            const brListResult = await exec('br', ['list', '--json'], { cwd, timeout: 8000, signal });
-            if (brListResult.code === 0) {
-                try {
-                    const allBeads = JSON.parse(brListResult.stdout);
-                    const siblings = allBeads.filter(b => b.parent === bead.parent);
-                    const allDone = siblings.every(b => b.status === 'closed' || b.id === beadId);
-                    if (allDone && bead.parent) {
-                        await exec('br', ['update', bead.parent, '--status', 'closed'], { cwd, timeout: 5000, signal });
-                        if (!state.beadResults)
-                            state.beadResults = {};
-                        state.beadResults[bead.parent] = { beadId: bead.parent, status: 'success', summary: 'All subtasks complete' };
-                    }
-                }
-                catch (err) {
-                    log.warn('Failed to parse sibling beads for parent auto-close', {
-                        code: 'parse_failure', tool: 'flywheel_review', phase: state.phase,
-                        cause: errMsg(err),
-                        parentId: bead.parent,
-                    });
-                }
-            }
-        }
+        await finalizeBeadLooksGood(ctx, beadId, bead);
         // E3: successful looks-good closes bead and advances
         await recordGateSteering(ctx, {
             source: 'wave_review',
             actionId: 'looks-good-all',
             beadIds: [beadId],
         });
+        saveState(state);
         return nextBeadOrGates(ctx, beadId, bead.title, 'Passed');
     }
     // ── action: hit-me — return parallel review agent specs ───────

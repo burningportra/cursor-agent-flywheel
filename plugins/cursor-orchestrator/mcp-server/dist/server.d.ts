@@ -66,6 +66,7 @@ export declare const TOOLS: ({
             output?: undefined;
             confirmDuelModels?: undefined;
             skipDuelModelsGate?: undefined;
+            commitBatchThreshold?: undefined;
             query?: undefined;
             operation?: undefined;
             content?: undefined;
@@ -215,6 +216,7 @@ export declare const TOOLS: ({
             output?: undefined;
             confirmDuelModels?: undefined;
             skipDuelModelsGate?: undefined;
+            commitBatchThreshold?: undefined;
             query?: undefined;
             operation?: undefined;
             content?: undefined;
@@ -286,6 +288,7 @@ export declare const TOOLS: ({
             output?: undefined;
             confirmDuelModels?: undefined;
             skipDuelModelsGate?: undefined;
+            commitBatchThreshold?: undefined;
             query?: undefined;
             operation?: undefined;
             content?: undefined;
@@ -369,6 +372,7 @@ export declare const TOOLS: ({
             output?: undefined;
             confirmDuelModels?: undefined;
             skipDuelModelsGate?: undefined;
+            commitBatchThreshold?: undefined;
             query?: undefined;
             operation?: undefined;
             content?: undefined;
@@ -493,6 +497,7 @@ export declare const TOOLS: ({
             output?: undefined;
             confirmDuelModels?: undefined;
             skipDuelModelsGate?: undefined;
+            commitBatchThreshold?: undefined;
             query?: undefined;
             operation?: undefined;
             content?: undefined;
@@ -578,6 +583,7 @@ export declare const TOOLS: ({
             output?: undefined;
             confirmDuelModels?: undefined;
             skipDuelModelsGate?: undefined;
+            commitBatchThreshold?: undefined;
             query?: undefined;
             operation?: undefined;
             content?: undefined;
@@ -653,6 +659,7 @@ export declare const TOOLS: ({
             output?: undefined;
             confirmDuelModels?: undefined;
             skipDuelModelsGate?: undefined;
+            commitBatchThreshold?: undefined;
             query?: undefined;
             operation?: undefined;
             content?: undefined;
@@ -742,6 +749,7 @@ export declare const TOOLS: ({
             output?: undefined;
             confirmDuelModels?: undefined;
             skipDuelModelsGate?: undefined;
+            commitBatchThreshold?: undefined;
             query?: undefined;
             operation?: undefined;
             content?: undefined;
@@ -825,6 +833,7 @@ export declare const TOOLS: ({
             output?: undefined;
             confirmDuelModels?: undefined;
             skipDuelModelsGate?: undefined;
+            commitBatchThreshold?: undefined;
             query?: undefined;
             operation?: undefined;
             content?: undefined;
@@ -903,6 +912,7 @@ export declare const TOOLS: ({
             output?: undefined;
             confirmDuelModels?: undefined;
             skipDuelModelsGate?: undefined;
+            commitBatchThreshold?: undefined;
             query?: undefined;
             operation?: undefined;
             content?: undefined;
@@ -978,6 +988,7 @@ export declare const TOOLS: ({
             output?: undefined;
             confirmDuelModels?: undefined;
             skipDuelModelsGate?: undefined;
+            commitBatchThreshold?: undefined;
             query?: undefined;
             operation?: undefined;
             content?: undefined;
@@ -1065,6 +1076,7 @@ export declare const TOOLS: ({
             output?: undefined;
             confirmDuelModels?: undefined;
             skipDuelModelsGate?: undefined;
+            commitBatchThreshold?: undefined;
             query?: undefined;
             operation?: undefined;
             content?: undefined;
@@ -1152,6 +1164,7 @@ export declare const TOOLS: ({
             totalSections?: undefined;
             missingSections?: undefined;
             overlapPairs?: undefined;
+            commitBatchThreshold?: undefined;
             query?: undefined;
             operation?: undefined;
             content?: undefined;
@@ -1187,6 +1200,11 @@ export declare const TOOLS: ({
                 description: string;
             };
             confirmImplModels: {
+                description: string;
+            };
+            commitBatchThreshold: {
+                type: string;
+                minimum: number;
                 description: string;
             };
             goal?: undefined;
@@ -1312,6 +1330,7 @@ export declare const TOOLS: ({
             output?: undefined;
             confirmDuelModels?: undefined;
             skipDuelModelsGate?: undefined;
+            commitBatchThreshold?: undefined;
             includeBodyInText?: undefined;
             name?: undefined;
             sinceDays?: undefined;
@@ -1375,6 +1394,7 @@ export declare const TOOLS: ({
             output?: undefined;
             confirmDuelModels?: undefined;
             skipDuelModelsGate?: undefined;
+            commitBatchThreshold?: undefined;
             query?: undefined;
             operation?: undefined;
             content?: undefined;
@@ -1452,6 +1472,7 @@ export declare const TOOLS: ({
             output?: undefined;
             confirmDuelModels?: undefined;
             skipDuelModelsGate?: undefined;
+            commitBatchThreshold?: undefined;
             query?: undefined;
             operation?: undefined;
             content?: undefined;
@@ -1525,6 +1546,7 @@ export declare const TOOLS: ({
             output?: undefined;
             confirmDuelModels?: undefined;
             skipDuelModelsGate?: undefined;
+            commitBatchThreshold?: undefined;
             query?: undefined;
             operation?: undefined;
             content?: undefined;
@@ -1568,6 +1590,11 @@ export declare const TOOLS: ({
             };
             coordinatorAgent: {
                 type: string;
+                description: string;
+            };
+            commitBatchThreshold: {
+                type: string;
+                minimum: number;
                 description: string;
             };
             goal?: undefined;
@@ -1694,6 +1721,7 @@ export declare const TOOLS: ({
             output?: undefined;
             confirmDuelModels?: undefined;
             skipDuelModelsGate?: undefined;
+            commitBatchThreshold?: undefined;
             query?: undefined;
             operation?: undefined;
             content?: undefined;
@@ -1772,6 +1800,7 @@ export declare const TOOLS: ({
             output?: undefined;
             confirmDuelModels?: undefined;
             skipDuelModelsGate?: undefined;
+            commitBatchThreshold?: undefined;
             query?: undefined;
             operation?: undefined;
             content?: undefined;
@@ -1842,6 +1871,7 @@ export declare const TOOLS: ({
             output?: undefined;
             confirmDuelModels?: undefined;
             skipDuelModelsGate?: undefined;
+            commitBatchThreshold?: undefined;
             query?: undefined;
             operation?: undefined;
             content?: undefined;
@@ -1940,6 +1970,7 @@ export declare const TOOLS: ({
             output?: undefined;
             confirmDuelModels?: undefined;
             skipDuelModelsGate?: undefined;
+            commitBatchThreshold?: undefined;
             query?: undefined;
             operation?: undefined;
             content?: undefined;
@@ -2016,6 +2047,7 @@ export declare const TOOLS: ({
             output?: undefined;
             confirmDuelModels?: undefined;
             skipDuelModelsGate?: undefined;
+            commitBatchThreshold?: undefined;
             query?: undefined;
             operation?: undefined;
             content?: undefined;
@@ -2088,6 +2120,7 @@ export declare const TOOLS: ({
             output?: undefined;
             confirmDuelModels?: undefined;
             skipDuelModelsGate?: undefined;
+            commitBatchThreshold?: undefined;
             query?: undefined;
             operation?: undefined;
             content?: undefined;

@@ -170,12 +170,34 @@ describe('flywheel user gate tools', () => {
   });
 
   it('E8: flywheel_wave_review_gate confirmAction bumps coordinatorEpoch', async () => {
+    const bead = makeBead('tb-9');
+    bead.status = 'in_progress';
     const saved: FlywheelState[] = [];
     const { ctx } = {
       ctx: {
-        exec: createMockExec([]),
+        exec: createMockExec([
+          {
+            cmd: 'br',
+            args: ['show', 'tb-9', '--json'],
+            result: { code: 0, stdout: JSON.stringify(bead), stderr: '' },
+          },
+          {
+            cmd: 'br',
+            args: ['update', 'tb-9', '--status', 'closed'],
+            result: { code: 0, stdout: '', stderr: '' },
+          },
+          {
+            cmd: 'br',
+            args: ['ready', '--json'],
+            result: { code: 0, stdout: '[]', stderr: '' },
+          },
+        ]),
         cwd: '/fake/project',
-        state: makeState({ phase: 'implementing', coordinatorEpoch: 4 }),
+        state: makeState({
+          phase: 'implementing',
+          coordinatorEpoch: 4,
+          beadResults: {},
+        }),
         saveState: (s: FlywheelState) => {
           saved.push(structuredClone(s));
         },
@@ -192,13 +214,50 @@ describe('flywheel user gate tools', () => {
 
     expect(data.kind).toBe('wave_review_confirmed');
     expect(data.coordinatorEpoch).toBe(5);
+    expect(data.closedBeadIds).toEqual(['tb-9']);
     expect(ctx.state.coordinatorEpoch).toBe(5);
-    expect(saved.some((s) => s.coordinatorEpoch === 5)).toBe(true);
+    expect(ctx.state.beadResults!['tb-9']).toMatchObject({
+      beadId: 'tb-9',
+      status: 'success',
+    });
+    expect(saved.some((s) => s.beadResults?.['tb-9']?.status === 'success')).toBe(true);
     expect(ctx.state.steeringEvents).toHaveLength(1);
     expect(ctx.state.steeringEvents![0]).toMatchObject({
       source: 'wave_review',
       actionId: 'looks-good-all',
       beadIds: ['tb-9'],
     });
+    expect(result.content[0]?.text).toContain('closed 1 bead');
+  });
+
+  it('E8: confirmAction looks-good-all closes every bead in the wave', async () => {
+    const beadA = makeBead('tb-a');
+    beadA.status = 'in_progress';
+    const beadB = makeBead('tb-b');
+    beadB.status = 'in_progress';
+    const { ctx } = {
+      ctx: {
+        exec: createMockExec([
+          { cmd: 'br', args: ['show', 'tb-a', '--json'], result: { code: 0, stdout: JSON.stringify(beadA), stderr: '' } },
+          { cmd: 'br', args: ['update', 'tb-a', '--status', 'closed'], result: { code: 0, stdout: '', stderr: '' } },
+          { cmd: 'br', args: ['show', 'tb-b', '--json'], result: { code: 0, stdout: JSON.stringify(beadB), stderr: '' } },
+          { cmd: 'br', args: ['update', 'tb-b', '--status', 'closed'], result: { code: 0, stdout: '', stderr: '' } },
+          { cmd: 'br', args: ['ready', '--json'], result: { code: 0, stdout: '[]', stderr: '' } },
+        ]),
+        cwd: '/fake/project',
+        state: makeState({ phase: 'implementing', beadResults: {} }),
+        saveState: (_s: FlywheelState) => {},
+        clearState: () => {},
+      },
+    };
+
+    await runWaveReviewGate(ctx, {
+      cwd: '/fake/project',
+      beadIds: ['tb-a', 'tb-b'],
+      confirmAction: 'looks-good-all',
+    });
+
+    expect(ctx.state.beadResults!['tb-a']?.status).toBe('success');
+    expect(ctx.state.beadResults!['tb-b']?.status).toBe('success');
   });
 });

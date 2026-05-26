@@ -19,6 +19,11 @@
     "coordinatorAgent": {
       "type": "string",
       "description": "Optional Agent Mail name for inbox probes"
+    },
+    "commitBatchThreshold": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Persist commit-batch fresh-eyes threshold for this session (0 = disable). Also readable from flywheel.config.yaml impl_tick.commit_batch_threshold or FW_COMMIT_BATCH_THRESHOLD."
     }
   },
   "required": [

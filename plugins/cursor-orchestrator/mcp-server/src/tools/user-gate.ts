@@ -30,6 +30,7 @@ import {
 } from "../bead-approval-metrics.js";
 import { makeOkToolResult, makeToolError } from "./shared.js";
 import type { BeadApprovalGateArgs } from "../types.js";
+import { acceptWaveBeadsAtReview } from "./review.js";
 
 const execFileAsync = promisify(execFile);
 const GIT_TIMEOUT_MS = 8_000;
@@ -119,6 +120,34 @@ export async function runWaveReviewGate(
       actionId: args.confirmAction,
       beadIds: args.beadIds,
     });
+
+    // looks-good-all must close beads — coordinators often stop after confirmAction.
+    if (args.confirmAction === "looks-good-all") {
+      const reviewResult = await acceptWaveBeadsAtReview(ctx, args.beadIds);
+      const reviewData = (
+        reviewResult.structuredContent as { data?: Record<string, unknown> } | undefined
+      )?.data;
+      const { kind: reviewKind, ...reviewRest } = reviewData ?? {};
+      return makeOkToolResult(
+        "flywheel_wave_review_gate",
+        state.phase,
+        [
+          `Wave review accepted: closed ${args.beadIds.length} bead(s) (epoch ${epoch}).`,
+          reviewResult.content[0]?.text ?? "",
+        ]
+          .filter(Boolean)
+          .join("\n\n"),
+        {
+          kind: "wave_review_confirmed",
+          confirmAction: args.confirmAction,
+          coordinatorEpoch: epoch,
+          beadIds: args.beadIds,
+          closedBeadIds: args.beadIds,
+          reviewOutcome: { kind: reviewKind, ...reviewRest },
+        },
+      );
+    }
+
     return makeOkToolResult(
       "flywheel_wave_review_gate",
       state.phase,

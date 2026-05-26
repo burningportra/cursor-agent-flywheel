@@ -35,7 +35,7 @@ vi.mock("../logger.js", () => ({
 }));
 // commit-batch.ts must be imported AFTER the vi.mock calls so the mocked
 // child_process binds before the module's `promisify(execFile)` runs.
-const { countCommitsSinceLastBatchReview, shouldTriggerBatchReview, recordBatchReview, synthesizeBeadsFromFindings, rollbackSynthesizedBeads, } = await import("../commit-batch.js");
+const { countCommitsSinceLastBatchReview, shouldTriggerBatchReview, resolveCommitBatchThreshold, ensureBatchReviewBaseline, recordBatchReview, synthesizeBeadsFromFindings, rollbackSynthesizedBeads, } = await import("../commit-batch.js");
 beforeEach(() => {
     execFileMock.mockClear();
     execHandler = () => {
@@ -109,32 +109,71 @@ describe("countCommitsSinceLastBatchReview", () => {
 // ─── shouldTriggerBatchReview ────────────────────────────────────────────
 describe("shouldTriggerBatchReview", () => {
     it("returns false when live count is below threshold", () => {
-        const s = baseState({ commitBatchThreshold: 8 });
-        expect(shouldTriggerBatchReview(s, 7)).toBe(false);
+        expect(shouldTriggerBatchReview(8, 7)).toBe(false);
     });
     it("returns true when live count equals threshold", () => {
-        const s = baseState({ commitBatchThreshold: 8 });
-        expect(shouldTriggerBatchReview(s, 8)).toBe(true);
+        expect(shouldTriggerBatchReview(8, 8)).toBe(true);
     });
     it("returns true when live count exceeds threshold", () => {
-        const s = baseState({ commitBatchThreshold: 8 });
-        expect(shouldTriggerBatchReview(s, 9)).toBe(true);
+        expect(shouldTriggerBatchReview(8, 9)).toBe(true);
     });
     it("returns false when threshold is 0 (feature disabled)", () => {
-        const s = baseState({ commitBatchThreshold: 0 });
-        expect(shouldTriggerBatchReview(s, 8)).toBe(false);
-    });
-    it("returns false when threshold is undefined (feature unset)", () => {
-        const s = baseState();
-        expect(shouldTriggerBatchReview(s, 8)).toBe(false);
+        expect(shouldTriggerBatchReview(0, 8)).toBe(false);
     });
     it("returns false when threshold is negative", () => {
-        const s = baseState({ commitBatchThreshold: -3 });
-        expect(shouldTriggerBatchReview(s, 8)).toBe(false);
+        expect(shouldTriggerBatchReview(-3, 8)).toBe(false);
     });
     it("returns false when threshold is non-integer", () => {
-        const s = baseState({ commitBatchThreshold: 8.5 });
-        expect(shouldTriggerBatchReview(s, 8)).toBe(false);
+        expect(shouldTriggerBatchReview(8.5, 8)).toBe(false);
+    });
+});
+describe("resolveCommitBatchThreshold", () => {
+    it("prefers checkpoint state over env and config", () => {
+        const prev = process.env.FW_COMMIT_BATCH_THRESHOLD;
+        process.env.FW_COMMIT_BATCH_THRESHOLD = "12";
+        try {
+            expect(resolveCommitBatchThreshold("/repo", baseState({ commitBatchThreshold: 5 }))).toBe(5);
+        }
+        finally {
+            if (prev === undefined)
+                delete process.env.FW_COMMIT_BATCH_THRESHOLD;
+            else
+                process.env.FW_COMMIT_BATCH_THRESHOLD = prev;
+        }
+    });
+    it("reads FW_COMMIT_BATCH_THRESHOLD when state unset", () => {
+        const prev = process.env.FW_COMMIT_BATCH_THRESHOLD;
+        process.env.FW_COMMIT_BATCH_THRESHOLD = "5";
+        try {
+            expect(resolveCommitBatchThreshold(process.cwd(), baseState())).toBe(5);
+        }
+        finally {
+            if (prev === undefined)
+                delete process.env.FW_COMMIT_BATCH_THRESHOLD;
+            else
+                process.env.FW_COMMIT_BATCH_THRESHOLD = prev;
+        }
+    });
+    it("returns 0 when nothing is configured", () => {
+        const prev = process.env.FW_COMMIT_BATCH_THRESHOLD;
+        delete process.env.FW_COMMIT_BATCH_THRESHOLD;
+        try {
+            expect(resolveCommitBatchThreshold("/nonexistent-cwd-no-config", baseState())).toBe(0);
+        }
+        finally {
+            if (prev !== undefined)
+                process.env.FW_COMMIT_BATCH_THRESHOLD = prev;
+        }
+    });
+});
+describe("ensureBatchReviewBaseline", () => {
+    it("seeds lastBatchReviewSha from cycleStartSha when missing", () => {
+        const next = ensureBatchReviewBaseline(baseState({ cycleStartSha: "abc123" }), "deadbeef");
+        expect(next.lastBatchReviewSha).toBe("abc123");
+    });
+    it("is idempotent when baseline already set", () => {
+        const s = baseState({ lastBatchReviewSha: "existing" });
+        expect(ensureBatchReviewBaseline(s, "deadbeef")).toBe(s);
     });
 });
 // ─── recordBatchReview ───────────────────────────────────────────────────

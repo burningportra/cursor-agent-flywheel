@@ -1,5 +1,6 @@
 import type { ConfirmImplModelsArgs, McpToolResult, ToolContext } from '../types.js';
 import { readyBeads } from '../beads.js';
+import { resolveCommitBatchThreshold } from '../commit-batch.js';
 import {
   buildCursorImplSpawnInstructions,
   buildImplModelsGate,
@@ -13,6 +14,31 @@ export interface ConfirmImplModelsOutcome {
   implModelsGate?: ReturnType<typeof buildImplModelsGate>;
   spawnInstructions?: string;
   confirmed: boolean;
+  /** Resolved threshold for pre-flight display (gate) or persisted value (confirm). */
+  commitBatchThreshold?: number;
+}
+
+function persistCommitBatchThreshold(
+  cwd: string,
+  state: ToolContext['state'],
+  explicit?: number,
+): number {
+  if (
+    typeof explicit === 'number'
+    && Number.isInteger(explicit)
+    && explicit >= 0
+  ) {
+    state.commitBatchThreshold = explicit;
+    return explicit;
+  }
+  if (state.commitBatchThreshold !== undefined) {
+    return state.commitBatchThreshold;
+  }
+  const resolved = resolveCommitBatchThreshold(cwd, state);
+  if (resolved > 0) {
+    state.commitBatchThreshold = resolved;
+  }
+  return resolved;
 }
 
 export async function runConfirmImplModels(
@@ -30,9 +56,11 @@ export async function runConfirmImplModels(
 
   if (args.confirmImplModels === undefined) {
     const gate = buildImplModelsGate(cwd, readyForRecommend);
+    const batchThreshold = resolveCommitBatchThreshold(cwd, state);
     const outcome: ConfirmImplModelsOutcome = {
       implModelsGate: gate,
       confirmed: Boolean(state.implModelsConfirmed),
+      commitBatchThreshold: batchThreshold,
       ...(state.implModelsConfirmed && state.implModels
         ? {
             implModels: state.implModels,
@@ -40,6 +68,10 @@ export async function runConfirmImplModels(
           }
         : {}),
     };
+    const batchLine =
+      batchThreshold > 0
+        ? `Commit-batch fresh-eyes: every ${batchThreshold} commits (from config/env/checkpoint). Pass commitBatchThreshold on confirm to override.`
+        : 'Commit-batch fresh-eyes: OFF — pass commitBatchThreshold on confirm (e.g. 5 or 8) or set impl_tick.commit_batch_threshold in flywheel.config.yaml.';
     const lines = [
       state.implModelsConfirmed
         ? 'Implement models already confirmed for this run.'
@@ -49,8 +81,10 @@ export async function runConfirmImplModels(
       '',
       formatCursorImplModelTable(gate.recommended),
       '',
+      batchLine,
+      '',
       'Present implModelsGate.options as numbered choices; wait for the user reply.',
-      'Then call flywheel_confirm_impl_models with confirmImplModels set ("recommended" if they accept option 1).',
+      'Then call flywheel_confirm_impl_models with confirmImplModels set ("recommended" if they accept option 1) and commitBatchThreshold when the user picks a batch-review cadence.',
     ];
     return makeOkToolResult('flywheel_confirm_impl_models', state.phase, lines.join('\n'), outcome);
   }
@@ -82,13 +116,20 @@ export async function runConfirmImplModels(
 
   state.implModels = resolved;
   state.implModelsConfirmed = true;
+  const batchThreshold = persistCommitBatchThreshold(cwd, state, args.commitBatchThreshold);
   saveState(state);
 
   const outcome: ConfirmImplModelsOutcome = {
     implModels: resolved,
     spawnInstructions: buildCursorImplSpawnInstructions(resolved),
     confirmed: true,
+    commitBatchThreshold: batchThreshold,
   };
+
+  const batchConfirmLine =
+    batchThreshold > 0
+      ? `Commit-batch fresh-eyes threshold persisted: ${batchThreshold} commits per review.`
+      : 'Commit-batch fresh-eyes: disabled (threshold 0).';
 
   return makeOkToolResult(
     'flywheel_confirm_impl_models',
@@ -98,7 +139,10 @@ export async function runConfirmImplModels(
       '',
       formatCursorImplModelTable(resolved),
       '',
+      batchConfirmLine,
+      '',
       'Spawn parallel Cursor Task agents using spawnInstructions; each Task must set `model` per bead complexity.',
+      'Re-call flywheel_impl_tick on ~interval_seconds cadence during implementation.',
     ].join('\n'),
     outcome,
   );

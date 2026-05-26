@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://agent-flywheel.dev/schemas/inputs/flywheel_confirm_impl_models.json",
   "title": "flywheel: flywheel_confirm_impl_models input",
-  "description": "One-time gate: show default implement models (flywheel.config.yaml implement:) and persist the user choice before spawning Cursor Task impl agents. Call without confirmImplModels to get implModelsGate; call again with confirmImplModels after the user replies.",
+  "description": "One-time gate: show default implement models (flywheel.config.yaml implement:) and persist the user choice before spawning Cursor Task impl agents. Also persists commitBatchThreshold from pre-flight (or config/env default). Call without confirmImplModels to get implModelsGate; call again with confirmImplModels after the user replies.",
   "type": "object",
   "properties": {
     "cwd": {
@@ -11,6 +11,11 @@
     },
     "confirmImplModels": {
       "description": "User choice: \"defaults\", { uniform: \"<slug>\" }, or { simple, medium, complex }."
+    },
+    "commitBatchThreshold": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Commit-batch fresh-eyes cadence (0 = off). On confirm, persists to checkpoint; when omitted, uses flywheel.config.yaml / FW_COMMIT_BATCH_THRESHOLD if set."
     }
   },
   "required": [

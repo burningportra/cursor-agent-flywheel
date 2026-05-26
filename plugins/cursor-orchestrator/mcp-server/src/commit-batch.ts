@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { FlywheelState, Finding, BatchReviewVerdict } from "./types.js";
 import { FindingSchema } from "./types.js";
+import { loadFlywheelConfigWithWarnings } from "./flywheel-config.js";
 import { createLogger } from "./logger.js";
 
 const log = createLogger("commit-batch");
@@ -42,28 +43,75 @@ export async function countCommitsSinceLastBatchReview(
 }
 
 /**
+ * Resolve commit-batch fresh-eyes threshold for this session.
+ *
+ * Priority: checkpoint `state.commitBatchThreshold` (incl. explicit `0` to
+ * disable) → `FW_COMMIT_BATCH_THRESHOLD` env → `flywheel.config.yaml`
+ * `impl_tick.commit_batch_threshold` → `0` (off).
+ */
+export function resolveCommitBatchThreshold(
+  cwd: string,
+  state: FlywheelState,
+): number {
+  if (
+    typeof state.commitBatchThreshold === "number"
+    && Number.isInteger(state.commitBatchThreshold)
+    && state.commitBatchThreshold >= 0
+  ) {
+    return state.commitBatchThreshold;
+  }
+
+  const envRaw = process.env.FW_COMMIT_BATCH_THRESHOLD?.trim();
+  if (envRaw !== undefined && envRaw !== "") {
+    const n = Number.parseInt(envRaw, 10);
+    if (Number.isInteger(n) && n >= 0) {
+      return n;
+    }
+  }
+
+  const fromConfig = loadFlywheelConfigWithWarnings(cwd).config.impl_tick?.commit_batch_threshold;
+  if (
+    typeof fromConfig === "number"
+    && Number.isInteger(fromConfig)
+    && fromConfig >= 0
+  ) {
+    return fromConfig;
+  }
+
+  return 0;
+}
+
+/**
  * Pure check: should the coordinator dispatch a batch review now? Returns
- * true iff the feature is enabled (`commitBatchThreshold` is a positive
- * integer) AND the live commit count has reached the threshold. 0/undefined
- * threshold disables the feature — the existing post-wave gate flow is
- * unchanged.
+ * true iff the feature is enabled (`threshold` is a positive integer) AND
+ * the live commit count has reached the threshold.
  *
  * The caller MUST compute `count` from `countCommitsSinceLastBatchReview(cwd,
- * state.lastBatchReviewSha)` and pass it in. This intentionally keeps the
- * boolean check pure-synchronous: callers handle the I/O for testability and
- * to make the data-flow visible in `advance-wave.ts` (we count commits at
- * gate-time, not from a stored counter — `state.commitBatchCounter` is
- * deprecated and unused by this function).
+ * state.lastBatchReviewSha)` and pass it in.
  */
 export function shouldTriggerBatchReview(
-  state: FlywheelState,
+  threshold: number,
   count: number,
 ): boolean {
-  const threshold = state.commitBatchThreshold;
-  if (typeof threshold !== "number" || !Number.isInteger(threshold) || threshold <= 0) {
+  if (!Number.isInteger(threshold) || threshold <= 0) {
     return false;
   }
   return count >= threshold;
+}
+
+/** Seed batch-review baseline from cycle start when impl begins counting commits. */
+export function ensureBatchReviewBaseline(
+  state: FlywheelState,
+  headSha: string,
+): FlywheelState {
+  if (state.lastBatchReviewSha && state.lastBatchReviewSha.length > 0) {
+    return state;
+  }
+  const baseline = state.cycleStartSha ?? headSha;
+  if (!baseline) {
+    return state;
+  }
+  return { ...state, lastBatchReviewSha: baseline };
 }
 
 /**

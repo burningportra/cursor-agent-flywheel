@@ -346,7 +346,7 @@ const PRIMARY_TOOLS = [
         confirmAction: {
           type: 'string',
           description:
-            'User AskQuestion selection — records steering and bumps coordinator epoch (E8). Re-call after user picks.',
+            'User AskQuestion selection — records steering and bumps coordinator epoch (E8). For looks-good-all, also closes every beadId in br. Re-call after user picks.',
         },
       },
       required: ['cwd', 'beadIds'],
@@ -439,7 +439,7 @@ const PRIMARY_TOOLS = [
   {
     name: 'flywheel_confirm_impl_models',
     description:
-      'One-time gate: show default implement models (flywheel.config.yaml implement:) and persist the user choice before spawning Cursor Task impl agents. Call without confirmImplModels to get implModelsGate; call again with confirmImplModels after the user replies.',
+      'One-time gate: show default implement models (flywheel.config.yaml implement:) and persist the user choice before spawning Cursor Task impl agents. Also persists commitBatchThreshold from pre-flight (or config/env default). Call without confirmImplModels to get implModelsGate; call again with confirmImplModels after the user replies.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -447,6 +447,12 @@ const PRIMARY_TOOLS = [
         confirmImplModels: {
           description:
             'User choice: "defaults", { uniform: "<slug>" }, or { simple, medium, complex }.',
+        },
+        commitBatchThreshold: {
+          type: 'integer',
+          minimum: 0,
+          description:
+            'Commit-batch fresh-eyes cadence (0 = off). On confirm, persists to checkpoint; when omitted, uses flywheel.config.yaml / FW_COMMIT_BATCH_THRESHOLD if set.',
         },
       },
       required: ['cwd'],
@@ -547,6 +553,12 @@ const PRIMARY_TOOLS = [
         coordinatorAgent: {
           type: 'string',
           description: 'Optional Agent Mail name for inbox probes',
+        },
+        commitBatchThreshold: {
+          type: 'integer',
+          minimum: 0,
+          description:
+            'Persist commit-batch fresh-eyes threshold for this session (0 = disable). Also readable from flywheel.config.yaml impl_tick.commit_batch_threshold or FW_COMMIT_BATCH_THRESHOLD.',
         },
       },
       required: ['cwd'],

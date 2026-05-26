@@ -35,11 +35,43 @@ function makeCtx(cwd, state) {
     };
 }
 describe('resolveImplTickConfig', () => {
+    let configDir;
+    beforeEach(async () => {
+        configDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'impl-tick-cfg-'));
+    });
+    afterEach(async () => {
+        await fs.promises.rm(configDir, { recursive: true, force: true });
+        delete process.env.FW_IMPL_TICK_INTERVAL_SECONDS;
+        delete process.env.FW_IMPL_TICK_REVIEW_MODEL;
+        delete process.env.FW_IMPL_TICK_MAX_PARALLEL;
+    });
     it('defaults to 240s interval and opus-4.6 review model', () => {
-        const cfg = resolveImplTickConfig('/tmp');
+        const cfg = resolveImplTickConfig('/tmp/no-config-here');
         expect(cfg.intervalSeconds).toBe(240);
         expect(cfg.reviewModel).toBe('opus-4.6');
         expect(cfg.maxParallelImpl).toBe(3);
+    });
+    it('reads impl_tick snake_case keys from flywheel.config.yaml', async () => {
+        await fs.promises.writeFile(path.join(configDir, 'flywheel.config.yaml'), [
+            'impl_tick:',
+            '  interval_seconds: 300',
+            '  review_model: composer-2.5',
+            '  max_parallel_impl: 4',
+        ].join('\n'));
+        const cfg = resolveImplTickConfig(configDir);
+        expect(cfg.intervalSeconds).toBe(300);
+        expect(cfg.reviewModel).toBe('composer-2.5');
+        expect(cfg.maxParallelImpl).toBe(4);
+    });
+    it('env vars override flywheel.config.yaml impl_tick', async () => {
+        await fs.promises.writeFile(path.join(configDir, 'flywheel.config.yaml'), 'impl_tick:\n  interval_seconds: 300\n');
+        process.env.FW_IMPL_TICK_INTERVAL_SECONDS = '360';
+        process.env.FW_IMPL_TICK_REVIEW_MODEL = 'gpt-5.5-xhigh';
+        process.env.FW_IMPL_TICK_MAX_PARALLEL = '2';
+        const cfg = resolveImplTickConfig(configDir);
+        expect(cfg.intervalSeconds).toBe(360);
+        expect(cfg.reviewModel).toBe('gpt-5.5-xhigh');
+        expect(cfg.maxParallelImpl).toBe(2);
     });
 });
 describe('markBatchReviewDispatched', () => {

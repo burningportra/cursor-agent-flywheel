@@ -63,6 +63,8 @@ export interface FlywheelConfigImplTick {
     interval_seconds?: number;
     review_model?: string;
     max_parallel_impl?: number;
+    /** Commits since last batch-review baseline before fresh-eyes auto-trigger (0 = off). */
+    commit_batch_threshold?: number;
 }
 export interface FlywheelConfigCoordinator {
     /** When false, skip server-side stale tick drop (default true). */

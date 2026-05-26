@@ -22,7 +22,7 @@ import {
   planSlugFromIdentifier,
 } from './convergence-tool.js';
 import { loadFlywheelConfig } from '../flywheel-config.js';
-import { countCommitsSinceLastBatchReview, shouldTriggerBatchReview } from '../commit-batch.js';
+import { countCommitsSinceLastBatchReview, resolveCommitBatchThreshold, shouldTriggerBatchReview } from '../commit-batch.js';
 import {
   adaptPromptForCursor,
   buildCursorImplSpawnInstructions,
@@ -322,11 +322,9 @@ export async function runAdvanceWave(
   // the review over `lastBatchReviewSha..HEAD`, persists the verdict, and
   // only then re-invokes `flywheel_advance_wave` — by which time the baseline
   // has advanced and the gate naturally re-arms.
+  const batchThreshold = resolveCommitBatchThreshold(cwd, state);
   let commitsSinceBaseline = 0;
-  if (
-    typeof state.commitBatchThreshold === 'number' &&
-    state.commitBatchThreshold > 0
-  ) {
+  if (batchThreshold > 0) {
     try {
       commitsSinceBaseline = await countCommitsSinceLastBatchReview(
         cwd,
@@ -339,7 +337,7 @@ export async function runAdvanceWave(
       commitsSinceBaseline = 0;
     }
   }
-  if (shouldTriggerBatchReview(state, commitsSinceBaseline)) {
+  if (shouldTriggerBatchReview(batchThreshold, commitsSinceBaseline)) {
     let reviewSha: string;
     try {
       const r = await execFileAsync('git', ['rev-parse', 'HEAD'], {
@@ -366,7 +364,7 @@ export async function runAdvanceWave(
           lastBaselineSha: state.lastBatchReviewSha,
         },
       };
-      const threshold = state.commitBatchThreshold ?? 0;
+      const threshold = batchThreshold;
       const rangeLabel = state.lastBatchReviewSha
         ? `${state.lastBatchReviewSha.slice(0, 7)}..${reviewSha.slice(0, 7)}`
         : `(initial)..${reviewSha.slice(0, 7)}`;

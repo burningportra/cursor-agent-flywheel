@@ -9,6 +9,8 @@ export interface ConfirmImplModelsOutcome {
     implModelsGate?: ReturnType<typeof buildImplModelsGate>;
     spawnInstructions?: string;
     confirmed: boolean;
+    /** Resolved threshold for pre-flight display (gate) or persisted value (confirm). */
+    commitBatchThreshold?: number;
 }
 export declare function runConfirmImplModels(ctx: ToolContext, args: ConfirmImplModelsArgs): Promise<McpToolResult>;
 //# sourceMappingURL=confirm-impl-models.d.ts.map

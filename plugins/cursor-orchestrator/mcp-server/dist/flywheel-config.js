@@ -46,7 +46,7 @@ const KNOWN_KEYS = {
     implement: ['simple', 'medium', 'complex'],
     duel: ['wizard_a', 'wizard_b', 'wizard_c', 'synthesis'],
     grader: ['model'],
-    impl_tick: ['interval_seconds', 'review_model', 'max_parallel_impl'],
+    impl_tick: ['interval_seconds', 'review_model', 'max_parallel_impl', 'commit_batch_threshold'],
     coordinator: ['epochGuards', 'nextActionHints'],
     profile: ['watchIntentFiles', 'staleAction', 'debounceSeconds'],
 };
@@ -341,11 +341,16 @@ export function loadFlywheelConfigWithWarnings(cwd) {
         const max_parallel_impl = typeof t.max_parallel_impl === 'number' && t.max_parallel_impl >= 1
             ? Math.floor(t.max_parallel_impl)
             : undefined;
-        if (interval_seconds || review_model || max_parallel_impl) {
+        const commit_batch_threshold = typeof t.commit_batch_threshold === 'number' && Number.isInteger(t.commit_batch_threshold)
+            && t.commit_batch_threshold >= 0
+            ? t.commit_batch_threshold
+            : undefined;
+        if (interval_seconds || review_model || max_parallel_impl || commit_batch_threshold !== undefined) {
             impl_tick = {
                 ...(interval_seconds ? { interval_seconds } : {}),
                 ...(review_model ? { review_model } : {}),
                 ...(max_parallel_impl ? { max_parallel_impl } : {}),
+                ...(commit_batch_threshold !== undefined ? { commit_batch_threshold } : {}),
             };
         }
     }

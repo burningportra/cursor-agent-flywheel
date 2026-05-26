@@ -16,7 +16,7 @@ import { promisify } from 'node:util';
 import { readCheckpoint } from '../checkpoint.js';
 import { readConvergenceFromDisk, planSlugFromIdentifier, } from './convergence-tool.js';
 import { loadFlywheelConfig } from '../flywheel-config.js';
-import { countCommitsSinceLastBatchReview, shouldTriggerBatchReview } from '../commit-batch.js';
+import { countCommitsSinceLastBatchReview, resolveCommitBatchThreshold, shouldTriggerBatchReview } from '../commit-batch.js';
 import { adaptPromptForCursor, buildCursorImplSpawnInstructions, buildImplModelsGate, formatCursorImplModelTable, recommendImplModels, modelForComplexity, resolveImplModelsConfirm, useNtmImplBackend, } from '../cursor-implement-swarm.js';
 import { areNextActionHintsEnabled } from '../flywheel-config.js';
 import { buildWaveCompleteHint } from '../next-action-hint.js';
@@ -174,9 +174,9 @@ export async function runAdvanceWave(ctx, args) {
     // the review over `lastBatchReviewSha..HEAD`, persists the verdict, and
     // only then re-invokes `flywheel_advance_wave` — by which time the baseline
     // has advanced and the gate naturally re-arms.
+    const batchThreshold = resolveCommitBatchThreshold(cwd, state);
     let commitsSinceBaseline = 0;
-    if (typeof state.commitBatchThreshold === 'number' &&
-        state.commitBatchThreshold > 0) {
+    if (batchThreshold > 0) {
         try {
             commitsSinceBaseline = await countCommitsSinceLastBatchReview(cwd, state.lastBatchReviewSha);
         }
@@ -187,7 +187,7 @@ export async function runAdvanceWave(ctx, args) {
             commitsSinceBaseline = 0;
         }
     }
-    if (shouldTriggerBatchReview(state, commitsSinceBaseline)) {
+    if (shouldTriggerBatchReview(batchThreshold, commitsSinceBaseline)) {
         let reviewSha;
         try {
             const r = await execFileAsync('git', ['rev-parse', 'HEAD'], {
@@ -215,7 +215,7 @@ export async function runAdvanceWave(ctx, args) {
                     lastBaselineSha: state.lastBatchReviewSha,
                 },
             };
-            const threshold = state.commitBatchThreshold ?? 0;
+            const threshold = batchThreshold;
             const rangeLabel = state.lastBatchReviewSha
                 ? `${state.lastBatchReviewSha.slice(0, 7)}..${reviewSha.slice(0, 7)}`
                 : `(initial)..${reviewSha.slice(0, 7)}`;

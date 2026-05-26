@@ -17,6 +17,11 @@ implement:
   medium: composer-2.5
   complex: opus-4.6
 
+# Impl supervision loop (flywheel_impl_tick): fresh-eyes batch review cadence.
+impl_tick:
+  interval_seconds: 240
+  commit_batch_threshold: 5
+
 # Cursor dueling idea wizards: one model per wizard + synthesis Task.
 duel:
   wizard_a: opus-4.6

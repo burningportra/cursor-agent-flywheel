@@ -7,6 +7,7 @@ export declare const ImplTickInputSchema: z.ZodObject<{
     cwd: z.ZodString;
     closedBeadIds: z.ZodOptional<z.ZodArray<z.ZodString>>;
     coordinatorAgent: z.ZodOptional<z.ZodString>;
+    commitBatchThreshold: z.ZodOptional<z.ZodNumber>;
 }, z.core.$strip>;
 export type ImplTickInput = z.infer<typeof ImplTickInputSchema>;
 export declare function runImplTick(ctx: ToolContext, rawArgs: unknown): Promise<McpToolResult>;

@@ -732,6 +732,8 @@ export interface ConfirmImplModelsArgs {
         medium: string;
         complex: string;
     };
+    /** Persist commit-batch fresh-eyes threshold (0 = disable). Defaults from config/env on confirm when omitted. */
+    commitBatchThreshold?: number;
 }
 export interface DuelArgs {
     cwd: string;

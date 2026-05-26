@@ -16,6 +16,12 @@ export const ImplTickInputSchema = z.object({
     .optional()
     .describe('Beads closed since the previous tick — triggers flywheel_advance_wave'),
   coordinatorAgent: z.string().min(1).optional(),
+  commitBatchThreshold: z
+    .number()
+    .int()
+    .min(0)
+    .optional()
+    .describe('Persist commit-batch fresh-eyes threshold for this session (0 = disable). Overrides config/env when set.'),
 });
 
 export type ImplTickInput = z.infer<typeof ImplTickInputSchema>;

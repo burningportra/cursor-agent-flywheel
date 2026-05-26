@@ -17,6 +17,8 @@ export interface ImplTickArgs {
     closedBeadIds?: string[];
     /** Agent Mail name for inbox probe (optional). */
     coordinatorAgent?: string;
+    /** Override / persist commit-batch threshold for this session (0 = disable). */
+    commitBatchThreshold?: number;
 }
 export type ImplTickKind = 'monitor' | 'batch_review_in_progress' | 'batch_review_dispatch' | 'batch_review_collect_verdict' | 'batch_review_verdict' | 'advance_wave' | 'dispatch_impl_tasks' | 'wave_complete' | 'stale';
 export interface ImplTickStructured {

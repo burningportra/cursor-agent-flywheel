@@ -15,7 +15,9 @@ import { readyBeads, readBeads } from './beads.js';
 import {
   clearPendingBatchReview,
   countCommitsSinceLastBatchReview,
+  ensureBatchReviewBaseline,
   markBatchReviewDispatched,
+  resolveCommitBatchThreshold,
   shouldTriggerBatchReview,
 } from './commit-batch.js';
 import {
@@ -53,6 +55,8 @@ export interface ImplTickArgs {
   closedBeadIds?: string[];
   /** Agent Mail name for inbox probe (optional). */
   coordinatorAgent?: string;
+  /** Override / persist commit-batch threshold for this session (0 = disable). */
+  commitBatchThreshold?: number;
 }
 
 export type ImplTickKind =
@@ -116,26 +120,26 @@ export function resolveImplTickConfig(cwd: string): ImplTickConfig {
   const fromEnvParallel = Number(process.env.FW_IMPL_TICK_MAX_PARALLEL);
 
   const { config } = loadFlywheelConfigWithWarnings(cwd);
-  const node = (config as { impl_tick?: Partial<ImplTickConfig> }).impl_tick;
+  const node = config.impl_tick;
 
   const intervalSeconds =
     Number.isFinite(fromEnvSec) && fromEnvSec >= 60
       ? Math.floor(fromEnvSec)
-      : typeof node?.intervalSeconds === 'number' && node.intervalSeconds >= 60
-        ? Math.floor(node.intervalSeconds)
+      : typeof node?.interval_seconds === 'number' && node.interval_seconds >= 60
+        ? Math.floor(node.interval_seconds)
         : DEFAULT_TICK_INTERVAL_SEC;
 
   const reviewModel =
     fromEnvModel ||
-    (typeof node?.reviewModel === 'string' && node.reviewModel.trim()
-      ? node.reviewModel.trim()
+    (typeof node?.review_model === 'string' && node.review_model.trim()
+      ? node.review_model.trim()
       : DEFAULT_REVIEW_MODEL);
 
   const maxParallelImpl =
     Number.isFinite(fromEnvParallel) && fromEnvParallel >= 1
       ? Math.min(8, Math.floor(fromEnvParallel))
-      : typeof node?.maxParallelImpl === 'number' && node.maxParallelImpl >= 1
-        ? Math.min(8, Math.floor(node.maxParallelImpl))
+      : typeof node?.max_parallel_impl === 'number' && node.max_parallel_impl >= 1
+        ? Math.min(8, Math.floor(node.max_parallel_impl))
         : DEFAULT_MAX_PARALLEL;
 
   return { intervalSeconds, reviewModel, maxParallelImpl };
@@ -291,10 +295,29 @@ export async function runImplTickCore(
   await saveState(state);
 
   const headSha = await resolveHeadSha(cwd, ctx.exec);
-  const threshold =
-    typeof state.commitBatchThreshold === 'number' && state.commitBatchThreshold > 0
-      ? state.commitBatchThreshold
-      : 0;
+
+  if (
+    typeof args.commitBatchThreshold === 'number'
+    && Number.isInteger(args.commitBatchThreshold)
+    && args.commitBatchThreshold >= 0
+  ) {
+    state.commitBatchThreshold = args.commitBatchThreshold;
+  } else if (state.commitBatchThreshold === undefined) {
+    const resolved = resolveCommitBatchThreshold(cwd, state);
+    if (resolved > 0) {
+      state.commitBatchThreshold = resolved;
+    }
+  }
+
+  const threshold = resolveCommitBatchThreshold(cwd, state);
+
+  if (threshold > 0) {
+    const withBaseline = ensureBatchReviewBaseline(state, headSha);
+    if (withBaseline !== state) {
+      Object.assign(state, withBaseline);
+      await saveState(state);
+    }
+  }
 
   let commitsSinceBaseline = 0;
   if (threshold > 0) {
@@ -381,7 +404,7 @@ export async function runImplTickCore(
   }
 
   // ── New batch review (commit threshold) ──
-  if (threshold > 0 && shouldTriggerBatchReview(state, commitsSinceBaseline)) {
+  if (shouldTriggerBatchReview(threshold, commitsSinceBaseline)) {
     const shaRange = buildShaRange(state.lastBatchReviewSha, headSha);
     const dispatch = await prepareBatchReviewDispatch(ctx, shaRange, headSha);
     const nextState = markBatchReviewDispatched(state, headSha, shaRange);
@@ -607,6 +630,15 @@ export async function runImplTickCore(
     `HEAD ${headSha.slice(0, 7)}; commits since baseline: ${commitsSinceBaseline}/${threshold || 'off'}.`,
     `Beads: ${counts.readyCount} ready, ${counts.inProgressCount} in_progress, ${counts.closedCount} closed.`,
   ];
+  if (threshold === 0) {
+    lines.push(
+      'Batch fresh-eyes review is OFF — set impl_tick.commit_batch_threshold in flywheel.config.yaml, FW_COMMIT_BATCH_THRESHOLD, or pass commitBatchThreshold on flywheel_impl_tick.',
+    );
+  } else if (commitsSinceBaseline >= Math.max(1, threshold - 1)) {
+    lines.push(
+      `Batch review fires at ${threshold} commits — ${threshold - commitsSinceBaseline} until next fresh-eyes dispatch (or sooner if threshold already crossed on next tick).`,
+    );
+  }
   if (stuck.length > 0) {
     lines.push(`Stuck (>30m): ${stuck.map((b) => b.id).join(', ')}`);
   }
