@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "writtenAt": "2026-05-21T01:21:03.318Z",
+  "writtenAt": "2026-05-26T18:12:56.851Z",
   "flywheelVersion": "3.18.1",
-  "gitHead": "af6ad3809eba19f237738b7ee4f4052fa87287d6",
+  "gitHead": "16d604f65191ca1c44eb1198a696d33b73cca0fc",
   "state": {
-    "phase": "iterating",
+    "phase": "awaiting_plan_approval",
     "constraints": [],
     "retryCount": 0,
     "maxRetries": 3,
@@ -14,12 +14,353 @@
     "polishRound": 0,
     "polishChanges": [],
     "polishConverged": false,
+    "repoProfile": {
+      "name": "cursor-agent-flywheel",
+      "languages": [],
+      "frameworks": [],
+      "structure": ".\n./.pi-orchestrator\n./.cursor\n./.cursor/.gitignore\n./.cursor/rules\n./.cursor/rules/flywheel-guided.mdc\n./.cursor/commands\n./.cursor/commands/orchestrate-swarm-stop.md\n./.cursor/commands/orchestrate-status.md\n./.cursor/commands/flywheel.md\n./.cursor/commands/orchestrate-swarm.md\n./.cursor/commands/orchestrate-research.md\n./.cursor/commands/orchestrate-stop.md\n./.cursor/commands/orchestrate-audit.md\n./.cursor/commands/orchestrate-refine-skill.md\n./.cursor/commands/orchestrate-swarm-status.md\n./.cursor/commands/orchestrate-rollback.md\n./.cursor/commands/orchestrate-refine-skills.md\n./.cursor/commands/orchestrate-cleanup.md\n./.cursor/commands/orchestrate-drift-check.md\n./.cursor/commands/orchestrate-fix.md\n./.cursor/commands/orchestrate-setup.md\n./.cursor/commands/memory.md\n./.cursor/commands/orchestrate-tool-feedback.md\n./.cursor/commands/orchestrate-scan.md\n./.cursor/commands/orchestrate.md\n./.cursor/commands/orchestrate-healthcheck.md\n./.cursor/mcp.json\n./plugins\n./plugins/cursor-orchestrator\n./plugins/cursor-orchestrator/.cursor-plugin\n./plugins/cursor-orchestrator/mcp-server\n./plugins/cursor-orchestrator/agents\n./plugins/cursor-orchestrator/docs\n./plugins/cursor-orchestrator/.gitignore\n./plugins/cursor-orchestrator/README.md\n./plugins/cursor-orchestrator/hooks\n./plugins/cursor-orchestrator/scripts\n./plugins/cursor-orchestrator/rules\n./plugins/cursor-orchestrator/commands\n./plugins/cursor-orchestrator/skills\n./plugins/cursor-orchestrator/AGENTS.md\n./plugins/cursor-orchestrator/assets\n./plugins/cursor-orchestrator/CHANGELOG.md\n./plugins/cursor-orchestrator/mcp.json\n./plugins/starter-simple\n./plugins/starter-simple/.cursor-plugin\n./plugins/starter-simple/README.md\n./plugins/starter-simple/rules\n./plugins/starter-simple/skills\n./plugins/starter-simple/assets\n./plugins/starter-advanced\n./plugins/starter-advanced/.cursor-plugin\n./plugins/starter-advanced/agents\n./plugins/starter-advanced/README.md\n./plugins/starter-advanced/hooks\n./plugins/starter-advanced/scripts\n./plugins/starter-advanced/rules\n./plugins/starter-advanced/commands\n./plugins/starter-advanced/skills\n./plugins/starter-advanced/assets\n./plugins/starter-advanced/mcp.json\n./.cursor-plugin\n./.cursor-plugin/marketplace.json\n./.beads\n./.beads/beads.db\n./.beads/last-touched\n./.beads/issues.jsonl\n./.beads/metadata.json\n./.beads/config.yaml\n./.beads/.gitignore\n./.beads/beads.db-wal\n./.beads/.br_history\n./.beads/.br_history/issues.20260409_141603_926737000.jsonl.meta.json\n./.beads/.br_history/issues.20260409_141533_119837000.jsonl\n./.beads/.br_history/issues.20260409_141900_388894000.jsonl.meta.json\n./.beads/.br_history/issues.20260409_141531_522979000.jsonl\n./.beads/.br_history/issues.20260409_141859_262720000.jsonl.meta.json\n./.beads/.br_history/issues.20260409_141859_262720000.jsonl\n./.beads/.br_history/issues.20260409_141532_682052000.jsonl.meta.json\n./.beads/.br_history/issues.20260409_141819_207024000.jsonl.meta.json\n./.beads/.br_history/issues.20260409_141859_982345000.jsonl.meta.json\n./.",
+      "entrypoints": [],
+      "recentCommits": [
+        {
+          "hash": "6dc1ff8",
+          "message": "feat(orchestrator): guided /flywheel menu, Cursor rule, slash-first UX",
+          "date": "2026-04-09 10:43:17 -0400",
+          "author": "burningportra"
+        },
+        {
+          "hash": "b4be2b8",
+          "message": "chore(beads): add issue tracker state and history",
+          "date": "2026-04-09 10:27:33 -0400",
+          "author": "burningportra"
+        },
+        {
+          "hash": "9a10eee",
+          "message": "feat(vscode): Activity Bar sidebar with checkpoint, beads, docs",
+          "date": "2026-04-09 10:27:08 -0400",
+          "author": "burningportra"
+        },
+        {
+          "hash": "ae5e4b4",
+          "message": "feat: add VS Code extension for Orchestrator QuickPick menus",
+          "date": "2026-04-09 10:24:33 -0400",
+          "author": "burningportra"
+        },
+        {
+          "hash": "2074cb1",
+          "message": "feat: changelog, slash-command parity CI, publish-gate, workflow paths",
+          "date": "2026-04-09 10:19:31 -0400",
+          "author": "burningportra"
+        },
+        {
+          "hash": "519f19d",
+          "message": "docs: add marketplace publishing runbook and link from READMEs",
+          "date": "2026-04-09 10:16:17 -0400",
+          "author": "burningportra"
+        },
+        {
+          "hash": "6e301fa",
+          "message": "fix(plugins): expose orchestrator slash commands via .cursor/commands",
+          "date": "2026-04-09 10:05:24 -0400",
+          "author": "burningportra"
+        },
+        {
+          "hash": "4b29761",
+          "message": "fix(plugins): harden orchestrator MCP paths, hooks, and Cursor command parity",
+          "date": "2026-04-09 09:50:31 -0400",
+          "author": "burningportra"
+        },
+        {
+          "hash": "918de63",
+          "message": "ci(plugins): verify cursor-orchestrator artifacts and expand orchestrator docs",
+          "date": "2026-04-09 09:43:29 -0400",
+          "author": "burningportra"
+        },
+        {
+          "hash": "b2bdaa6",
+          "message": "chore: add workspace .cursor/mcp.json for manual Cursor testing",
+          "date": "2026-04-09 09:38:33 -0400",
+          "author": "burningportra"
+        },
+        {
+          "hash": "87ffe71",
+          "message": "feat(plugins): add cursor-orchestrator port from upstream",
+          "date": "2026-04-09 09:36:02 -0400",
+          "author": "burningportra"
+        },
+        {
+          "hash": "70c625c",
+          "message": "Initial commit",
+          "date": "2026-04-09 09:02:05 -0400",
+          "author": "burningportra"
+        }
+      ],
+      "hasTests": false,
+      "hasDocs": true,
+      "hasCI": true,
+      "todos": [
+        {
+          "file": "./plugins/cursor-orchestrator/mcp-server/dist/tools/review.js",
+          "line": 309,
+          "text": "left over, console.log not cleaned up, dead code. Report findings.`,",
+          "type": "FIXME"
+        },
+        {
+          "file": "./plugins/cursor-orchestrator/mcp-server/dist/prompts.js",
+          "line": 193,
+          "text": "in src/scan.ts:45\", \"ccc finding: no error recovery\", \"recent commits all touch prompts.ts\")",
+          "type": "TODO"
+        },
+        {
+          "file": "./plugins/cursor-orchestrator/mcp-server/dist/prompts.js",
+          "line": 1591,
+          "text": "comments that have been there a long time",
+          "type": "FIXME"
+        },
+        {
+          "file": "./plugins/cursor-orchestrator/mcp-server/dist/bead-templates.js",
+          "line": 162,
+          "text": "stubs.\",",
+          "type": "TODO"
+        },
+        {
+          "file": "./plugins/cursor-orchestrator/mcp-server/src/bead-templates.ts",
+          "line": 182,
+          "text": "stubs.\",",
+          "type": "TODO"
+        }
+      ],
+      "keyFiles": {
+        "README.md": "# Cursor plugin template\n\nBuild and publish Cursor Marketplace plugins from a single repo.\n\nPlugins included:\n\n- **starter-simple**: rules and skills only\n- **starter-advanced**: rules, skills, agents, commands, hooks, MCP, and scripts\n- **cursor-orchestrator**: multi-agent orchestrator (beads, dual MCP, hooks, full command set) — see [plugins/cursor-orchestrator/README.md](plugins/cursor-orchestrator/README.md)\n\n## Getting started\n\n[Use this template](https://github.com/cursor/plugin-template/g"
+      },
+      "ciPlatform": "GitHub Actions"
+    },
+    "coordinationBackend": {
+      "beads": true,
+      "agentMail": false,
+      "sophia": false
+    },
+    "coordinationStrategy": "beads",
+    "coordinationMode": "worktree",
+    "candidateIdeas": [
+      {
+        "id": "add-root-agents-md",
+        "title": "Add workspace AGENTS.md for multi-plugin repo",
+        "description": "The profile flags missing AGENTS.md at the repo root while `plugins/cursor-orchestrator/AGENTS.md` exists. A short root-level AGENTS.md can orient agents to plugin layout, validation scripts, and which package.json lives where.",
+        "category": "docs",
+        "effort": "low",
+        "impact": "medium",
+        "rationale": "orch_profile explicitly lists 'No AGENTS.md found'; reduces onboarding friction for contributors and agents.",
+        "tier": "top",
+        "sourceEvidence": [
+          "orch_profile Foundation Gaps",
+          "plugins/cursor-orchestrator/AGENTS.md exists"
+        ],
+        "scores": {
+          "useful": 0.85,
+          "pragmatic": 0.9,
+          "accretive": 0.7,
+          "robust": 0.6,
+          "ergonomic": 0.85
+        },
+        "risks": [
+          "Duplicating plugin AGENTS.md content"
+        ],
+        "synergies": [
+          "validate-template.mjs expectations"
+        ]
+      },
+      {
+        "id": "mcp-review-tool-hygiene",
+        "title": "Clean MCP review tool dead code and logging",
+        "description": "Profile TODOs reference `dist/tools/review.js` leftover console.log and report-style strings. Fix in TypeScript source (`src/`), rebuild dist, and add a lint or test guard so dist drift does not hide issues.",
+        "category": "refactor",
+        "effort": "medium",
+        "impact": "medium",
+        "rationale": "TODOs cite review.js:309; production MCP should not ship noisy or dead paths.",
+        "tier": "top",
+        "sourceEvidence": [
+          "orch_profile TODOs review.js",
+          "plugins/cursor-orchestrator/mcp-server/src"
+        ],
+        "scores": {
+          "useful": 0.8,
+          "pragmatic": 0.75,
+          "accretive": 0.65,
+          "robust": 0.8,
+          "ergonomic": 0.7
+        },
+        "risks": [
+          "Behavior change if removing code paths relied on accidentally"
+        ],
+        "synergies": [
+          "CI verify-cursor-orchestrator"
+        ]
+      },
+      {
+        "id": "bead-templates-complete-stubs",
+        "title": "Complete or document bead-templates stubs",
+        "description": "`bead-templates.ts` is flagged with stub comments. Either implement minimal real templates, or clearly document why stubs are intentional and wire tests.",
+        "category": "reliability",
+        "effort": "medium",
+        "impact": "high",
+        "rationale": "Incomplete bead templates can break orchestration UX for users installing the plugin.",
+        "tier": "top",
+        "sourceEvidence": [
+          "orch_profile TODOs bead-templates.ts:182"
+        ],
+        "scores": {
+          "useful": 0.85,
+          "pragmatic": 0.7,
+          "accretive": 0.75,
+          "robust": 0.85,
+          "ergonomic": 0.75
+        },
+        "risks": [
+          "Scope creep if templates expand"
+        ],
+        "synergies": [
+          "br CLI workflows"
+        ]
+      },
+      {
+        "id": "root-test-story",
+        "title": "Surface tests in repo profile (root or documented)",
+        "description": "Profile reports no test framework while MCP server uses Vitest. Add a root note or script that runs extension + MCP tests so discovery and CI mental model align.",
+        "category": "dx",
+        "effort": "low",
+        "impact": "medium",
+        "rationale": "Reduces false signal from orch_profile and helps agents find `npm test` entry points.",
+        "tier": "honorable",
+        "sourceEvidence": [
+          "explore: vitest in mcp-server/package.json",
+          "orch_profile Has tests: no"
+        ],
+        "scores": {
+          "useful": 0.75,
+          "pragmatic": 0.85,
+          "accretive": 0.6,
+          "robust": 0.65,
+          "ergonomic": 0.8
+        },
+        "risks": [
+          "Minimal maintenance of wrapper scripts"
+        ],
+        "synergies": [
+          ".github/workflows/orchestrator-mcp.yml"
+        ]
+      },
+      {
+        "id": "vscode-extension-polish",
+        "title": "Orchestrator sidebar parity with slash commands",
+        "description": "Recent commits added Activity Bar sidebar; audit feature parity with `.cursor/commands` (checkpoint, beads, docs) and fix gaps or document limitations.",
+        "category": "feature",
+        "effort": "medium",
+        "impact": "medium",
+        "rationale": "Commits 9a10eee/ae5e4b4 suggest rapid UI growth; parity reduces user confusion.",
+        "tier": "honorable",
+        "sourceEvidence": [
+          "git log feat(vscode)",
+          "extensions/cursor-orchestrator-menu"
+        ],
+        "scores": {
+          "useful": 0.8,
+          "pragmatic": 0.7,
+          "accretive": 0.8,
+          "robust": 0.65,
+          "ergonomic": 0.9
+        },
+        "risks": [
+          "VS Code API constraints"
+        ],
+        "synergies": [
+          "flywheel-guided.mdc"
+        ]
+      },
+      {
+        "id": "ci-marketplace-path-coverage",
+        "title": "Expand path-filtered CI for extension + scripts",
+        "description": "Workflow `orchestrator-mcp.yml` is path-filtered; ensure changes under `extensions/` and `scripts/` trigger appropriate checks so publish-gate stays trustworthy.",
+        "category": "reliability",
+        "effort": "medium",
+        "impact": "medium",
+        "rationale": "Template repos rely on CI as the safety net for marketplace publishes.",
+        "tier": "honorable",
+        "sourceEvidence": [
+          ".github/workflows/orchestrator-mcp.yml",
+          "scripts/publish-gate.mjs"
+        ],
+        "scores": {
+          "useful": 0.75,
+          "pragmatic": 0.8,
+          "accretive": 0.55,
+          "robust": 0.85,
+          "ergonomic": 0.6
+        },
+        "risks": [
+          "Slower CI if paths too broad"
+        ],
+        "synergies": [
+          "validate-template.mjs"
+        ]
+      },
+      {
+        "id": "prompts-scan-hardening",
+        "title": "Harden scan/prompts error recovery",
+        "description": "TODOs reference `scan.ts` and 'no error recovery' in prompts. Add structured errors and retries where scan hits partial failures.",
+        "category": "reliability",
+        "effort": "high",
+        "impact": "high",
+        "rationale": "Orchestration MCP should degrade gracefully when repos are partial or permissions fail.",
+        "tier": "top",
+        "sourceEvidence": [
+          "orch_profile TODOs prompts.js/scan"
+        ],
+        "scores": {
+          "useful": 0.9,
+          "pragmatic": 0.65,
+          "accretive": 0.7,
+          "robust": 0.9,
+          "ergonomic": 0.7
+        },
+        "risks": [
+          "Larger refactor touching many call sites"
+        ],
+        "synergies": [
+          "mcp-review-tool-hygiene"
+        ]
+      },
+      {
+        "id": "docs-plans-workflow",
+        "title": "Integrate or ignore docs/plans deep-plan artifacts",
+        "description": "Untracked `docs/plans/2026-04-09-*.md` files exist from deep planning. Add to .gitignore, or document committing synthesized plans for team visibility.",
+        "category": "docs",
+        "effort": "low",
+        "impact": "low",
+        "rationale": "Keeps workspace clean and clarifies whether plans are ephemeral or versioned.",
+        "tier": "honorable",
+        "sourceEvidence": [
+          "git status docs/plans",
+          "orchestrate command Step 5"
+        ],
+        "scores": {
+          "useful": 0.6,
+          "pragmatic": 0.85,
+          "accretive": 0.5,
+          "robust": 0.55,
+          "ergonomic": 0.7
+        },
+        "risks": [
+          "Accidentally ignoring valuable docs"
+        ],
+        "synergies": []
+      }
+    ],
+    "selectedGoal": "Polish recover-gates and post-implement flywheel gate UX: /recover-gates and /flywheel-recover-gates commands, wave review + wrap-up MCP menus, context-budget compliance, and agent guidance so dropped sessions resume without ceremony/discover bloat.",
+    "planRefinementRound": 0,
+    "planDocument": "docs/plans/2026-05-26-polish-recover-gates-and-post-implement-flywheel-gate-ux-rec-synthesized.md",
     "wrapUpConfirmed": true,
-    "outcomeRubricPath": ".pi-flywheel/plans/2026-05-20-implement-pi-prompt-suggester-integration-synthesized/rubric.md",
-    "selectedGoal": "Implement pi-prompt-suggester integration in cursor-orchestrator MCP: coordinator epoch guards, profile staleness on plan/config drift, post-wave next-action hints",
-    "planDocument": "docs/plans/2026-05-20-implement-pi-prompt-suggester-integration-synthesized.md",
-    "cycleStartSha": "f83c6955d6ef367b5a09e364883586a34c7c07d7",
-    "maxOutcomeIterations": 3,
+    "cycleStartSha": "16d604f65191ca1c44eb1198a696d33b73cca0fc",
+    "outcomeRubricPath": ".pi-flywheel/plans/2026-05-26-polish-recover-gates-and-post-implement-flywheel-gate-ux-rec-synthesized/rubric.md",
     "outcomeGradingHistory": [
       {
         "iteration": 1,
@@ -31,79 +372,79 @@
             {
               "criterionId": "c1",
               "status": "met",
-              "evidence": "coordinator-epoch.ts exports getCoordinatorEpoch/bumpCoordinatorEpoch; imported in cursor-impl-tick.ts, tools/advance-wave.ts, tools/review.ts, tools/user-gate.ts",
+              "evidence": "types.ts closed enums + strict Zod",
               "gaps": []
             },
             {
               "criterionId": "c2",
               "status": "met",
-              "evidence": "cursor-impl-tick.ts returns kind stale without implTasks when epoch mismatch (tests in cursor-impl-tick.test.ts)",
+              "evidence": "CompactGatePayloadSchema round-trip tests",
               "gaps": []
             },
             {
               "criterionId": "c3",
               "status": "met",
-              "evidence": "All impl tick structured responses include data.epoch captured at tick start",
+              "evidence": "gateActionsFromOptions one-liner",
               "gaps": []
             },
             {
               "criterionId": "c4",
               "status": "met",
-              "evidence": "advance-wave.ts and review.ts call persistCoordinatorEpochBump on gate/steering paths; user-gate E7 test",
+              "evidence": "exhaustive confirmWaveReviewAction switch",
               "gaps": []
             },
             {
               "criterionId": "c5",
               "status": "met",
-              "evidence": "types.ts FlywheelState adds coordinatorEpoch, steeringEvents, profileWatch, profileStale",
+              "evidence": "gate-resolutions FIFO 20 + idempotentReplay",
               "gaps": []
             },
             {
               "criterionId": "c6",
               "status": "met",
-              "evidence": "profile-staleness.ts hashFile, registerProfileWatch, checkProfileStaleness with debounce",
+              "evidence": "wrap_up_already_confirmed askQuestion null",
               "gaps": []
             },
             {
               "criterionId": "c7",
               "status": "met",
-              "evidence": "observe.ts profileStale hint; doctor.ts profile_intent_stale yellow check",
+              "evidence": "gitPorcelain -z rename handling",
               "gaps": []
             },
             {
               "criterionId": "c8",
               "status": "met",
-              "evidence": "next-action-hint.ts buildNextActionHint caps text at 160 chars; includes generationEpoch",
+              "evidence": "resolveRecoveryContext trust policy",
               "gaps": []
             },
             {
               "criterionId": "c9",
               "status": "met",
-              "evidence": "wave_complete and advance_wave attach nextActionHint with text and epoch fields",
+              "evidence": "observe pending-gate hint suppression",
               "gaps": []
             },
             {
               "criterionId": "c10",
               "status": "met",
-              "evidence": "_implement.cursor.md documents epoch check before spawning Tasks and nextActionHint advisory usage",
+              "evidence": "On error tables in recover-gates commands",
               "gaps": []
             }
           ],
-          "explanation": "All ten rubric criteria verified against f83c695..HEAD diff and 2376 passing MCP tests. Pi-prompt-suggester integration (epoch guards, profile staleness, next-action hints) shipped.",
+          "explanation": "22 bead commits; all rubric criteria met; 2519 tests passed.",
           "modelUsed": "cursor",
           "durationMs": 0,
-          "timestamp": "2026-05-21T01:21:03.317Z",
+          "timestamp": "2026-05-26T18:12:56.848Z",
           "details": {
             "cycleStartShaSource": "state",
-            "diffTruncated": true,
+            "diffTruncated": false,
             "testOutputTruncated": false,
             "graderRetried": false
           },
           "persistence": "ok"
         },
-        "timestamp": "2026-05-21T01:21:03.317Z"
+        "timestamp": "2026-05-26T18:12:56.848Z"
       }
     ]
   },
-  "stateHash": "19b30c205bcee787cf93061a0c0bb3b29251832d34a8beb026fa0f8a0775777e"
+  "stateHash": "0ddac0c80adf62be41d8d33caac44c34bcca85b3f564c4b2f11d5af47487f90f"
 }
