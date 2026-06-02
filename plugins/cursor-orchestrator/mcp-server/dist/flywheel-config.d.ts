@@ -78,6 +78,9 @@ export interface FlywheelConfigProfile {
     staleAction?: FlywheelConfigProfileStaleAction;
     debounceSeconds?: number;
 }
+export interface FlywheelConfigReview {
+    thermo_nuclear_model?: string;
+}
 export interface FlywheelConfig {
     convergence: FlywheelConfigConvergence;
     deep_plan?: FlywheelConfigDeepPlan;
@@ -87,6 +90,7 @@ export interface FlywheelConfig {
     impl_tick?: FlywheelConfigImplTick;
     coordinator?: FlywheelConfigCoordinator;
     profile?: FlywheelConfigProfile;
+    review?: FlywheelConfigReview;
 }
 /**
  * R-008 — single warning surfaced from the loader. Each reports a
@@ -120,6 +124,8 @@ export declare function suggestKey(unknown: string, known: readonly string[]): s
  */
 export declare function loadFlywheelConfigWithWarnings(cwd: string): FlywheelConfigResult;
 export declare function loadFlywheelConfig(cwd: string): FlywheelConfig;
+/** Model for thermo-nuclear subagent (batch review + hit-me thermo persona). */
+export declare function resolveThermoNuclearModel(cwd: string): string;
 /** True when coordinator.epochGuards is absent or explicitly true (default on). */
 export declare function areEpochGuardsEnabled(cwd: string): boolean;
 /** True when coordinator.nextActionHints is absent or explicitly true (default on). */

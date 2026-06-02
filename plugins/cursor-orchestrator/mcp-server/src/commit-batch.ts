@@ -191,6 +191,7 @@ export async function synthesizeBeadsFromFindings(
   state: FlywheelState,
   findings: Finding[],
   range: string,
+  labels: string[] = ['auto-batch-review'],
 ): Promise<string[]> {
   if (!state.batchReviewSynthesizedBeads) {
     state.batchReviewSynthesizedBeads = {};
@@ -212,7 +213,7 @@ export async function synthesizeBeadsFromFindings(
           "--type", "task",
           "--priority", "2",
           "--description", body,
-          "--labels", "auto-batch-review",
+          "--labels", labels.join(","),
           "--silent",
         ],
         { cwd, timeout: BR_TIMEOUT_MS },

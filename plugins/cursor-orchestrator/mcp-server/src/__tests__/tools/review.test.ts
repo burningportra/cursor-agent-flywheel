@@ -16,6 +16,10 @@ vi.mock('node:fs', async () => {
         const err = Object.assign(new Error('not mocked'), { code: 'ENOENT' });
         throw err;
       }),
+      access: vi.fn(async () => {
+        const err = Object.assign(new Error('not mocked'), { code: 'ENOENT' });
+        throw err;
+      }),
       mkdir: vi.fn(async () => undefined),
     },
   };
@@ -446,7 +450,97 @@ describe('runReview', () => {
     expect(perspectives).toContain('adversarial');
     expect(perspectives).toContain('ergonomics');
     expect(perspectives).toContain('reality-check');
-    expect(perspectives).toContain('exploration');
+    expect(perspectives).toContain('thermo-nuclear');
+  });
+
+  it('prepends thermo preamble to non-thermo hit-me agent tasks', async () => {
+    const bead = makeBead();
+    const { ctx } = makeCtx({}, [brShowCall(bead)]);
+
+    const result = await runReview(ctx, { cwd: '/fake/cwd', beadId: 'test-bead-1', action: 'hit-me' });
+
+    const structured = result.structuredContent as {
+      data: { agentTasks: Array<{ task: string; perspective: string }> };
+    };
+    const nonThermo = structured.data.agentTasks.filter((a) => a.perspective !== 'thermo-nuclear');
+    expect(nonThermo).toHaveLength(4);
+    for (const agent of nonThermo) {
+      expect(agent.task).toContain('Thermo-nuclear structural standards');
+    }
+    const thermo = structured.data.agentTasks.find((a) => a.perspective === 'thermo-nuclear');
+    expect(thermo?.task).toContain('/thermo-nuclear-code-quality-review');
+  });
+
+  it('includes reviewVerdictRel and thermo subagent in hit-me dispatch payload', async () => {
+    const bead = makeBead();
+    const { ctx } = makeCtx({}, [brShowCall(bead)]);
+
+    const result = await runReview(ctx, { cwd: '/fake/cwd', beadId: 'test-bead-1', action: 'hit-me' });
+
+    const structured = result.structuredContent as {
+      data: {
+        reviewVerdictRel: string;
+        thermoSubagentType: string;
+        agentTasks: Array<{ perspective: string; subagent_type?: string; model?: string }>;
+      };
+    };
+    expect(structured.data.reviewVerdictRel).toBe('.pi-flywheel/review-verdicts/test-bead-1-r0.json');
+    expect(structured.data.thermoSubagentType).toBe('thermo-nuclear-code-quality-review');
+    const thermo = structured.data.agentTasks.find((a) => a.perspective === 'thermo-nuclear');
+    expect(thermo?.subagent_type).toBe('thermo-nuclear-code-quality-review');
+    expect(thermo?.model).toBeTruthy();
+  });
+
+  it('returns hit_me_review_in_progress when triggered but verdict file absent', async () => {
+    const bead = makeBead();
+    const { ctx } = makeCtx({ beadHitMeTriggered: { 'test-bead-1': true } }, [brShowCall(bead)]);
+
+    const result = await runReview(ctx, { cwd: '/fake/cwd', beadId: 'test-bead-1', action: 'hit-me' });
+
+    expect(result.structuredContent).toMatchObject({
+      data: {
+        kind: 'hit_me_review_in_progress',
+        beadId: 'test-bead-1',
+        reviewVerdictRel: '.pi-flywheel/review-verdicts/test-bead-1-r0.json',
+      },
+    });
+  });
+
+  it('hit-me collect: blocking verdict synthesizes beads with auto-review-finding label', async () => {
+    const SHA_RANGE = '0000000..abc123def456';
+    const findings = [
+      {
+        severity: 'high' as const,
+        summary: 'Spaghetti branch in handler',
+        suggested_bead_title: 'Refactor handler branches',
+        affected_files: ['src/handler.ts'],
+        evidence_excerpt: 'if (a) { if (b) { ...',
+      },
+    ];
+    vi.mocked(fsPromises.access).mockResolvedValueOnce(undefined);
+    vi.mocked(fsPromises.readFile).mockResolvedValueOnce(
+      JSON.stringify({ status: 'blocking', findings, sha_range: SHA_RANGE }),
+    );
+    vi.mocked(synthesizeBeadsFromFindings).mockResolvedValueOnce(['tb-synth-1']);
+
+    const bead = makeBead();
+    const { ctx } = makeCtx({ beadHitMeTriggered: { 'test-bead-1': true } }, [brShowCall(bead)]);
+
+    const result = await runReview(ctx, { cwd: '/fake/cwd', beadId: 'test-bead-1', action: 'hit-me' });
+
+    const structured = result.structuredContent as {
+      data: { kind: string; nextStep: { kind: string; beadIds: string[] } };
+    };
+    expect(structured.data.kind).toBe('hit_me_review_verdict');
+    expect(structured.data.nextStep.kind).toBe('synthesized_beads_pending');
+    expect(structured.data.nextStep.beadIds).toEqual(['tb-synth-1']);
+    expect(vi.mocked(synthesizeBeadsFromFindings)).toHaveBeenCalledWith(
+      '/fake/cwd',
+      expect.any(Object),
+      findings,
+      'test-bead-1-r0',
+      ['auto-review-finding'],
+    );
   });
 
   it('sets beadHitMeTriggered on hit-me', async () => {
@@ -838,12 +932,21 @@ describe('runReview', () => {
 
     beforeEach(() => {
       vi.mocked(fsPromises.readFile).mockReset();
+      vi.mocked(fsPromises.access).mockReset();
       vi.mocked(fsPromises.mkdir).mockReset();
       vi.mocked(synthesizeBeadsFromFindings).mockReset();
       vi.mocked(rollbackSynthesizedBeads).mockReset();
       vi.mocked(appendMemory).mockReset();
       vi.mocked(readMemory).mockReset();
       // Restore sane defaults so unrelated paths in the run never hit real fs.
+      vi.mocked(fsPromises.readFile).mockImplementation(async () => {
+        const err = Object.assign(new Error('not mocked'), { code: 'ENOENT' });
+        throw err;
+      });
+      vi.mocked(fsPromises.access).mockImplementation(async () => {
+        const err = Object.assign(new Error('not mocked'), { code: 'ENOENT' });
+        throw err;
+      });
       vi.mocked(fsPromises.mkdir).mockResolvedValue(undefined);
       vi.mocked(rollbackSynthesizedBeads).mockResolvedValue({ deleted: [], closed: [], failed: [] });
       vi.mocked(appendMemory).mockReturnValue(true);
@@ -905,6 +1008,7 @@ describe('runReview', () => {
         expect.any(Object),
         findings,
         SHA_RANGE,
+        ['auto-review-finding'],
       );
       // No malformed-verdict CASS note on the happy path.
       expect(vi.mocked(appendMemory)).not.toHaveBeenCalled();
@@ -984,7 +1088,7 @@ describe('runReview', () => {
       expect(vi.mocked(appendMemory)).toHaveBeenCalledTimes(1);
       const [appendCwd, appendContent, appendCategory] = vi.mocked(appendMemory).mock.calls[0];
       expect(appendCwd).toBe('/fake/cwd');
-      expect(appendContent).toMatch(/malformed batch-review verdict/i);
+      expect(appendContent).toMatch(/malformed review verdict/i);
       expect(appendContent).toContain(SHA_RANGE);
       expect(appendCategory).toBe('batch-review');
       // No bead synthesis on schema failure.

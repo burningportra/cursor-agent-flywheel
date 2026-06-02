@@ -6,6 +6,21 @@ _No plugin-only changes beyond monorepo root._
 
 ---
 
+## [3.22.0] — 2026-06-02
+
+### Added
+
+- **Combined Fresh-eyes + thermo-nuclear review** — single wave-gate path (no new menu option): hit-me 5-agent swarm with shared thermo preamble; thermo persona owns structured verdict at `.pi-flywheel/review-verdicts/<bead>-r<N>.json`; re-call `hit-me` to collect and auto-beadify blocking findings (`auto-review-finding` label).
+- **Commit-batch review** — always uses combined fresh-eyes + thermo rubric; batch Task spawns `subagent_type: thermo-nuclear-code-quality-review` with `review.thermo_nuclear_model` (default `opus-4.6`).
+- **`combined-review-prompt.ts`** / **`review-verdict-collect.ts`** — shared prompt + verdict parse/beadify for batch and hit-me collect phases.
+- Vendored **`thermo-nuclear-code-quality-review`** skill; updated parallel-reviewers, `_review.md`, and `_implement.cursor.md`.
+
+### Changed
+
+- Fresh-eyes gate copy mentions thermo-nuclear structural quality; structural beads get rationale in wave review gate.
+
+---
+
 ## [3.21.0] — 2026-05-26
 
 ### Added

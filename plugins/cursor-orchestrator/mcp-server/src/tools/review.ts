@@ -1,21 +1,25 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
-import type { ToolContext, McpToolResult, Bead, ReviewArgs, FlywheelPhase, ReviewMode, BatchReviewVerdict } from '../types.js';
-import { BatchReviewVerdictSchema } from '../types.js';
+import type { ToolContext, McpToolResult, Bead, ReviewArgs, FlywheelPhase, ReviewMode } from '../types.js';
 import type { FlywheelErrorCode } from '../errors.js';
 import { errMsg, makeFlywheelErrorResult } from '../errors.js';
 import { recordGateSteering } from '../steering-events.js';
 import { createLogger } from '../logger.js';
 import { makeOkToolResult } from './shared.js';
-import { buildFreshEyesPrompt } from '../gates.js';
 import {
-  clearPendingBatchReview,
-  markBatchReviewDispatched,
-  synthesizeBeadsFromFindings,
-  rollbackSynthesizedBeads,
-} from '../commit-batch.js';
+  AUTO_REVIEW_FINDING_LABEL,
+  buildThermoNuclearPersonaTask,
+  reviewVerdictPath,
+  reviewVerdictRel,
+  THERMO_PREAMBLE,
+  THERMO_SUBAGENT_TYPE,
+} from '../combined-review-prompt.js';
+import { buildShaRange, resolveHeadSha } from '../batch-review-dispatch.js';
+import { markBatchReviewDispatched } from '../commit-batch.js';
 import { prepareBatchReviewDispatch } from '../batch-review-dispatch.js';
-import { readMemory, appendMemory } from '../memory.js';
+import { resolveThermoNuclearModel } from '../flywheel-config.js';
+import { collectReviewVerdict } from '../review-verdict-collect.js';
+import { readMemory } from '../memory.js';
 import { readBeads } from '../beads.js';
 import { persistCoordinatorEpochBump } from '../coordinator-epoch.js';
 
@@ -445,6 +449,52 @@ export async function runReview(ctx: ToolContext, args: ReviewArgs): Promise<Mcp
       : '';
     const modeNote = modePreamble(effectiveMode, beadId);
 
+    const headSha = await resolveHeadSha(cwd, ctx.exec);
+    const shaRange = buildShaRange(state.lastBatchReviewSha, headSha);
+    const verdictRel = reviewVerdictRel(beadId, round);
+    const verdictPath = reviewVerdictPath(cwd, beadId, round);
+    const provenanceKey = `${beadId}-r${round}`;
+
+    // ── Collect phase: verdict file present after swarm completes ──
+    try {
+      await fs.access(verdictPath);
+      return collectReviewVerdict(ctx, {
+        verdictPath,
+        provenanceKey,
+        expectedShaRange: shaRange,
+        kind: 'hit_me_review_verdict',
+        memoryTag: 'hit-me-review',
+        passMessage: `## Hit-me review: PASS — ${beadId} (round ${round})\n\nNo blocking findings. Coordinator: call \`flywheel_review({ action: "looks-good", beadId: "${beadId}" }\`.`,
+        needsAttentionMessage: `## Hit-me review: NEEDS ATTENTION — ${beadId}\n\nFindings surfaced. Apply review mode matrix (Step 8.0) or re-run hit-me after fixes.`,
+        blockingMessagePrefix: `## Hit-me review: BLOCKING — ${beadId}`,
+        labels: [AUTO_REVIEW_FINDING_LABEL],
+      });
+    } catch (err: unknown) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') {
+        return errorResult(
+          state.phase,
+          'internal_error',
+          `Failed to check review verdict file: ${errMsg(err)}`,
+          { verdictPath },
+        );
+      }
+      if (state.beadHitMeTriggered?.[beadId]) {
+        return okResult(
+          state.phase,
+          `## Hit-me review in progress — ${beadId} (round ${round})\n\n` +
+            `Waiting for thermo-nuclear verdict at \`${verdictRel}\`. Re-call \`flywheel_review({ action: "hit-me", beadId: "${beadId}" })\` after the swarm completes.`,
+          {
+            kind: 'hit_me_review_in_progress',
+            beadId,
+            round,
+            reviewVerdictRel: verdictRel,
+            reviewVerdictPath: verdictPath,
+            shaRange,
+          },
+        );
+      }
+    }
+
     if (!state.beadHitMeTriggered) state.beadHitMeTriggered = {};
     if (!state.beadHitMeCompleted) state.beadHitMeCompleted = {};
     state.beadHitMeTriggered[beadId] = true;
@@ -466,11 +516,24 @@ export async function runReview(ctx: ToolContext, args: ReviewArgs): Promise<Mcp
       ? prevResults.slice(-3).map(r => `- ${r.beadId}: ${r.status}`).join('\n')
       : '(none yet)';
 
+    const thermoModel = resolveThermoNuclearModel(cwd);
+    const thermoTask = buildThermoNuclearPersonaTask({
+      modeNote,
+      postCloseNote,
+      beadId,
+      round,
+      fileList,
+      cwd,
+      shaRange,
+      verdictRel,
+    });
+
     const agentTasks = [
       {
         name: `FreshEyes-${beadId}-r${round}`,
         perspective: 'fresh-eyes',
-        task: `${modeNote}${postCloseNote}Fresh-eyes code reviewer. You have NEVER seen this code before.
+        subagent_type: 'generalPurpose',
+        task: `${THERMO_PREAMBLE}${modeNote}${postCloseNote}Fresh-eyes code reviewer. You have NEVER seen this code before.
 
 **Bead:** ${beadId} — ${bead.title}
 **Files to review:** ${fileList}
@@ -484,7 +547,8 @@ Report what you found and what you fixed.`,
       {
         name: `Adversary-${beadId}-r${round}`,
         perspective: 'adversarial',
-        task: `${modeNote}${postCloseNote}Adversarial code reviewer. Your job is to break this implementation.
+        subagent_type: 'generalPurpose',
+        task: `${THERMO_PREAMBLE}${modeNote}${postCloseNote}Adversarial code reviewer. Your job is to break this implementation.
 
 **Bead:** ${beadId} — ${bead.title}
 **Files to review:** ${fileList}
@@ -502,7 +566,8 @@ Report your attack attempts and findings.`,
       {
         name: `Ergonomics-${beadId}-r${round}`,
         perspective: 'ergonomics',
-        task: `${modeNote}${postCloseNote}Ergonomics reviewer. Focus on usability and developer experience.
+        subagent_type: 'generalPurpose',
+        task: `${THERMO_PREAMBLE}${modeNote}${postCloseNote}Ergonomics reviewer. Focus on usability and developer experience.
 
 **Bead:** ${beadId} — ${bead.title}
 **Files to review:** ${fileList}
@@ -517,7 +582,8 @@ Report improvements made.`,
       {
         name: `RealityCheck-${beadId}-r${round}`,
         perspective: 'reality-check',
-        task: `${modeNote}${postCloseNote}Reality checker. Verify the implementation actually achieves the goal.
+        subagent_type: 'generalPurpose',
+        task: `${THERMO_PREAMBLE}${modeNote}${postCloseNote}Reality checker. Verify the implementation actually achieves the goal.
 
 **Goal:** ${goal}
 **Bead:** ${beadId} — ${bead.title}
@@ -529,27 +595,19 @@ Check: Does this actually solve the bead's stated goal? Are there gaps between i
 Do NOT edit code — just report your findings.`,
       },
       {
-        name: `Explorer-${beadId}-r${round}`,
-        perspective: 'exploration',
-        task: `${modeNote}${postCloseNote}Code explorer. Randomly explore the codebase to find related issues.
-
-**Bead:** ${beadId} — ${bead.title}
-**cwd:** ${cwd}
-
-Pick 3 random files related to the bead's area and read them. Look for:
-- Inconsistencies with the new implementation
-- Patterns broken by the changes
-- Tests that should exist but don't
-
-Report what you found. Fix obvious issues directly.`,
+        name: `ThermoNuclear-${beadId}-r${round}`,
+        perspective: 'thermo-nuclear',
+        subagent_type: THERMO_SUBAGENT_TYPE,
+        model: thermoModel,
+        task: thermoTask,
       },
     ];
 
-    const baseInstructions = `Spawn these 5 review agents in parallel. After all complete, synthesize their findings and apply fixes. Then call \`flywheel_review\` with beadId="${beadId}" and action="looks-good" or action="hit-me" for another round.`;
+    const baseInstructions = `Spawn these 5 review agents in parallel (combined fresh-eyes + thermo-nuclear). The **thermo-nuclear** agent (\`subagent_type: "${THERMO_SUBAGENT_TYPE}"\`, model: \`${thermoModel}\`) writes the canonical verdict JSON to \`${verdictRel}\`. After all complete, re-call \`flywheel_review({ action: "hit-me", beadId: "${beadId}" })\` to collect the verdict and auto-beadify blocking findings. Then \`looks-good\` or another \`hit-me\` round if needed.`;
     const modeInstructions: Record<ReviewMode, string> = {
-      autofix: `Review mode=autofix: each reviewer applies and commits its fixes directly. After all 5 finish, verify the tree is green and call \`flywheel_review\` with action="looks-good" — do NOT AskUserQuestion per finding.`,
-      'report-only': `Review mode=report-only: reviewers write findings to docs/reviews/<perspective>-<date>.md and DO NOT edit code. After synthesizing, call \`flywheel_review\` with action="looks-good" to close the bead or action="hit-me" again if reports surfaced blockers.`,
-      headless: `Review mode=headless (CI): reviewers emit JSON-on-stdout only. The coordinator MUST aggregate finding counts and treat a non-zero count as review_headless_findings (CI exit code 1). Do NOT AskUserQuestion — this mode is for non-interactive shells.`,
+      autofix: `Review mode=autofix: each reviewer applies and commits its fixes directly. After all 5 finish, re-call hit-me to collect the thermo verdict, then \`looks-good\` if pass — do NOT AskUserQuestion per finding.`,
+      'report-only': `Review mode=report-only: reviewers write findings to docs/reviews/<perspective>-<date>.md and DO NOT edit code. Thermo agent still writes \`${verdictRel}\`. Re-call hit-me to collect; then looks-good or another hit-me if blockers remain.`,
+      headless: `Review mode=headless (CI): reviewers emit JSON-on-stdout only. Thermo agent writes \`${verdictRel}\`. Re-call hit-me to collect; aggregate exit codes — do NOT AskUserQuestion.`,
       interactive: baseInstructions,
     };
     const instructions = postClose
@@ -565,6 +623,11 @@ Report what you found. Fix obvious issues directly.`,
       mode: effectiveMode,
       requestedMode,
       parallelSafe,
+      shaRange,
+      reviewVerdictRel: verdictRel,
+      reviewVerdictPath: verdictPath,
+      thermoSubagentType: THERMO_SUBAGENT_TYPE,
+      thermoModel,
       ...(modeGateWarning ? { modeGateWarning } : {}),
       agentTasks,
       files,
@@ -683,198 +746,22 @@ async function handleBatchReview(
     });
   }
 
-  // ── Phase 2: verdict present → parse + validate + branch ──────
-  let parsedJson: unknown;
-  try {
-    parsedJson = JSON.parse(rawVerdict);
-  } catch (err: unknown) {
-    return needsAttentionFallback(
-      ctx,
-      shaRange,
-      verdictPath,
-      rawVerdict,
-      `Verdict JSON parse failed: ${errMsg(err)}`,
-    );
-  }
-
-  const parseResult = BatchReviewVerdictSchema.safeParse(parsedJson);
-  if (!parseResult.success) {
-    const issues = parseResult.error.issues
-      .map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`)
-      .join('; ');
-    try {
-      appendMemory(
-        cwd,
-        `malformed batch-review verdict (sha range ${shaRange}): ${issues}`,
-        'batch-review',
-      );
-    } catch { /* best-effort */ }
-    return needsAttentionFallback(
-      ctx,
-      shaRange,
-      verdictPath,
-      rawVerdict,
-      `Verdict schema validation failed (BatchReviewVerdictSchema): ${issues}`,
-    );
-  }
-
-  const verdict = parseResult.data;
-  ctx.state = clearPendingBatchReview(ctx.state);
-  await saveState(ctx.state);
-
-  // Echo back: the reviewer's sha_range field MUST match the path's shaRange
-  // — otherwise the reviewer wrote to the wrong file. Treat as malformed.
-  if (verdict.sha_range !== shaRange) {
-    try {
-      appendMemory(
-        cwd,
-        `batch-review verdict sha_range mismatch (path=${shaRange}, verdict=${verdict.sha_range})`,
-        'batch-review',
-      );
-    } catch { /* best-effort */ }
-    return needsAttentionFallback(
-      ctx,
-      shaRange,
-      verdictPath,
-      rawVerdict,
-      `Verdict sha_range field "${verdict.sha_range}" does not match the path "${shaRange}". Treating as malformed.`,
-    );
-  }
-
-  // ── status: pass ────────────────────────────────────────────
-  if (verdict.status === 'pass') {
-    return okResult(
-      state.phase,
-      `## Batch Review: PASS — ${shaRange}\n\nNo findings. Coordinator: advance the wave normally.`,
-      {
-        kind: 'batch_review_verdict',
-        verdict,
-        nextStep: { kind: 'advance_wave' as const },
-      },
-    );
-  }
-
-  // ── status: needs_attention ─────────────────────────────────
-  if (verdict.status === 'needs_attention') {
-    return okResult(
-      state.phase,
+  // ── Phase 2: verdict present → collect + beadify ─────────────
+  return collectReviewVerdict(ctx, {
+    verdictPath,
+    rawVerdict,
+    provenanceKey: shaRange,
+    expectedShaRange: shaRange,
+    kind: 'batch_review_verdict',
+    memoryTag: 'batch-review',
+    passMessage: `## Batch Review: PASS — ${shaRange}\n\nNo findings. Coordinator: advance the wave normally.`,
+    needsAttentionMessage:
       `## Batch Review: NEEDS ATTENTION — ${shaRange}\n\n` +
-        `${verdict.findings.length} finding(s) surfaced. Coordinator: prompt the user (Continue / Synthesize beads / Pause / Regress).`,
-      {
-        kind: 'batch_review_verdict',
-        verdict,
-        nextStep: { kind: 'needs_attention' as const, findings: verdict.findings },
-      },
-    );
-  }
-
-  // ── status: blocking → synthesize beads ─────────────────────
-  let synthesisError: string | undefined;
-  let synthesizedIds: string[] = [];
-  try {
-    synthesizedIds = await synthesizeBeadsFromFindings(cwd, state, verdict.findings, shaRange);
-  } catch (err: unknown) {
-    synthesisError = errMsg(err);
-    const partialIds = state.batchReviewSynthesizedBeads?.[shaRange] ?? [];
-    if (partialIds.length > 0) {
-      try {
-        const rb = await rollbackSynthesizedBeads(cwd, partialIds);
-        log.warn('batch_review: partial-rollback after synthesize failure', {
-          shaRange,
-          deleted: rb.deleted.length,
-          closed: rb.closed.length,
-          failed: rb.failed.length,
-        });
-      } catch (rbErr: unknown) {
-        log.error('batch_review: rollback also failed', { err: errMsg(rbErr) });
-      }
-      // Clear the partial record so a future call sees a clean slate.
-      if (state.batchReviewSynthesizedBeads) {
-        delete state.batchReviewSynthesizedBeads[shaRange];
-      }
-    }
-    try {
-      appendMemory(
-        cwd,
-        `batch-review synthesize failure (sha range ${shaRange}): ${synthesisError}`,
-        'batch-review',
-      );
-    } catch { /* best-effort */ }
-  }
-
-  await saveState(state);
-
-  if (synthesisError) {
-    return okResult(
-      state.phase,
-      `## Batch Review: BLOCKING — ${shaRange} (synthesis failed)\n\n` +
-        `Verdict was blocking but bead synthesis failed: ${synthesisError}. ` +
-        `Partial-rollback ran on the in-flight set. Surfacing as needs_attention so the operator can decide.`,
-      {
-        kind: 'batch_review_verdict',
-        verdict,
-        nextStep: { kind: 'needs_attention' as const, findings: verdict.findings },
-        synthesisError,
-      },
-    );
-  }
-
-  const mapping = synthesizedIds.map((beadId, i) => ({
-    beadId,
-    finding: verdict.findings[i],
-  }));
-
-  return okResult(
-    state.phase,
-    `## Batch Review: BLOCKING — ${shaRange}\n\n` +
-      `Synthesized ${synthesizedIds.length} bead(s) from findings (all severities). ` +
-      `Coordinator: surface the four-option Approve/Reject gate (Approve all / Approve subset / Reject all / Regress to plan).\n\n` +
-      `Created beads: ${synthesizedIds.join(', ')}`,
-    {
-      kind: 'batch_review_verdict',
-      verdict,
-      nextStep: {
-        kind: 'synthesized_beads_pending' as const,
-        beadIds: synthesizedIds,
-        mapping,
-      },
-    },
-  );
-}
-
-function needsAttentionFallback(
-  ctx: ToolContext,
-  shaRange: string,
-  verdictPath: string,
-  rawVerdict: string,
-  reason: string,
-): McpToolResult {
-  const { state } = ctx;
-  log.warn('batch_review: falling back to needs_attention', { shaRange, reason });
-  // Surface the first ~2 KiB of raw verdict so the operator can still read
-  // what the reviewer wrote even if the schema parse failed.
-  const rawSnippet = rawVerdict.length > 2048 ? rawVerdict.slice(0, 2048) + '\n…(truncated)' : rawVerdict;
-  const fallback: BatchReviewVerdict = {
-    status: 'needs_attention',
-    findings: [],
-    sha_range: shaRange,
-  };
-  return okResult(
-    state.phase,
-    `## Batch Review: NEEDS ATTENTION (fallback) — ${shaRange}\n\n` +
-      `${reason}\n\n` +
-      `Verdict file: \`${verdictPath}\`\n\n` +
-      `**Raw reviewer output (first 2 KiB):**\n\n\`\`\`\n${rawSnippet}\n\`\`\`\n\n` +
-      `Coordinator: surface the raw output to the user; do not auto-synthesize.`,
-    {
-      kind: 'batch_review_verdict',
-      verdict: fallback,
-      nextStep: { kind: 'needs_attention' as const, findings: [] },
-      malformed: true,
-      reason,
-      rawVerdictSnippet: rawSnippet,
-    },
-  );
+      `Findings surfaced. Coordinator: prompt the user (Continue / Synthesize beads / Pause / Regress).`,
+    blockingMessagePrefix: `## Batch Review: BLOCKING — ${shaRange}`,
+    clearBatchPending: true,
+    labels: [AUTO_REVIEW_FINDING_LABEL],
+  });
 }
 
 async function nextBeadOrGates(

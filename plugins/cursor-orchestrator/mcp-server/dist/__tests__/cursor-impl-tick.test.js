@@ -299,5 +299,10 @@ describe('buildImplTickCoordinatorPlaybook', () => {
         expect(playbook).toContain('advisory');
         expect(playbook).toContain('generationEpoch === data.epoch');
     });
+    it('documents combined commit-batch fresh-eyes + thermo-nuclear review', async () => {
+        const { buildImplTickCoordinatorPlaybook, resolveImplTickConfig } = await import('../cursor-impl-tick.js');
+        const playbook = buildImplTickCoordinatorPlaybook(resolveImplTickConfig('/tmp'));
+        expect(playbook).toMatch(/combined.*thermo-nuclear|thermo-nuclear.*combined/i);
+    });
 });
 //# sourceMappingURL=cursor-impl-tick.test.js.map

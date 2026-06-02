@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { ACTION_KEYS, createInitialState } from '../types.js';
-import { buildAskQuestionFromGate, buildBatchReviewSynthesizedGate, buildBeadCoverageGate, buildBeadDedupGate, buildBeadHotspotGate, buildBeadLaunchGate, buildBeadLowQualityGate, buildBeadReviewGate, buildWaveReviewGate, buildWrapUpGate, buildWrapUpVerdictGate, gateActionsFromOptions, isRiskyBead, toCompactGatePayload, } from '../cursor-user-gates.js';
+import { buildAskQuestionFromGate, buildBatchReviewSynthesizedGate, buildBeadCoverageGate, buildBeadDedupGate, buildBeadHotspotGate, buildBeadLaunchGate, buildBeadLowQualityGate, buildBeadReviewGate, buildWaveReviewGate, buildWrapUpGate, buildWrapUpVerdictGate, gateActionsFromOptions, isRiskyBead, isStructuralBead, toCompactGatePayload, } from '../cursor-user-gates.js';
 function bead(id, title, description = '') {
     return {
         id,
@@ -27,6 +27,19 @@ describe('cursor-user-gates', () => {
         expect(gate.kind).toBe('wave_review');
         expect(gate.options.some((o) => o.label.includes('Duel'))).toBe(true);
         expect(gate.rationale).toContain('Risky');
+    });
+    it('fresh-eyes option mentions thermo-nuclear structural review', () => {
+        const gate = buildWaveReviewGate([bead('tb-1', 'Add feature')], state);
+        const fresh = gate.options.find((o) => o.action === 'fresh-eyes');
+        expect(fresh?.detail).toMatch(/thermo-nuclear structural quality/i);
+        expect(gate.options).toHaveLength(3);
+    });
+    it('structural bead adds rationale for thermo rubric in fresh-eyes', () => {
+        const structural = bead('tb-ref', 'Decompose handler module', 'architecture simplify internal layers');
+        expect(isStructuralBead(structural)).toBe(true);
+        expect(isRiskyBead(structural, state)).toBe(false);
+        const gate = buildWaveReviewGate([structural], state);
+        expect(gate.rationale).toMatch(/Structural signals|thermo-nuclear rubric/i);
     });
     it('toCompactGatePayload drops duplicate option blobs', () => {
         const beads = ['tb-1', 'tb-2', 'tb-3', 'tb-4'].map((id) => bead(id, `Task ${id}`, 'implement feature'));

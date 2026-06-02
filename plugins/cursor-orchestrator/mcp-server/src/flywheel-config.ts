@@ -91,6 +91,10 @@ export interface FlywheelConfigProfile {
   debounceSeconds?: number;
 }
 
+export interface FlywheelConfigReview {
+  thermo_nuclear_model?: string;
+}
+
 export interface FlywheelConfig {
   convergence: FlywheelConfigConvergence;
   deep_plan?: FlywheelConfigDeepPlan;
@@ -100,6 +104,7 @@ export interface FlywheelConfig {
   impl_tick?: FlywheelConfigImplTick;
   coordinator?: FlywheelConfigCoordinator;
   profile?: FlywheelConfigProfile;
+  review?: FlywheelConfigReview;
 }
 
 /**
@@ -128,7 +133,7 @@ export interface FlywheelConfigResult {
  * MUST update this map AND DEFAULT_CONFIG. Keep them lockstep.
  */
 const KNOWN_KEYS: Record<string, readonly string[]> = {
-  '': ['convergence', 'deep_plan', 'implement', 'duel', 'grader', 'impl_tick', 'coordinator', 'profile'],
+  '': ['convergence', 'deep_plan', 'implement', 'duel', 'grader', 'impl_tick', 'coordinator', 'profile', 'review'],
   convergence: ['gate_advance_wave'],
   deep_plan: ['correctness', 'ergonomics', 'robustness', 'synthesis'],
   implement: ['simple', 'medium', 'complex'],
@@ -137,6 +142,7 @@ const KNOWN_KEYS: Record<string, readonly string[]> = {
   impl_tick: ['interval_seconds', 'review_model', 'max_parallel_impl', 'commit_batch_threshold'],
   coordinator: ['epochGuards', 'nextActionHints'],
   profile: ['watchIntentFiles', 'staleAction', 'debounceSeconds'],
+  review: ['thermo_nuclear_model'],
 };
 
 export const DEFAULT_CONFIG: FlywheelConfig = {
@@ -494,6 +500,19 @@ export function loadFlywheelConfigWithWarnings(cwd: string): FlywheelConfigResul
     }
   }
 
+  let review: FlywheelConfigReview | undefined;
+  const reviewNode = parsed.review;
+  if (typeof reviewNode === 'object' && reviewNode !== null) {
+    const r = reviewNode as Record<string, unknown>;
+    const thermo_nuclear_model =
+      typeof r.thermo_nuclear_model === 'string' && r.thermo_nuclear_model.trim()
+        ? r.thermo_nuclear_model.trim()
+        : undefined;
+    if (thermo_nuclear_model) {
+      review = { thermo_nuclear_model };
+    }
+  }
+
   return {
     config: {
       convergence: { gate_advance_wave: gate },
@@ -504,6 +523,7 @@ export function loadFlywheelConfigWithWarnings(cwd: string): FlywheelConfigResul
       ...(impl_tick ? { impl_tick } : {}),
       ...(coordinator ? { coordinator } : {}),
       ...(profile ? { profile } : {}),
+      ...(review ? { review } : {}),
     },
     warnings,
     source: configPath,
@@ -512,6 +532,20 @@ export function loadFlywheelConfigWithWarnings(cwd: string): FlywheelConfigResul
 
 export function loadFlywheelConfig(cwd: string): FlywheelConfig {
   return loadFlywheelConfigWithWarnings(cwd).config;
+}
+
+const DEFAULT_THERMO_REVIEW_MODEL = 'opus-4.6';
+
+/** Model for thermo-nuclear subagent (batch review + hit-me thermo persona). */
+export function resolveThermoNuclearModel(cwd: string): string {
+  const fromEnv = process.env.FW_REVIEW_THERMO_MODEL?.trim();
+  if (fromEnv) return fromEnv;
+  const { config } = loadFlywheelConfigWithWarnings(cwd);
+  const fromReview = config.review?.thermo_nuclear_model?.trim();
+  if (fromReview) return fromReview;
+  const fromTick = config.impl_tick?.review_model?.trim();
+  if (fromTick) return fromTick;
+  return DEFAULT_THERMO_REVIEW_MODEL;
 }
 
 /** True when coordinator.epochGuards is absent or explicitly true (default on). */

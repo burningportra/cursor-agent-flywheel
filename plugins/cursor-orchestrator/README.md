@@ -9,7 +9,7 @@ This plugin is a **Cursor port** of [agent-flywheel-plugin](https://github.com/b
 
 | Field            | Value                                                                                                                                                             |
 | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Pinned ref**   | `v3.18.1` (see `SYNC_MANIFEST.json` after `node scripts/sync-agent-flywheel-upstream.mjs`)                                                                        |
+| **Pinned ref**   | `v3.22.0` (see `SYNC_MANIFEST.json` after `node scripts/sync-agent-flywheel-upstream.mjs`)                                                                        |
 | **Merge policy** | Re-sync from upstream via `scripts/sync-agent-flywheel-upstream.mjs`, then re-apply Cursor overlays (`cursor-adapters.ts`, `checkpoint-legacy.ts`, `hooks/hooks.json`, rules). |
 
 

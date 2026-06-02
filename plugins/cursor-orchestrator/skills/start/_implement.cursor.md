@@ -38,7 +38,7 @@ flywheel_impl_tick({ cwd, closedBeadIds: ["br-1", "br-2"] })
 |-------------|-------------------|
 | `monitor` | Wait; schedule next tick |
 | `stale` | Epoch mismatch or user steered mid-tick — re-call `flywheel_impl_tick` immediately; do not spawn Tasks |
-| `batch_review_dispatch` | Epoch check → spawn **one** Task with `data.batchReviewTask` (`model` = decorrelated reviewer, default `opus-4.6`); tick again when verdict JSON exists |
+| `batch_review_dispatch` | Epoch check → spawn **one** Task with `data.batchReviewTask` (`subagent_type: thermo-nuclear-code-quality-review`, combined fresh-eyes + thermo prompt); tick again when verdict JSON exists |
 | `batch_review_in_progress` | Do not start another review; tick later |
 | `batch_review_verdict` | **AskQuestion** with `data.askQuestion`; approve synthesized beads → merge into wave → tick |
 | `advance_wave` | Epoch check → spawn `data.implTasks` (stagger ~30s) |

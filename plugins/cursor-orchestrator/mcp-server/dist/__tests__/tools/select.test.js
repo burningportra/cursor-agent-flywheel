@@ -189,7 +189,17 @@ describe('runSelect', () => {
             expect(state.cycleStartSha).toBe('abc123def456');
         });
         it('leaves cycleStartSha undefined when git rev-parse fails', async () => {
-            const { ctx, state } = makeCtx();
+            const exec = createMockExec([
+                { cmd: 'git', args: ['rev-parse', 'HEAD'], result: { code: 1, stdout: '', stderr: 'fatal: not a git repository' } },
+            ]);
+            const state = makeState({ repoProfile: makeRepoProfile() });
+            const ctx = {
+                exec,
+                cwd: '/fake/cwd',
+                state,
+                saveState: () => { },
+                clearState: () => { },
+            };
             await runSelect(ctx, { cwd: '/fake/cwd', goal: 'Detached HEAD' });
             expect(state.cycleStartSha).toBeUndefined();
         });

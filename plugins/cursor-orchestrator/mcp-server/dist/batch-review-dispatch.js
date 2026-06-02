@@ -3,7 +3,7 @@
  */
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
-import { buildFreshEyesPrompt } from './gates.js';
+import { buildCombinedReviewPrompt } from './combined-review-prompt.js';
 import { readMemory } from './memory.js';
 export function batchReviewVerdictRel(shaRange) {
     return path.join('.pi-flywheel', 'batch-reviews', `${shaRange}.json`);
@@ -59,14 +59,13 @@ export async function prepareBatchReviewDispatch(ctx, shaRange, reviewSha) {
     const callbackHint = `\n\nWrite your verdict JSON to \`${verdictRel}\` (create parent dirs if needed). ` +
         `The coordinator will call \`flywheel_impl_tick\` or \`flywheel_review({ action: "batch_review", shaRange: "${shaRange}" })\` ` +
         `to read the file and branch.`;
-    const prompt = buildFreshEyesPrompt({
+    const prompt = buildCombinedReviewPrompt({
         round: 1,
         memoryContext,
         allArtifacts: changedFiles,
         callbackHint,
         regressionHint: '',
         shaRange,
-        emitStructuredFindings: true,
     });
     return {
         shaRange,

@@ -22,6 +22,8 @@ Sections are grouped by **capability waves**. The **version timeline** keeps chr
 | Label | Date (landed) | Summary |
 |-------|---------------|---------|
 | **[Unreleased]** | — | No open beads |
+| **3.22.0** | 2026-06-02 | Combined fresh-eyes + thermo-nuclear review (hit-me collect, commit-batch thermo Task) |
+| **3.21.0** | 2026-05-26 | Recover-gates, observe pending-gate hint, outcome grading Cursor grader |
 | **3.20.0** | 2026-05-26 | Flywheel doc-vs-code audit: wave gate bead close, commit-batch fresh-eyes, compliance Cursor defer |
 | **3.19.0** | 2026-05-20 | pi-prompt-suggester integration: coordinator epoch, profile staleness, next-action hints |
 | **3.18.1+visual** | 2026-05-20 | Planning browser companion + changelog rebuild ([89397cc](https://github.com/burningportra/cursor-agent-flywheel/commit/89397cc)) |
@@ -35,6 +37,18 @@ There are **no git tags** and **no GitHub Releases** in this repository yet.
 ## [Unreleased]
 
 _No pending release items._
+
+---
+
+## 3.22.0 — combined fresh-eyes + thermo-nuclear review (2026-06-02)
+
+Fresh-eyes wave review and commit-batch review share one combined rubric: thermo-nuclear structural quality alongside correctness/DX/goal checks; blocking findings auto-beadify via shared verdict collect. See [plugins/cursor-orchestrator/CHANGELOG.md](plugins/cursor-orchestrator/CHANGELOG.md).
+
+---
+
+## 3.21.0 — recover-gates and outcome grading (2026-05-26)
+
+Recover-gates context resolution, compact gate payloads, Cursor Task outcome grader, and `readBeads` fix for closed beads in wave review. See [plugins/cursor-orchestrator/CHANGELOG.md](plugins/cursor-orchestrator/CHANGELOG.md).
 
 ---
 

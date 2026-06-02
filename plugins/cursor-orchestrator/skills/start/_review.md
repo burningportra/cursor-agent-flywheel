@@ -114,9 +114,9 @@ Actions:
   4. Wait for the `[review] <id> self-review` Agent Mail report. Only AFTER it arrives, call `flywheel_review` with `action: "looks-good"` and `beadId` to close the bead. Do NOT close the bead before the report; doing so causes the gates to auto-advance and may trigger downstream pane teardown before review actually happened.
   5. If the pane has genuinely died or been recycled (verified via `ntm --robot-is-working` returning `gone` AND no Agent Mail traffic for >10 min AND not recoverable via the stuck-pane ladder in `_implement.md`), fall back to a coordinator-side `git diff` review of that bead's files only — do NOT spawn fresh reviewer agents and do NOT touch other panes.
 
-- **"Fresh-eyes `<id>`"** -> call `flywheel_review` with `action: "hit-me"` and `beadId`. The tool returns 5 agent task specs. Then:
+- **"Fresh-eyes `<id>`"** -> combined **fresh-eyes + thermo-nuclear** review. Call `flywheel_review` with `action: "hit-me"` and `beadId`. The tool returns 5 agent task specs (thermo persona uses `subagent_type: thermo-nuclear-code-quality-review`). Then:
   1. Create a review team: `TeamCreate(team_name: "review-<bead-id>")`
-  2. Spawn all 5 with `run_in_background: true`, each with `team_name` set and the strict STEP 0 Agent Mail bootstrap in their prompt. Each reviewer prompt **MUST** include:
+  2. Spawn all 5 with `run_in_background: true`, each with `team_name` set and the strict STEP 0 Agent Mail bootstrap in their prompt. Use `model` / `subagent_type` from each `agentTasks` entry. Each reviewer prompt **MUST** include:
      - Instruction to write findings to disk: `docs/reviews/<perspective>-<date>.md`
      - Instruction to send **only the file path** (not body content) via Agent Mail
      - **Do NOT** include review content inline in the Agent Mail message body — inbox delivery is unreliable and large bodies may be silently dropped
@@ -128,6 +128,8 @@ Actions:
      **Persistent inbox failure fallback**: If inbox remains empty after all nudges, do not block. Read findings files directly from disk (`docs/reviews/<perspective>-<date>.md`) using the Read tool. If no disk file exists either, synthesize from `git diff <base-sha>..HEAD` directly.
   4. Shutdown each reviewer individually after collecting results — do NOT broadcast structured messages to `"*"`
   5. Collect and summarize results. If fewer than 5 reviewers delivered via inbox, synthesize from disk files + `git diff` — do NOT wait indefinitely for unresponsive reviewers.
+  6. **Verdict collect:** Re-call `flywheel_review({ action: "hit-me", beadId: "<id>" })`. When the thermo agent has written `.pi-flywheel/review-verdicts/<id>-r<N>.json`, the tool returns `hit_me_review_verdict` — blocking findings auto-beadify with label `auto-review-finding`. Present `askQuestion` if synthesized beads need approval.
+  7. On `pass` → `flywheel_review({ action: "looks-good", beadId })`. On `needs_attention` → apply review mode matrix (Step 8.0) or another hit-me round.
 
 - **"Duel review `<id>`"** (only offered for risky beads per §8.0a) -> invoke `/dueling-idea-wizards` against the bead's diff:
   1. Resolve the bead's primary signal class:

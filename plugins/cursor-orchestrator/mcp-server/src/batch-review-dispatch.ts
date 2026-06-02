@@ -5,7 +5,7 @@
 import { promises as fs } from 'node:fs';
 import * as path from 'node:path';
 
-import { buildFreshEyesPrompt } from './gates.js';
+import { buildCombinedReviewPrompt } from './combined-review-prompt.js';
 import { readMemory } from './memory.js';
 import type { ToolContext } from './types.js';
 
@@ -84,14 +84,13 @@ export async function prepareBatchReviewDispatch(
     `The coordinator will call \`flywheel_impl_tick\` or \`flywheel_review({ action: "batch_review", shaRange: "${shaRange}" })\` ` +
     `to read the file and branch.`;
 
-  const prompt = buildFreshEyesPrompt({
+  const prompt = buildCombinedReviewPrompt({
     round: 1,
     memoryContext,
     allArtifacts: changedFiles,
     callbackHint,
     regressionHint: '',
     shaRange,
-    emitStructuredFindings: true,
   });
 
   return {

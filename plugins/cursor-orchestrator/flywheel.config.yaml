@@ -29,5 +29,8 @@ impl_tick:
   review_model: opus-4.6
   max_parallel_impl: 3
 
+review:
+  thermo_nuclear_model: opus-4.6
+
 coordinator:
   epochGuards: true

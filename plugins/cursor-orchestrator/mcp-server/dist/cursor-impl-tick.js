@@ -10,7 +10,8 @@ import { adaptPromptForCursor, buildCursorImplSpawnInstructions, getCursorImplMo
 import { buildAskQuestionFromGate, buildBatchReviewSynthesizedGate } from './cursor-user-gates.js';
 import { classifyBeadComplexity } from './model-routing.js';
 import { getCoordinatorEpoch, persistCoordinatorEpochBump } from './coordinator-epoch.js';
-import { areEpochGuardsEnabled, areNextActionHintsEnabled, loadFlywheelConfigWithWarnings } from './flywheel-config.js';
+import { THERMO_SUBAGENT_TYPE } from './combined-review-prompt.js';
+import { areEpochGuardsEnabled, areNextActionHintsEnabled, loadFlywheelConfigWithWarnings, resolveThermoNuclearModel } from './flywheel-config.js';
 import { buildNextActionHint } from './next-action-hint.js';
 import { probeProfileStale } from './profile-staleness.js';
 import { scheduleProfileAutoRefresh } from './tools/profile.js';
@@ -51,7 +52,7 @@ export function buildImplTickCoordinatorPlaybook(cfg) {
         '2b. **Epoch check (before any Task spawn):** Read `data.epoch` from the tick response. Confirm it matches checkpoint `coordinatorEpoch` (`flywheel_observe` or same-session state). If `kind: stale` or epochs differ, discard `implTasks` / `batchReviewTask` and re-call `flywheel_impl_tick` — do not spawn.',
         '3. **Scan:** Prefer one line from `data.nextActionHint.text` in chat when present. Hints are **advisory** — follow `data.kind`, gate MCP tools, and `nextStep` for control flow; never skip mandatory gates because a hint exists. When both hint and structured fields exist, verify `nextActionHint.generationEpoch === data.epoch` before acting on the hint.',
         '4. Branch on `data.kind`:',
-        '   - `batch_review_dispatch` → epoch check → spawn **one** Task with `data.batchReviewTask`, then tick again (verdict file).',
+        '   - `batch_review_dispatch` → epoch check → spawn **one** combined fresh-eyes + thermo-nuclear Task with `data.batchReviewTask` (`subagent_type: thermo-nuclear-code-quality-review`), then tick again (verdict file).',
         '   - `batch_review_in_progress` → wait; do not start another review.',
         '   - `batch_review_collect_verdict` → verdict on disk; tick again (auto-reads via review).',
         '   - `batch_review_verdict` → present `data.askQuestion`; merge synthesized beads into the wave.',
@@ -150,6 +151,7 @@ export async function runImplTickCore(ctx, args) {
     const epochAtTickStart = getCoordinatorEpoch(state);
     const epochGuards = areEpochGuardsEnabled(cwd);
     const cfg = resolveImplTickConfig(cwd);
+    const thermoReviewModel = resolveThermoNuclearModel(cwd);
     const { config } = loadFlywheelConfigWithWarnings(cwd);
     scheduleProfileAutoRefresh(ctx, config.profile);
     const tickAt = new Date().toISOString();
@@ -246,7 +248,7 @@ export async function runImplTickCore(ctx, args) {
         await saveState(nextState);
         return buildTickResult(epochAtTickStart, state, epochGuards, [
             `Commit-batch threshold crossed (${commitsSinceBaseline} ≥ ${threshold}).`,
-            `Dispatch fresh-eyes Task over ${shaRange}, then call flywheel_impl_tick again.`,
+            `Dispatch combined fresh-eyes + thermo-nuclear Task over ${shaRange}, then call flywheel_impl_tick again.`,
         ].join('\n'), {
             kind: 'batch_review_dispatch',
             tickAt,
@@ -257,9 +259,9 @@ export async function runImplTickCore(ctx, args) {
             },
             coordinatorPlaybook: playbook,
             batchReviewTask: {
-                model: cfg.reviewModel,
-                subagent_type: 'generalPurpose',
-                description: `Fresh-eyes batch review ${shaRange}`,
+                model: thermoReviewModel,
+                subagent_type: THERMO_SUBAGENT_TYPE,
+                description: `Combined review ${shaRange}`,
                 prompt: dispatch.prompt,
                 shaRange,
                 verdictRel: dispatch.verdictRel,
@@ -292,9 +294,9 @@ export async function runImplTickCore(ctx, args) {
                 coordinatorPlaybook: playbook,
                 advanceWave: outcome,
                 batchReviewTask: {
-                    model: cfg.reviewModel,
-                    subagent_type: 'generalPurpose',
-                    description: `Fresh-eyes batch review ${shaRange}`,
+                    model: thermoReviewModel,
+                    subagent_type: THERMO_SUBAGENT_TYPE,
+                    description: `Combined review ${shaRange}`,
                     prompt: dispatch.prompt,
                     shaRange,
                     verdictRel: dispatch.verdictRel,

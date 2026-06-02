@@ -42,6 +42,7 @@ export declare function gateActionsFromOptions(gate: FlywheelUserGate): Record<s
 /** MCP payload without duplicating options/coordinatorAction (saves ~80% JSON vs full userGate). */
 export declare function toCompactGatePayload(gate: FlywheelUserGate): CompactGatePayload;
 export declare function buildAskQuestionFromGate(gate: FlywheelUserGate): CursorAskQuestionPayload;
+export declare function isStructuralBead(bead: Bead): boolean;
 export declare function isRiskyBead(bead: Bead, state: FlywheelState): boolean;
 /** Step 8 wave-completion gate (after all impl agents in a wave report back). */
 export declare function buildWaveReviewGate(beads: Bead[], state: FlywheelState): FlywheelUserGate;

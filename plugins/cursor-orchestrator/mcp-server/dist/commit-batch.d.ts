@@ -59,7 +59,7 @@ export declare function recordBatchReview(state: FlywheelState, sha: string, ver
  * severity is preserved in the bead description for downstream prioritization
  * via the Approve subset gate.)
  */
-export declare function synthesizeBeadsFromFindings(cwd: string, state: FlywheelState, findings: Finding[], range: string): Promise<string[]>;
+export declare function synthesizeBeadsFromFindings(cwd: string, state: FlywheelState, findings: Finding[], range: string, labels?: string[]): Promise<string[]>;
 /**
  * Tear down auto-synthesized beads when the user picks Reject all (or the
  * rejected subset of Approve subset). Primary path: `br delete <id>

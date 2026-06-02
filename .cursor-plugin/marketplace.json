@@ -7,15 +7,15 @@
   },
   "metadata": {
     "description": "Team marketplace for the Agentic Coding Flywheel: cursor-orchestrator (beads, MCP, hooks, /start) plus optional starter plugins.",
-    "version": "3.20.0",
+    "version": "3.22.0",
     "pluginRoot": "plugins"
   },
   "plugins": [
     {
       "name": "cursor-orchestrator",
       "source": "./cursor-orchestrator",
-      "description": "Agentic Coding Flywheel — scan, plan, beads, review, swarm (Cursor port of agent-flywheel-plugin 3.20.x)",
-      "version": "3.20.0"
+      "description": "Agentic Coding Flywheel — scan, plan, beads, review, swarm (Cursor port of agent-flywheel-plugin 3.22.x)",
+      "version": "3.22.0"
     },
     {
       "name": "starter-advanced",

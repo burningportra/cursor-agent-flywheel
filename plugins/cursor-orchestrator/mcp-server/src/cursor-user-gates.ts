@@ -125,6 +125,14 @@ export function buildAskQuestionFromGate(
 const RISKY_LABEL_RE =
   /security|auth|crypto|secret|permission|migration|breaking-change/i;
 
+const STRUCTURAL_LABEL_RE =
+  /refactor|architecture|decompose|simplify|maintainability|extract/i;
+
+export function isStructuralBead(bead: Bead): boolean {
+  const text = `${bead.title} ${bead.description} ${(bead.labels ?? []).join(" ")}`;
+  return STRUCTURAL_LABEL_RE.test(text);
+}
+
 export function isRiskyBead(bead: Bead, state: FlywheelState): boolean {
   if (bead.priority === 0) return true;
   const text = `${bead.title} ${bead.description} ${(bead.labels ?? []).join(" ")}`;
@@ -141,6 +149,7 @@ export function buildWaveReviewGate(
 ): FlywheelUserGate {
   const ids = beads.map((b) => b.id);
   const risky = beads.filter((b) => isRiskyBead(b, state)).map((b) => b.id);
+  const structural = beads.filter((b) => isStructuralBead(b)).map((b) => b.id);
   const multi = beads.length > 1;
   const idList = ids.join(", ");
 
@@ -164,7 +173,8 @@ export function buildWaveReviewGate(
         {
           id: "3",
           label: "Fresh-eyes review",
-          detail: "5 parallel reviewers on one bead (reply with bead id)",
+          detail:
+            "5 parallel reviewers — bugs, security, DX, goals, and thermo-nuclear structural quality (reply with bead id)",
           action: "fresh-eyes",
           coordinatorAction:
             'flywheel_review({ action: "hit-me", beadId: "<id>" }) then spawn reviewers per _review.md',
@@ -188,7 +198,8 @@ export function buildWaveReviewGate(
         {
           id: "3",
           label: "Fresh-eyes",
-          detail: "5 parallel independent reviewers",
+          detail:
+            "5 parallel reviewers — bugs, security, DX, goals, and thermo-nuclear structural quality",
           action: "fresh-eyes",
           coordinatorAction: `flywheel_review({ action: "hit-me", beadId: "${ids[0]}" })`,
         },
@@ -216,7 +227,9 @@ export function buildWaveReviewGate(
         : `Implement agent finished ${ids[0]}.`,
       risky.length > 0
         ? `Risky bead(s) detected (${risky.join(", ")}) — duel review is available.`
-        : "No high-risk signals — standard review menu is enough.",
+        : structural.length > 0
+          ? `Structural signals on ${structural.join(", ")} — fresh-eyes includes thermo-nuclear rubric.`
+          : "No high-risk signals — standard review menu is enough.",
       "Do not skip to commit or wrap-up until the user picks a review option.",
     ].join(" "),
     options,

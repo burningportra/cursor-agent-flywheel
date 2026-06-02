@@ -149,7 +149,7 @@ export function recordBatchReview(state, sha, verdict) {
  * severity is preserved in the bead description for downstream prioritization
  * via the Approve subset gate.)
  */
-export async function synthesizeBeadsFromFindings(cwd, state, findings, range) {
+export async function synthesizeBeadsFromFindings(cwd, state, findings, range, labels = ['auto-batch-review']) {
     if (!state.batchReviewSynthesizedBeads) {
         state.batchReviewSynthesizedBeads = {};
     }
@@ -168,7 +168,7 @@ export async function synthesizeBeadsFromFindings(cwd, state, findings, range) {
                 "--type", "task",
                 "--priority", "2",
                 "--description", body,
-                "--labels", "auto-batch-review",
+                "--labels", labels.join(","),
                 "--silent",
             ], { cwd, timeout: BR_TIMEOUT_MS });
             stdout = result.stdout;

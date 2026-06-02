@@ -40,7 +40,7 @@ import * as path from 'node:path';
  * MUST update this map AND DEFAULT_CONFIG. Keep them lockstep.
  */
 const KNOWN_KEYS = {
-    '': ['convergence', 'deep_plan', 'implement', 'duel', 'grader', 'impl_tick', 'coordinator', 'profile'],
+    '': ['convergence', 'deep_plan', 'implement', 'duel', 'grader', 'impl_tick', 'coordinator', 'profile', 'review'],
     convergence: ['gate_advance_wave'],
     deep_plan: ['correctness', 'ergonomics', 'robustness', 'synthesis'],
     implement: ['simple', 'medium', 'complex'],
@@ -49,6 +49,7 @@ const KNOWN_KEYS = {
     impl_tick: ['interval_seconds', 'review_model', 'max_parallel_impl', 'commit_batch_threshold'],
     coordinator: ['epochGuards', 'nextActionHints'],
     profile: ['watchIntentFiles', 'staleAction', 'debounceSeconds'],
+    review: ['thermo_nuclear_model'],
 };
 export const DEFAULT_CONFIG = {
     convergence: {
@@ -389,6 +390,17 @@ export function loadFlywheelConfigWithWarnings(cwd) {
             };
         }
     }
+    let review;
+    const reviewNode = parsed.review;
+    if (typeof reviewNode === 'object' && reviewNode !== null) {
+        const r = reviewNode;
+        const thermo_nuclear_model = typeof r.thermo_nuclear_model === 'string' && r.thermo_nuclear_model.trim()
+            ? r.thermo_nuclear_model.trim()
+            : undefined;
+        if (thermo_nuclear_model) {
+            review = { thermo_nuclear_model };
+        }
+    }
     return {
         config: {
             convergence: { gate_advance_wave: gate },
@@ -399,6 +411,7 @@ export function loadFlywheelConfigWithWarnings(cwd) {
             ...(impl_tick ? { impl_tick } : {}),
             ...(coordinator ? { coordinator } : {}),
             ...(profile ? { profile } : {}),
+            ...(review ? { review } : {}),
         },
         warnings,
         source: configPath,
@@ -406,6 +419,21 @@ export function loadFlywheelConfigWithWarnings(cwd) {
 }
 export function loadFlywheelConfig(cwd) {
     return loadFlywheelConfigWithWarnings(cwd).config;
+}
+const DEFAULT_THERMO_REVIEW_MODEL = 'opus-4.6';
+/** Model for thermo-nuclear subagent (batch review + hit-me thermo persona). */
+export function resolveThermoNuclearModel(cwd) {
+    const fromEnv = process.env.FW_REVIEW_THERMO_MODEL?.trim();
+    if (fromEnv)
+        return fromEnv;
+    const { config } = loadFlywheelConfigWithWarnings(cwd);
+    const fromReview = config.review?.thermo_nuclear_model?.trim();
+    if (fromReview)
+        return fromReview;
+    const fromTick = config.impl_tick?.review_model?.trim();
+    if (fromTick)
+        return fromTick;
+    return DEFAULT_THERMO_REVIEW_MODEL;
 }
 /** True when coordinator.epochGuards is absent or explicitly true (default on). */
 export function areEpochGuardsEnabled(cwd) {

@@ -113,7 +113,7 @@ describe('pre-P3 → v3.20.0 checkpoint migration', () => {
         const parsed = JSON.parse(fixtureRaw);
         expect(validateCheckpoint(parsed)).toEqual({
             valid: true,
-            warnings: ['Checkpoint was written by v3.19.0, current is v3.20.0'],
+            warnings: ['Checkpoint was written by v3.19.0, current is v3.22.0'],
         });
         expect(computeStateHash(parsed.state)).toBe(parsed.stateHash);
         const result = readCheckpoint(dir);

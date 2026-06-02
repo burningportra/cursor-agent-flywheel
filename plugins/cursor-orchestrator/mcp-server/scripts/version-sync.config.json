@@ -7,8 +7,13 @@
       "isSource": true
     },
     {
-      "path": ".claude-plugin/plugin.json",
+      "path": ".cursor-plugin/plugin.json",
       "kind": "json"
+    },
+    {
+      "path": ".claude-plugin/plugin.json",
+      "kind": "json",
+      "optional": true
     },
     {
       "path": ".claude-plugin/marketplace.json",
