@@ -119,10 +119,30 @@ async function assertWorkspaceSlashCommandsParity(pluginStems) {
   }
 }
 
+async function ensurePluginMcpConfig() {
+  const mcpPath = path.join(pluginRoot, "mcp.json");
+  try {
+    await fs.access(mcpPath);
+    return;
+  } catch {
+    /* gitignored — install script writes absolute launcher paths per machine */
+  }
+  const writeScript = path.join(repoRoot, "scripts", "write-plugin-mcp-config.mjs");
+  const r = spawnSync(process.execPath, [writeScript, pluginRoot], {
+    cwd: repoRoot,
+    stdio: "inherit",
+  });
+  if (r.status !== 0) {
+    console.error("verify: failed to generate plugin mcp.json via write-plugin-mcp-config.mjs");
+    process.exit(1);
+  }
+}
+
 async function main() {
   await assertFile(path.join(pluginRoot, "mcp-server", "package-lock.json"), "mcp-server/package-lock.json");
   await assertFile(path.join(pluginRoot, "mcp-server", "dist", "server.js"), "MCP server dist/server.js");
   await assertFile(path.join(pluginRoot, "scripts", "start-orchestrator-mcp.cjs"), "MCP launcher");
+  await ensurePluginMcpConfig();
   await assertFile(path.join(pluginRoot, "mcp.json"), "plugin mcp.json");
   const mcpMeta = await readJson(path.join(pluginRoot, "mcp.json"), "mcp.json");
   if (!mcpMeta || typeof mcpMeta !== "object") {
