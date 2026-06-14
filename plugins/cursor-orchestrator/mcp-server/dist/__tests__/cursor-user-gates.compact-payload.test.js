@@ -3,7 +3,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { CompactGatePayloadSchema, FLYWHEEL_USER_GATE_KINDS, createInitialState, } from '../types.js';
-import { buildBatchReviewSynthesizedGate, buildBeadCoverageGate, buildBeadDedupGate, buildBeadHotspotGate, buildBeadLaunchGate, buildBeadLowQualityGate, buildBeadReviewGate, buildWaveReviewGate, buildWaveReviewBeadPickGate, buildWrapUpAlreadyConfirmedPayload, buildWrapUpGate, buildWrapUpVerdictGate, toCompactGatePayload, } from '../cursor-user-gates.js';
+import { buildBatchReviewSynthesizedGate, buildImplSupervisionGate, buildBeadCoverageGate, buildBeadDedupGate, buildBeadHotspotGate, buildBeadLaunchGate, buildBeadLowQualityGate, buildBeadReviewGate, buildWaveReviewGate, buildWaveReviewBeadPickGate, buildWrapUpAlreadyConfirmedPayload, buildWrapUpGate, buildWrapUpVerdictGate, toCompactGatePayload, } from '../cursor-user-gates.js';
 import { buildStartMenu } from '../cursor-start-menu.js';
 function bead(id, title, description = '') {
     return {
@@ -65,6 +65,17 @@ describe('CompactGatePayloadSchema round-trip', () => {
         }
         expectRoundTrip(buildBatchReviewSynthesizedGate(2), 'wrap_up_verdict batch synthesized');
         covered.add('wrap_up_verdict');
+        expectRoundTrip(buildImplSupervisionGate({
+            headSha: 'abc1234',
+            commitsSinceBaseline: 3,
+            commitBatchThreshold: 8,
+            readyCount: 1,
+            inProgressCount: 2,
+            closedCount: 4,
+            nextTickInSeconds: 240,
+            mode: 'monitor',
+        }), 'impl_supervision monitor');
+        covered.add('impl_supervision');
         const alreadyConfirmed = buildWrapUpAlreadyConfirmedPayload({ confirmedAction: 'full' });
         const alreadyParsed = CompactGatePayloadSchema.safeParse(alreadyConfirmed);
         expect(alreadyParsed.success, 'wrap_up_already_confirmed').toBe(true);

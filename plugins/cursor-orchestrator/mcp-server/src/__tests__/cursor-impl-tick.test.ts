@@ -162,6 +162,23 @@ describe('runImplTickCore epoch guards', () => {
     expect(structured.data.kind).toBe('monitor');
   });
 
+  it('monitor tick returns impl supervision AskQuestion gate', async () => {
+    const ctx = makeCtx(
+      dir,
+      baseState({
+        coordinatorEpoch: 2,
+        commitBatchThreshold: 0,
+        implModelsConfirmed: true,
+      }),
+    );
+    const { structured } = await runImplTickCore(ctx, { cwd: dir });
+    expect(structured.data.kind).toBe('monitor');
+    expect(structured.data.gateMeta?.kind).toBe('impl_supervision');
+    expect(structured.data.askQuestion).toBeDefined();
+    expect(structured.data.actions?.['1']).toBe('impl-supervision-tick');
+    expect(structured.data.actions?.['2']).toBe('impl-supervision-loop');
+  });
+
   it('simulated mid-tick bump yields kind stale and no implTasks when guards enabled', async () => {
     const { runAdvanceWave } = await import('../tools/advance-wave.js');
     vi.spyOn(await import('../tools/advance-wave.js'), 'runAdvanceWave').mockImplementation(
@@ -373,6 +390,16 @@ describe('buildImplTickCoordinatorPlaybook', () => {
     expect(playbook).toContain('nextActionHint.text');
     expect(playbook).toContain('advisory');
     expect(playbook).toContain('generationEpoch === data.epoch');
+  });
+
+  it('documents impl supervision AskQuestion on every tick', async () => {
+    const { buildImplTickCoordinatorPlaybook, resolveImplTickConfig } = await import(
+      '../cursor-impl-tick.js'
+    );
+    const playbook = buildImplTickCoordinatorPlaybook(resolveImplTickConfig('/tmp'));
+    expect(playbook).toContain('AskQuestion');
+    expect(playbook).toContain('impl supervision');
+    expect(playbook).toContain('Hard rule');
   });
 
   it('documents combined commit-batch fresh-eyes + thermo-nuclear review', async () => {

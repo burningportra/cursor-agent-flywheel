@@ -4,6 +4,7 @@ import { ACTION_KEYS, createInitialState } from '../types.js';
 import {
   buildAskQuestionFromGate,
   buildBatchReviewSynthesizedGate,
+  buildImplSupervisionGate,
   buildBeadCoverageGate,
   buildBeadDedupGate,
   buildBeadHotspotGate,
@@ -152,6 +153,19 @@ describe('cursor-user-gates', () => {
       'bead_coverage',
     );
     expectAllOptionsHaveValidActions(buildBeadDedupGate(2), 'bead_dedup');
+    expectAllOptionsHaveValidActions(
+      buildImplSupervisionGate({
+        headSha: 'abc',
+        commitsSinceBaseline: 2,
+        commitBatchThreshold: 8,
+        readyCount: 0,
+        inProgressCount: 1,
+        closedCount: 0,
+        nextTickInSeconds: 240,
+        mode: 'monitor',
+      }),
+      'impl_supervision',
+    );
   });
 
   it('gateActionsFromOptions snapshot for multi-bead wave review with risky bead', () => {
