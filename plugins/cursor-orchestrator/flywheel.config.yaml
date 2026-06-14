@@ -26,6 +26,7 @@ grader:
 
 impl_tick:
   interval_seconds: 240
+  commit_batch_threshold: 8
   review_model: opus-4.6
   max_parallel_impl: 3
 

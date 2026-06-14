@@ -999,6 +999,10 @@ export const ACTION_KEYS = [
   'synthesized-approve-subset',
   'synthesized-reject-all',
   'synthesized-regress-plan',
+  // impl_supervision (flywheel_impl_tick monitor loop)
+  'impl-supervision-tick',
+  'impl-supervision-loop',
+  'impl-force-batch-review',
 ] as const;
 export type ActionKey = (typeof ACTION_KEYS)[number];
 
@@ -1015,6 +1019,7 @@ export const FLYWHEEL_USER_GATE_KINDS = [
   'bead_hotspot',
   'bead_coverage',
   'bead_dedup',
+  'impl_supervision',
 ] as const;
 export type FlywheelUserGateKind = (typeof FLYWHEEL_USER_GATE_KINDS)[number];
 
