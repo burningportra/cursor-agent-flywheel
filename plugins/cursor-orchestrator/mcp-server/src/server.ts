@@ -600,6 +600,11 @@ const PRIMARY_TOOLS = [
           description:
             'Persist commit-batch fresh-eyes threshold for this session (0 = disable). Also readable from flywheel.config.yaml impl_tick.commit_batch_threshold or FW_COMMIT_BATCH_THRESHOLD.',
         },
+        forceBatchReview: {
+          type: 'boolean',
+          description:
+            'Trigger commit-batch fresh-eyes review even when below threshold (requires commits since baseline > 0).',
+        },
       },
       required: ['cwd'],
     },

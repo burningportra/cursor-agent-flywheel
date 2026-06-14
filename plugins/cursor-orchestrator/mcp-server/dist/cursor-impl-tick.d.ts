@@ -2,9 +2,8 @@
  * Cursor-native implementation coordinator tick — commit-batch fresh-eyes,
  * wave advance, and ready-bead dispatch hints in one MCP call.
  */
-import { buildAskQuestionFromGate } from './cursor-user-gates.js';
 import type { AdvanceWaveOutcome } from './tools/advance-wave.js';
-import type { ToolContext } from './types.js';
+import type { CompactGatePayload, ToolContext } from './types.js';
 import type { CoordinatorNextActionHint, FlywheelState } from './types.js';
 export interface ImplTickConfig {
     intervalSeconds: number;
@@ -19,6 +18,8 @@ export interface ImplTickArgs {
     coordinatorAgent?: string;
     /** Override / persist commit-batch threshold for this session (0 = disable). */
     commitBatchThreshold?: number;
+    /** Trigger commit-batch fresh-eyes review even when below threshold (requires commits since baseline > 0). */
+    forceBatchReview?: boolean;
 }
 export type ImplTickKind = 'monitor' | 'batch_review_in_progress' | 'batch_review_dispatch' | 'batch_review_collect_verdict' | 'batch_review_verdict' | 'advance_wave' | 'dispatch_impl_tasks' | 'wave_complete' | 'stale';
 export interface ImplTickStructured {
@@ -59,7 +60,10 @@ export interface ImplTickStructured {
         }>;
         advanceWave?: AdvanceWaveOutcome;
         reviewEnvelope?: unknown;
-        askQuestion?: ReturnType<typeof buildAskQuestionFromGate>;
+        askQuestion?: CompactGatePayload['askQuestion'];
+        gateMeta?: CompactGatePayload['gateMeta'];
+        actions?: CompactGatePayload['actions'];
+        waveReviewBeadIds?: string[];
         /** Advisory one-line coordinator nudge (template v1). */
         nextActionHint?: CoordinatorNextActionHint;
     };

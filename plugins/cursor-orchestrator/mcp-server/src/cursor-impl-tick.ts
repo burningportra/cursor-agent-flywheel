@@ -26,7 +26,13 @@ import {
   getCursorImplModels,
   modelForComplexity,
 } from './cursor-implement-swarm.js';
-import { buildAskQuestionFromGate, buildBatchReviewSynthesizedGate } from './cursor-user-gates.js';
+import {
+  buildBatchReviewSynthesizedGate,
+  buildImplSupervisionGate,
+  buildWaveReviewGate,
+  toCompactGatePayload,
+  type ImplSupervisionSnapshot,
+} from './cursor-user-gates.js';
 import { classifyBeadComplexity } from './model-routing.js';
 import { getCoordinatorEpoch, persistCoordinatorEpochBump } from './coordinator-epoch.js';
 import { THERMO_SUBAGENT_TYPE } from './combined-review-prompt.js';
@@ -37,7 +43,12 @@ import { scheduleProfileAutoRefresh } from './tools/profile.js';
 import type { AdvanceWaveOutcome, AdvanceWavePrompt } from './tools/advance-wave.js';
 import { runAdvanceWave } from './tools/advance-wave.js';
 import { runReview } from './tools/review.js';
-import type { McpToolResult, ToolContext } from './types.js';
+import type {
+  Bead,
+  CompactGatePayload,
+  McpToolResult,
+  ToolContext,
+} from './types.js';
 import type { CoordinatorNextActionHint, FlywheelState } from './types.js';
 
 const DEFAULT_TICK_INTERVAL_SEC = 240;
@@ -59,6 +70,8 @@ export interface ImplTickArgs {
   coordinatorAgent?: string;
   /** Override / persist commit-batch threshold for this session (0 = disable). */
   commitBatchThreshold?: number;
+  /** Trigger commit-batch fresh-eyes review even when below threshold (requires commits since baseline > 0). */
+  forceBatchReview?: boolean;
 }
 
 export type ImplTickKind =
@@ -110,7 +123,10 @@ export interface ImplTickStructured {
     }>;
     advanceWave?: AdvanceWaveOutcome;
     reviewEnvelope?: unknown;
-    askQuestion?: ReturnType<typeof buildAskQuestionFromGate>;
+    askQuestion?: CompactGatePayload['askQuestion'];
+    gateMeta?: CompactGatePayload['gateMeta'];
+    actions?: CompactGatePayload['actions'];
+    waveReviewBeadIds?: string[];
     /** Advisory one-line coordinator nudge (template v1). */
     nextActionHint?: CoordinatorNextActionHint;
   };
@@ -164,7 +180,11 @@ export function buildImplTickCoordinatorPlaybook(cfg: ImplTickConfig): string {
     '   - `dispatch_impl_tasks` → epoch check → first wave or idle capacity; spawn tasks.',
     '   - `wave_complete` → read `nextActionHint` if present → `flywheel_wave_review_gate` → **AskQuestion** → `flywheel_review`.',
     '   - `stale` → epoch mismatch or user steered mid-tick; re-call `flywheel_impl_tick` immediately (do not spawn).',
-    '   - `monitor` → report snapshot; schedule next tick.',
+    '   - `monitor` | `batch_review_in_progress` | `batch_review_dispatch` → **AskQuestion** with `data.askQuestion` (impl supervision menu); map via `data.actions`.',
+    '   - `wave_complete` → **AskQuestion** is inlined wave review gate (`data.gateMeta.kind === wave_review`); confirm via `flywheel_wave_review_gate`.',
+    '',
+    '**Hard rule:** While impl agents run, every tick ends with AskQuestion — never free-text "waiting" or ad-hoc commit prompts.',
+    'Arm `/loop` dynamic wake when the user picks impl-supervision-loop.',
     '',
     'Do not echo full `coordinatorPlaybook`, `implTasks[].prompt`, or gate JSON into chat.',
     'Do not use codex/claude CLI for batch review in the Cursor port.',
@@ -259,6 +279,55 @@ function beadCounts(beads: Awaited<ReturnType<typeof readBeads>>): {
     else if (s === 'open' || s === 'ready') readyCount++;
   }
   return { readyCount, inProgressCount, closedCount };
+}
+
+type GateAttachment = Pick<CompactGatePayload, 'askQuestion' | 'actions' | 'gateMeta'>;
+
+function attachGateFields(
+  snapshot: ImplSupervisionSnapshot,
+): GateAttachment {
+  const compact = toCompactGatePayload(buildImplSupervisionGate(snapshot));
+  return {
+    askQuestion: compact.askQuestion,
+    actions: compact.actions,
+    gateMeta: compact.gateMeta,
+  };
+}
+
+function supervisionSnapshot(
+  baseSnapshot: ImplTickStructured['data']['snapshot'],
+  cfg: ImplTickConfig,
+  mode: ImplSupervisionSnapshot['mode'],
+  stuckBeadIds?: string[],
+): ImplSupervisionSnapshot {
+  return {
+    headSha: baseSnapshot.headSha,
+    commitsSinceBaseline: baseSnapshot.commitsSinceBaseline,
+    commitBatchThreshold: baseSnapshot.commitBatchThreshold,
+    readyCount: baseSnapshot.readyCount,
+    inProgressCount: baseSnapshot.inProgressCount,
+    closedCount: baseSnapshot.closedCount,
+    pendingBatchReviewRange: baseSnapshot.pendingBatchReviewRange,
+    nextTickInSeconds: cfg.intervalSeconds,
+    stuckBeadIds,
+    mode,
+  };
+}
+
+function beadsForWaveReview(all: Bead[], ids: string[]): Bead[] {
+  const byId = new Map(all.map((b) => [b.id, b]));
+  return ids.map(
+    (id) =>
+      byId.get(id) ?? {
+        id,
+        title: id,
+        description: '',
+        status: 'closed',
+        priority: 2,
+        type: 'task',
+        labels: [],
+      },
+  );
 }
 
 function buildImplTasksFromPrompts(
@@ -364,13 +433,20 @@ export async function runImplTickCore(
       });
       const sc = reviewResult.structuredContent as { data?: { kind?: string; verdict?: { status?: string }; nextStep?: { kind?: string; beadIds?: string[] } } } | undefined;
       const kind = sc?.data?.kind;
-      let askQuestion: ReturnType<typeof buildAskQuestionFromGate> | undefined;
+      let gateFields: GateAttachment | undefined;
       if (kind === 'batch_review_verdict' && sc?.data?.nextStep?.kind === 'synthesized_beads_pending') {
         const beadIds = sc.data.nextStep.beadIds ?? [];
-        askQuestion = buildAskQuestionFromGate(buildBatchReviewSynthesizedGate(beadIds.length));
+        gateFields = toCompactGatePayload(buildBatchReviewSynthesizedGate(beadIds.length));
       }
       const nextState = clearPendingBatchReview(state);
       await saveState(nextState);
+      const supervision = attachGateFields(
+        supervisionSnapshot(
+          { ...baseSnapshot, pendingBatchReviewRange: undefined },
+          cfg,
+          'monitor',
+        ),
+      );
       return buildTickResult(
         epochAtTickStart,
         state,
@@ -383,11 +459,16 @@ export async function runImplTickCore(
           snapshot: { ...baseSnapshot, pendingBatchReviewRange: undefined },
           coordinatorPlaybook: playbook,
           reviewEnvelope: sc,
-          askQuestion,
+          askQuestion: gateFields?.askQuestion ?? supervision.askQuestion,
+          gateMeta: gateFields?.gateMeta ?? supervision.gateMeta,
+          actions: gateFields?.actions ?? supervision.actions,
         },
       );
     }
 
+    const inProgressGate = attachGateFields(
+      supervisionSnapshot(baseSnapshot, cfg, 'batch_review_in_progress'),
+    );
     return buildTickResult(
       epochAtTickStart,
       state,
@@ -403,23 +484,39 @@ export async function runImplTickCore(
         nextTickInSeconds: cfg.intervalSeconds,
         snapshot: baseSnapshot,
         coordinatorPlaybook: playbook,
+        ...inProgressGate,
       },
     );
   }
 
+  const batchReviewForced =
+    args.forceBatchReview === true
+    && threshold > 0
+    && commitsSinceBaseline > 0;
+
   // ── New batch review (commit threshold) ──
-  if (shouldTriggerBatchReview(threshold, commitsSinceBaseline)) {
+  if (shouldTriggerBatchReview(threshold, commitsSinceBaseline) || batchReviewForced) {
     const shaRange = buildShaRange(state.lastBatchReviewSha, headSha);
     const dispatch = await prepareBatchReviewDispatch(ctx, shaRange, headSha);
     const nextState = markBatchReviewDispatched(state, headSha, shaRange);
     await saveState(nextState);
 
+    const dispatchGate = attachGateFields(
+      supervisionSnapshot(
+        { ...baseSnapshot, pendingBatchReviewRange: shaRange },
+        cfg,
+        'batch_review_dispatch',
+      ),
+    );
+    const dispatchReason = batchReviewForced
+      ? `Batch review forced (${commitsSinceBaseline} commit(s) since baseline).`
+      : `Commit-batch threshold crossed (${commitsSinceBaseline} ≥ ${threshold}).`;
     return buildTickResult(
       epochAtTickStart,
       state,
       epochGuards,
       [
-        `Commit-batch threshold crossed (${commitsSinceBaseline} ≥ ${threshold}).`,
+        dispatchReason,
         `Dispatch combined fresh-eyes + thermo-nuclear Task over ${shaRange}, then call flywheel_impl_tick again.`,
       ].join('\n'),
       {
@@ -439,6 +536,7 @@ export async function runImplTickCore(
           shaRange,
           verdictRel: dispatch.verdictRel,
         },
+        ...dispatchGate,
       },
     );
   }
@@ -462,6 +560,13 @@ export async function runImplTickCore(
       const dispatch = await prepareBatchReviewDispatch(ctx, shaRange, reviewSha);
       const nextState = markBatchReviewDispatched(state, reviewSha, shaRange);
       await saveState(nextState);
+      const verifyDispatchGate = attachGateFields(
+        supervisionSnapshot(
+          { ...baseSnapshot, pendingBatchReviewRange: shaRange },
+          cfg,
+          'batch_review_dispatch',
+        ),
+      );
       return buildTickResult(
         epochAtTickStart,
         state,
@@ -482,12 +587,15 @@ export async function runImplTickCore(
             shaRange,
             verdictRel: dispatch.verdictRel,
           },
+          ...verifyDispatchGate,
         },
       );
     }
 
     if (outcome?.waveComplete && outcome.nextStep?.kind === 'wave_review_gate') {
       const waveBeadIds = outcome.nextStep.beadIds;
+      const waveBeads = beadsForWaveReview(beads, waveBeadIds);
+      const waveGate = toCompactGatePayload(buildWaveReviewGate(waveBeads, state));
       return buildTickResult(
         epochAtTickStart,
         state,
@@ -500,6 +608,10 @@ export async function runImplTickCore(
           snapshot: baseSnapshot,
           coordinatorPlaybook: playbook,
           advanceWave: outcome,
+          waveReviewBeadIds: waveBeadIds,
+          askQuestion: waveGate.askQuestion,
+          gateMeta: waveGate.gateMeta,
+          actions: waveGate.actions,
           nextActionHint: maybeAttachNextActionHint(cwd, 'wave_complete', epochAtTickStart, state, {
             beadIds: waveBeadIds,
           }),
@@ -648,6 +760,15 @@ export async function runImplTickCore(
   }
   lines.push(`Next tick in ~${cfg.intervalSeconds}s.`);
 
+  const monitorGate = attachGateFields(
+    supervisionSnapshot(
+      baseSnapshot,
+      cfg,
+      'monitor',
+      stuck.length > 0 ? stuck.map((b) => b.id) : undefined,
+    ),
+  );
+
   return buildTickResult(
     epochAtTickStart,
     state,
@@ -659,6 +780,7 @@ export async function runImplTickCore(
       nextTickInSeconds: cfg.intervalSeconds,
       snapshot: baseSnapshot,
       coordinatorPlaybook: playbook,
+      ...monitorGate,
     },
   );
 }

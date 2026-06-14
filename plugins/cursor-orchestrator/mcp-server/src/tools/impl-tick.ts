@@ -22,6 +22,12 @@ export const ImplTickInputSchema = z.object({
     .min(0)
     .optional()
     .describe('Persist commit-batch fresh-eyes threshold for this session (0 = disable). Overrides config/env when set.'),
+  forceBatchReview: z
+    .boolean()
+    .optional()
+    .describe(
+      'Trigger commit-batch fresh-eyes review even when below threshold (requires commits since baseline > 0).',
+    ),
 });
 
 export type ImplTickInput = z.infer<typeof ImplTickInputSchema>;
@@ -48,7 +54,10 @@ export async function runImplTick(
     const nextType =
       kind === 'batch_review_dispatch' || kind === 'dispatch_impl_tasks' || kind === 'advance_wave'
         ? 'spawn_agents'
-        : kind === 'batch_review_verdict' || kind === 'wave_complete'
+        : kind === 'batch_review_verdict'
+          || kind === 'wave_complete'
+          || kind === 'monitor'
+          || kind === 'batch_review_in_progress'
           ? 'present_choices'
           : 'none';
 
@@ -56,9 +65,11 @@ export async function runImplTick(
       ...structured,
       nextStep: makeNextToolStep(
         nextType,
-        kind === 'monitor' || kind === 'batch_review_in_progress'
-          ? `Re-call flywheel_impl_tick in ~${structured.data.nextTickInSeconds}s.`
-          : `Branch on data.kind (${kind}); see coordinatorPlaybook.`,
+        structured.data.askQuestion
+          ? 'Present AskQuestion(data.askQuestion); map via data.actions; stay in gate flow.'
+          : kind === 'monitor' || kind === 'batch_review_in_progress'
+            ? `Re-call flywheel_impl_tick in ~${structured.data.nextTickInSeconds}s.`
+            : `Branch on data.kind (${kind}); see coordinatorPlaybook.`,
       ),
     });
   } catch (err) {

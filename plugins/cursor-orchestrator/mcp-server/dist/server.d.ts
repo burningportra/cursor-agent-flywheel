@@ -99,6 +99,7 @@ export declare const TOOLS: ({
             name?: undefined;
             sinceDays?: undefined;
             coordinatorAgent?: undefined;
+            forceBatchReview?: undefined;
             variant?: undefined;
             recentPlanPaths?: undefined;
             isFirstRun?: undefined;
@@ -251,6 +252,7 @@ export declare const TOOLS: ({
             name?: undefined;
             sinceDays?: undefined;
             coordinatorAgent?: undefined;
+            forceBatchReview?: undefined;
             variant?: undefined;
             recentPlanPaths?: undefined;
             isFirstRun?: undefined;
@@ -325,6 +327,7 @@ export declare const TOOLS: ({
             name?: undefined;
             sinceDays?: undefined;
             coordinatorAgent?: undefined;
+            forceBatchReview?: undefined;
             variant?: undefined;
             recentPlanPaths?: undefined;
             isFirstRun?: undefined;
@@ -411,6 +414,7 @@ export declare const TOOLS: ({
             name?: undefined;
             sinceDays?: undefined;
             coordinatorAgent?: undefined;
+            forceBatchReview?: undefined;
             variant?: undefined;
             recentPlanPaths?: undefined;
             isFirstRun?: undefined;
@@ -538,6 +542,7 @@ export declare const TOOLS: ({
             name?: undefined;
             sinceDays?: undefined;
             coordinatorAgent?: undefined;
+            forceBatchReview?: undefined;
             variant?: undefined;
             recentPlanPaths?: undefined;
             isFirstRun?: undefined;
@@ -626,6 +631,7 @@ export declare const TOOLS: ({
             name?: undefined;
             sinceDays?: undefined;
             coordinatorAgent?: undefined;
+            forceBatchReview?: undefined;
             variant?: undefined;
             recentPlanPaths?: undefined;
             isFirstRun?: undefined;
@@ -704,6 +710,7 @@ export declare const TOOLS: ({
             name?: undefined;
             sinceDays?: undefined;
             coordinatorAgent?: undefined;
+            forceBatchReview?: undefined;
             variant?: undefined;
             recentPlanPaths?: undefined;
             isFirstRun?: undefined;
@@ -799,6 +806,7 @@ export declare const TOOLS: ({
             name?: undefined;
             sinceDays?: undefined;
             coordinatorAgent?: undefined;
+            forceBatchReview?: undefined;
             variant?: undefined;
             recentPlanPaths?: undefined;
             isFirstRun?: undefined;
@@ -885,6 +893,7 @@ export declare const TOOLS: ({
             name?: undefined;
             sinceDays?: undefined;
             coordinatorAgent?: undefined;
+            forceBatchReview?: undefined;
             variant?: undefined;
             recentPlanPaths?: undefined;
             isFirstRun?: undefined;
@@ -970,6 +979,7 @@ export declare const TOOLS: ({
             name?: undefined;
             sinceDays?: undefined;
             coordinatorAgent?: undefined;
+            forceBatchReview?: undefined;
             variant?: undefined;
             recentPlanPaths?: undefined;
             isFirstRun?: undefined;
@@ -1048,6 +1058,7 @@ export declare const TOOLS: ({
             name?: undefined;
             sinceDays?: undefined;
             coordinatorAgent?: undefined;
+            forceBatchReview?: undefined;
             variant?: undefined;
             recentPlanPaths?: undefined;
             isFirstRun?: undefined;
@@ -1138,6 +1149,7 @@ export declare const TOOLS: ({
             name?: undefined;
             sinceDays?: undefined;
             coordinatorAgent?: undefined;
+            forceBatchReview?: undefined;
             variant?: undefined;
             recentPlanPaths?: undefined;
             isFirstRun?: undefined;
@@ -1228,6 +1240,7 @@ export declare const TOOLS: ({
             name?: undefined;
             sinceDays?: undefined;
             coordinatorAgent?: undefined;
+            forceBatchReview?: undefined;
             variant?: undefined;
             recentPlanPaths?: undefined;
             isFirstRun?: undefined;
@@ -1305,6 +1318,7 @@ export declare const TOOLS: ({
             name?: undefined;
             sinceDays?: undefined;
             coordinatorAgent?: undefined;
+            forceBatchReview?: undefined;
             variant?: undefined;
             recentPlanPaths?: undefined;
             isFirstRun?: undefined;
@@ -1393,6 +1407,7 @@ export declare const TOOLS: ({
             name?: undefined;
             sinceDays?: undefined;
             coordinatorAgent?: undefined;
+            forceBatchReview?: undefined;
             variant?: undefined;
             recentPlanPaths?: undefined;
             isFirstRun?: undefined;
@@ -1464,6 +1479,7 @@ export declare const TOOLS: ({
             name?: undefined;
             sinceDays?: undefined;
             coordinatorAgent?: undefined;
+            forceBatchReview?: undefined;
             variant?: undefined;
             recentPlanPaths?: undefined;
             isFirstRun?: undefined;
@@ -1542,6 +1558,7 @@ export declare const TOOLS: ({
             refreshRoot?: undefined;
             sinceDays?: undefined;
             coordinatorAgent?: undefined;
+            forceBatchReview?: undefined;
             variant?: undefined;
             recentPlanPaths?: undefined;
             isFirstRun?: undefined;
@@ -1619,6 +1636,7 @@ export declare const TOOLS: ({
             includeBodyInText?: undefined;
             name?: undefined;
             coordinatorAgent?: undefined;
+            forceBatchReview?: undefined;
             variant?: undefined;
             recentPlanPaths?: undefined;
             isFirstRun?: undefined;
@@ -1659,6 +1677,10 @@ export declare const TOOLS: ({
             commitBatchThreshold: {
                 type: string;
                 minimum: number;
+                description: string;
+            };
+            forceBatchReview: {
+                type: string;
                 description: string;
             };
             goal?: undefined;
@@ -1799,6 +1821,7 @@ export declare const TOOLS: ({
             name?: undefined;
             sinceDays?: undefined;
             coordinatorAgent?: undefined;
+            forceBatchReview?: undefined;
             checkName?: undefined;
             autoConfirm?: undefined;
             planSlug?: undefined;
@@ -1880,6 +1903,7 @@ export declare const TOOLS: ({
             name?: undefined;
             sinceDays?: undefined;
             coordinatorAgent?: undefined;
+            forceBatchReview?: undefined;
             variant?: undefined;
             recentPlanPaths?: undefined;
             isFirstRun?: undefined;
@@ -1953,6 +1977,7 @@ export declare const TOOLS: ({
             name?: undefined;
             sinceDays?: undefined;
             coordinatorAgent?: undefined;
+            forceBatchReview?: undefined;
             variant?: undefined;
             recentPlanPaths?: undefined;
             isFirstRun?: undefined;
@@ -2054,6 +2079,7 @@ export declare const TOOLS: ({
             name?: undefined;
             sinceDays?: undefined;
             coordinatorAgent?: undefined;
+            forceBatchReview?: undefined;
             variant?: undefined;
             recentPlanPaths?: undefined;
             isFirstRun?: undefined;
@@ -2133,6 +2159,7 @@ export declare const TOOLS: ({
             name?: undefined;
             sinceDays?: undefined;
             coordinatorAgent?: undefined;
+            forceBatchReview?: undefined;
             variant?: undefined;
             recentPlanPaths?: undefined;
             isFirstRun?: undefined;
@@ -2208,6 +2235,7 @@ export declare const TOOLS: ({
             name?: undefined;
             sinceDays?: undefined;
             coordinatorAgent?: undefined;
+            forceBatchReview?: undefined;
             variant?: undefined;
             recentPlanPaths?: undefined;
             isFirstRun?: undefined;
