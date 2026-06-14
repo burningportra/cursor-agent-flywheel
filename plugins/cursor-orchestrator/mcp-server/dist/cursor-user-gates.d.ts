@@ -14,7 +14,7 @@ export interface FlywheelUserGateOption {
     coordinatorAction?: string;
 }
 export interface FlywheelUserGate {
-    kind: "wave_review" | "wave_review_bead_pick_required" | "wrap_up" | "wrap_up_verdict" | "wrap_up_already_confirmed" | "review_mode" | "bead_review" | "bead_launch" | "bead_low_quality" | "bead_hotspot" | "bead_coverage" | "bead_dedup";
+    kind: "wave_review" | "wave_review_bead_pick_required" | "wrap_up" | "wrap_up_verdict" | "wrap_up_already_confirmed" | "review_mode" | "bead_review" | "bead_launch" | "bead_low_quality" | "bead_hotspot" | "bead_coverage" | "bead_dedup" | "impl_supervision";
     title: string;
     rationale: string;
     options: FlywheelUserGateOption[];
@@ -66,6 +66,20 @@ export declare function buildWrapUpGate(opts: {
     uncommittedPreview: string[];
     beadCommitCount?: number;
 }): FlywheelUserGate;
+export interface ImplSupervisionSnapshot {
+    headSha: string;
+    commitsSinceBaseline: number;
+    commitBatchThreshold: number;
+    readyCount: number;
+    inProgressCount: number;
+    closedCount: number;
+    pendingBatchReviewRange?: string;
+    nextTickInSeconds: number;
+    stuckBeadIds?: string[];
+    mode: "monitor" | "batch_review_in_progress" | "batch_review_dispatch";
+}
+/** Step 7 monitor loop — keeps coordinator in AskQuestion gates while agents work. */
+export declare function buildImplSupervisionGate(snapshot: ImplSupervisionSnapshot): FlywheelUserGate;
 /** Batch review auto-synthesized beads — approve / reject gate. */
 export declare function buildBatchReviewSynthesizedGate(beadCount: number): FlywheelUserGate;
 /** Step 9.5.0 outcome grading verdict gate. */

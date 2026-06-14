@@ -40,7 +40,8 @@ export interface FlywheelUserGate {
     | "bead_low_quality"
     | "bead_hotspot"
     | "bead_coverage"
-    | "bead_dedup";
+    | "bead_dedup"
+    | "impl_supervision";
   title: string;
   rationale: string;
   options: FlywheelUserGateOption[];
@@ -367,6 +368,99 @@ export function buildWrapUpGate(opts: {
       'On option 1 or 2, follow _wrapup.md — sub-choices also use AskQuestion when available.',
       "After wrap-up, read _wrapup.md Steps 10–12 for CASS and post-flywheel menu.",
     ].join(" "),
+  };
+}
+
+export interface ImplSupervisionSnapshot {
+  headSha: string;
+  commitsSinceBaseline: number;
+  commitBatchThreshold: number;
+  readyCount: number;
+  inProgressCount: number;
+  closedCount: number;
+  pendingBatchReviewRange?: string;
+  nextTickInSeconds: number;
+  stuckBeadIds?: string[];
+  mode: "monitor" | "batch_review_in_progress" | "batch_review_dispatch";
+}
+
+/** Step 7 monitor loop — keeps coordinator in AskQuestion gates while agents work. */
+export function buildImplSupervisionGate(
+  snapshot: ImplSupervisionSnapshot,
+): FlywheelUserGate {
+  const mins = Math.max(1, Math.round(snapshot.nextTickInSeconds / 60));
+  const thresholdLabel =
+    snapshot.commitBatchThreshold > 0
+      ? String(snapshot.commitBatchThreshold)
+      : "off";
+
+  const lines = [
+    `${snapshot.inProgressCount} in_progress, ${snapshot.readyCount} ready, ${snapshot.closedCount} closed.`,
+    `Commits since last batch review: ${snapshot.commitsSinceBaseline}/${thresholdLabel}.`,
+  ];
+  if (snapshot.mode === "batch_review_in_progress" && snapshot.pendingBatchReviewRange) {
+    lines.push(`Batch review in flight: ${snapshot.pendingBatchReviewRange}.`);
+  } else if (snapshot.mode === "batch_review_dispatch") {
+    lines.push("Spawn batchReviewTask, then tick again for verdict collection.");
+  }
+  if (snapshot.stuckBeadIds?.length) {
+    lines.push(`Stuck (>30m): ${snapshot.stuckBeadIds.join(", ")}.`);
+  }
+
+  const options: FlywheelUserGateOption[] = [];
+
+  if (snapshot.mode === "batch_review_dispatch") {
+    options.push({
+      id: "1",
+      label: "Review dispatched — tick when verdict ready",
+      detail: "Re-call flywheel_impl_tick after batchReviewTask finishes",
+      action: "impl-supervision-tick",
+      coordinatorAction:
+        "After spawning batchReviewTask, flywheel_impl_tick({ cwd }) until batch_review_verdict",
+    });
+  } else {
+    options.push({
+      id: "1",
+      label: "Run tick now",
+      detail: "Check commits, inbox, and bead status immediately",
+      action: "impl-supervision-tick",
+      coordinatorAction:
+        "flywheel_impl_tick({ cwd, closedBeadIds? }) — present AskQuestion again",
+    });
+  }
+
+  options.push({
+    id: "2",
+    label: `Arm auto-tick (~${mins}m)`,
+    detail:
+      "Loop skill: dynamic wake re-calls flywheel_impl_tick until wave completes",
+    action: "impl-supervision-loop",
+    coordinatorAction:
+      "Read loop skill; arm dynamic wake with prompt flywheel_impl_tick; present AskQuestion each wake",
+  });
+
+  if (
+    snapshot.mode === "monitor"
+    && snapshot.commitBatchThreshold > 0
+    && snapshot.commitsSinceBaseline > 0
+  ) {
+    options.push({
+      id: "3",
+      label: "Force batch review now",
+      detail: `Trigger fresh-eyes + thermo-nuclear over ${snapshot.commitsSinceBaseline} commit(s)`,
+      action: "impl-force-batch-review",
+      coordinatorAction:
+        "flywheel_impl_tick({ cwd, forceBatchReview: true }) then spawn batchReviewTask",
+    });
+  }
+
+  return {
+    kind: "impl_supervision",
+    title: "Impl supervision",
+    rationale: lines.join(" "),
+    options,
+    instructions:
+      "Cursor: present AskQuestion(data.askQuestion) every impl tick. Map via data.actions. Do not end the turn without the menu while agents are running.",
   };
 }
 
