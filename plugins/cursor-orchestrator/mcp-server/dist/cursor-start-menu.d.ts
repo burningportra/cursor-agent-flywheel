@@ -20,6 +20,10 @@ export interface StartMenuResult {
     recentPlanPaths: string[];
     primaryEntryPointsMarkdown: string;
 }
+/** Shared Step 0d entry — routes to recover-gates wave review (combined fresh-eyes + thermo-nuclear). */
+export declare const FRESH_EYES_REVIEW_OPTION: StartMenuOption;
+/** Shared Step 0d entry — external repo research via /flywheel-research. */
+export declare const RESEARCH_REPO_OPTION: StartMenuOption;
 export declare function buildStartMenu(input: {
     variant: StartMenuVariant;
     recentPlanPaths?: string[];

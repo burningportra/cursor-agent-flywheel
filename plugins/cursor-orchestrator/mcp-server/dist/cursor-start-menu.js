@@ -2,6 +2,22 @@
  * Step 0d start menus — AskQuestion payloads + route hints for Cursor.
  */
 import { buildAskQuestionFromGate, } from "./cursor-user-gates.js";
+/** Shared Step 0d entry — routes to recover-gates wave review (combined fresh-eyes + thermo-nuclear). */
+export const FRESH_EYES_REVIEW_OPTION = {
+    id: "fresh-eyes-review",
+    label: "Fresh-eyes review",
+    description: "5 parallel reviewers + thermo-nuclear quality — /recover-gates --review-only",
+    route: "Fresh-eyes review",
+    action: "fresh-eyes",
+};
+/** Shared Step 0d entry — external repo research via /flywheel-research. */
+export const RESEARCH_REPO_OPTION = {
+    id: "research-repo",
+    label: "Research repo",
+    description: "GitHub URL → /flywheel-research (research-only or integrate)",
+    route: "Research repo",
+    action: "continue-wrap-up",
+};
 function gateFromOptions(kind, title, rationale, options) {
     return {
         kind,
@@ -22,33 +38,33 @@ function primaryBlock(variant, ctx) {
     if (variant === "previous-session-exists") {
         return [
             `Primary entry points (active session: '${ctx.goal ?? "?"}' @ ${ctx.phase ?? "?"}):`,
-            "  • Resume swarm · Resume session · Set a goal · Pick up existing plan",
+            "  • Resume swarm · Resume session · Set a goal · Pick up existing plan · Research repo · Fresh-eyes review",
             "",
             "Recent plans:",
             plans,
             "",
-            "More: Work on beads · New goal · Reality check · Duel · Simplify · Research · Audit · Setup",
+            "More: Work on beads · New goal · Reality check · Duel · Simplify · Audit · Setup",
         ].join("\n");
     }
     if (variant === "open-beads-exist") {
         return [
             `Primary entry points (${ctx.openBeads ?? "?"} open beads):`,
-            "  • Resume swarm · Work on beads · Set a goal · Pick up existing plan",
+            "  • Resume swarm · Work on beads · Set a goal · Pick up existing plan · Research repo · Fresh-eyes review",
             "",
             "Recent plans:",
             plans,
             "",
-            "More: Reality check · Duel · New goal · Simplify · Research · Audit · Setup",
+            "More: Reality check · Duel · New goal · Simplify · Audit · Setup",
         ].join("\n");
     }
     return [
         "Primary entry points:",
-        "  • Set a goal · Pick up existing plan · Scan & discover · Reality check",
+        "  • Set a goal · Pick up existing plan · Scan & discover · Research repo · Reality check · Fresh-eyes review",
         "",
         "Recent plans:",
         plans,
         "",
-        "More: Research · Simplify · Duel · Audit · Setup · Quick fix",
+        "More: Simplify · Duel · Audit · Setup · Quick fix",
     ].join("\n");
 }
 export function buildStartMenu(input) {
@@ -86,6 +102,8 @@ export function buildStartMenu(input) {
                     route: "Pick up existing plan",
                     action: "bead-back-to-plan",
                 },
+                RESEARCH_REPO_OPTION,
+                FRESH_EYES_REVIEW_OPTION,
             ];
             break;
         case "open-beads-exist":
@@ -119,6 +137,8 @@ export function buildStartMenu(input) {
                     route: "Pick up existing plan",
                     action: "bead-back-to-plan",
                 },
+                RESEARCH_REPO_OPTION,
+                FRESH_EYES_REVIEW_OPTION,
             ];
             break;
         default: {
@@ -153,6 +173,7 @@ export function buildStartMenu(input) {
                         route: "Scan & discover",
                         action: "bead-back-to-plan",
                     },
+                    RESEARCH_REPO_OPTION,
                 ];
             }
             else {
@@ -183,13 +204,15 @@ export function buildStartMenu(input) {
                         action: "bead-back-to-plan",
                         recommended: rec === "scan-discover",
                     },
+                    RESEARCH_REPO_OPTION,
                     {
                         id: "reality-check",
                         label: "Reality check",
                         description: "/reality-check-for-project",
                         route: "Reality check",
-                        action: "fresh-eyes",
+                        action: "continue-wrap-up",
                     },
+                    FRESH_EYES_REVIEW_OPTION,
                 ];
             }
         }

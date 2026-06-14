@@ -78,6 +78,7 @@ Primary entry points (active session: '<goal>' @ <phase>):
   • Resume session      — continue manually (no swarm)
   • Set a goal          — type a fresh goal in Other; appends after drift confirm
   • Pick up existing plan — type docs/plans/<file>.md in Other; Step 5.45 then beads
+  • Research repo — external GitHub repo via /flywheel-research
 
 Recent plans (copy-paste into Other when picking "Pick up existing plan"):
   • <RECENT_PLAN_PATHS[0]>   (or "(no docs/plans/*.md found)")
@@ -85,7 +86,7 @@ Recent plans (copy-paste into Other when picking "Pick up existing plan"):
   • <RECENT_PLAN_PATHS[2]>
 
 More entry points (slash command or type label in Other):
-  • Work on beads · New goal · Reality check · Duel · Simplify pass · Research repo · Audit · Setup
+  • Work on beads · New goal · Reality check · Duel · Simplify pass · Audit · Setup
 ```
 
 | AskQuestion id | label | description (short) |
@@ -94,6 +95,8 @@ More entry points (slash command or type label in Other):
 | resume-session | Resume session | Continue `<goal>` @ `<phase>` manually |
 | set-goal | Set a goal | Type goal in Other; append-mode |
 | pick-plan | Pick up existing plan | Path in Other; `flywheel_plan` → Step 5.45 |
+| fresh-eyes-review | Fresh-eyes review | `/recover-gates --review-only` — wave review gate + combined thermo-nuclear |
+| research-repo | Research repo | `/flywheel-research` — URL + mode in follow-up AskQuestion |
 
 #### **If open/in-progress beads exist** (no active session)
 
@@ -103,12 +106,13 @@ Primary entry points (<N> open beads):
   • Work on beads       — refine / implement / inspect manually
   • Set a goal          — append new beads
   • Pick up existing plan — path in Other; merges via Step 5.45
+  • Research repo — /flywheel-research
 
 Recent plans:
   • <RECENT_PLAN_PATHS[0]> …
 
 More entry points:
-  • Reality check · Duel · New goal · Simplify pass · Research repo · Audit · Setup
+  • Reality check · Duel · New goal · Simplify pass · Audit · Setup
 ```
 
 | AskQuestion id | label | route hint |
@@ -117,6 +121,8 @@ More entry points:
 | work-beads | Work on beads | manual |
 | set-goal | Set a goal | append beads |
 | pick-plan | Pick up existing plan | Step 5.45 validate |
+| fresh-eyes-review | Fresh-eyes review | `/recover-gates --review-only` |
+| research-repo | Research repo | `/flywheel-research` |
 
 #### **If no beads and no session** (fresh start)
 
@@ -128,12 +134,14 @@ Primary entry points:
   • Set a goal
   • Pick up existing plan
   • Scan & discover
+  • Research repo
   • Reality check
+  • Fresh-eyes review
 
 Recent plans: …
 
 More entry points:
-  • Research repo · Simplify pass · Duel · Audit · Setup · Quick fix · Resume swarm (if beads appear mid-session)
+  • Simplify pass · Duel · Audit · Setup · Quick fix · Resume swarm (if beads appear mid-session)
 ```
 
 | AskQuestion id | label (non-first-run) |
@@ -141,7 +149,9 @@ More entry points:
 | set-goal | Set a goal |
 | pick-plan | Pick up existing plan | Step 5.45 validate before beads |
 | scan-discover | Scan & discover |
+| research-repo | Research repo | `/flywheel-research` |
 | reality-check | Reality check |
+| fresh-eyes-review | Fresh-eyes review | `/recover-gates --review-only` |
 
 Glossary: see `rules/context-budget.mdc` (bead, plan, flywheel, MCP).
 
@@ -157,6 +167,7 @@ Glossary: see `rules/context-budget.mdc` (bead, plan, flywheel, MCP).
 | **Simplify pass** | `skills/start/_deslop.md` — mode gate via **AskQuestion**; engine `/simplify-and-refactor-code-isomorphically`. |
 | **Duel** | `flywheel_duel` or `/flywheel-duel`; Cursor: `duelModelsGate` + Task wizards; NTM: `FW_DUEL_BACKEND=ntm`. |
 | **Reality check** | `skills/start/_reality_check.md` — depth via **AskQuestion**; `/reality-check-for-project`. |
+| **Fresh-eyes review** | Read [`commands/recover-gates.md`](../../commands/recover-gates.md) with `--review-only`. Resolve bead ids from args, checkpoint, or `br list`; `flywheel_wave_review_gate` → **AskQuestion** → pick **Fresh-eyes** → `flywheel_review` `hit-me`. Load `start_review` only if needed. |
 | **Resume session** | Drift check below, then saved phase. |
 | **Work on beads** | Sub-menu below — bootstrap `selectedGoal` first. |
 | **New goal** | Delete checkpoint → `start_discover` Step 2. |
