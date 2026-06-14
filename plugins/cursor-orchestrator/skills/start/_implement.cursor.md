@@ -36,14 +36,14 @@ flywheel_impl_tick({ cwd, closedBeadIds: ["br-1", "br-2"] })
 
 | `data.kind` | Coordinator action |
 |-------------|-------------------|
-| `monitor` | Wait; schedule next tick |
+| `monitor` | **AskQuestion** with `data.askQuestion` (impl supervision menu). Map via `data.actions`. On `impl-supervision-tick` → `flywheel_impl_tick`; on `impl-supervision-loop` → arm `/loop` dynamic wake; on `impl-force-batch-review` → `flywheel_impl_tick({ forceBatchReview: true })`. |
 | `stale` | Epoch mismatch or user steered mid-tick — re-call `flywheel_impl_tick` immediately; do not spawn Tasks |
-| `batch_review_dispatch` | Epoch check → spawn **one** Task with `data.batchReviewTask` (`subagent_type: thermo-nuclear-code-quality-review`, combined fresh-eyes + thermo prompt); tick again when verdict JSON exists |
-| `batch_review_in_progress` | Do not start another review; tick later |
-| `batch_review_verdict` | **AskQuestion** with `data.askQuestion`; approve synthesized beads → merge into wave → tick |
-| `advance_wave` | Epoch check → spawn `data.implTasks` (stagger ~30s) |
-| `dispatch_impl_tasks` | Epoch check → idle capacity — spawn ready-bead tasks |
-| `wave_complete` | Quote `nextActionHint.text` if present → `flywheel_wave_review_gate({ cwd, beadIds })` → **AskQuestion** → `flywheel_review` |
+| `batch_review_dispatch` | Epoch check → spawn **one** Task with `data.batchReviewTask`; then **AskQuestion** (supervision menu) — tick again when verdict JSON exists |
+| `batch_review_in_progress` | **AskQuestion** (supervision menu); do not start another review |
+| `batch_review_verdict` | **AskQuestion** with `data.askQuestion` (synthesized beads or supervision); approve → merge into wave → tick |
+| `advance_wave` | Epoch check → spawn `data.implTasks` (stagger ~30s) → **immediately** `flywheel_impl_tick` again for supervision menu |
+| `dispatch_impl_tasks` | Epoch check → spawn ready-bead tasks → **immediately** `flywheel_impl_tick` for supervision menu |
+| `wave_complete` | **AskQuestion** is inlined wave review gate (`data.gateMeta.kind === wave_review`). Confirm via `flywheel_wave_review_gate({ cwd, beadIds: data.waveReviewBeadIds, confirmAction })` → `flywheel_review` |
 
 ### Hint discipline (context budget)
 
@@ -79,5 +79,12 @@ Task({
 ### Coordinator duties
 
 Poll `fetch_inbox` between ticks if useful; nudge stuck Tasks; never use free-text "commit now?" — gates only.
+
+**Hard rules (impl supervision):**
+
+1. **Every `flywheel_impl_tick` ends with AskQuestion** while agents are running — never end the turn on prose alone.
+2. After spawning impl or batch-review Tasks, **re-call `flywheel_impl_tick` in the same session** before waiting for the user.
+3. When the user picks **Arm auto-tick**, use the **loop** skill: dynamic wake with prompt `flywheel_impl_tick({ cwd })` and present AskQuestion on each wake.
+4. Commit-batch fresh-eyes fires automatically when `commitsSinceBaseline ≥ commitBatchThreshold` (default **8** from config).
 
 **Hard rule:** After a wave completes, continue to Step 8 (`_review.md`). Implementation is the middle of the flywheel — not the end.
