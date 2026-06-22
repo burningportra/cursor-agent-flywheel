@@ -20,7 +20,7 @@ vi.mock('node:child_process', async () => {
 // binds the mock at module load time.
 const { runAdvanceWave } = await import('../../tools/advance-wave.js');
 const { writeCompletionReport } = await import('../../completion-report.js');
-const { createMockExec, makeState } = await import('../helpers/mocks.js');
+const { createMockExec, makeState, wrapExecWithAgentMail } = await import('../helpers/mocks.js');
 // ─── Helpers ──────────────────────────────────────────────────
 function makeBead(overrides = {}) {
     return {
@@ -46,7 +46,7 @@ function makeCtx(stateOverrides = {}, execCalls = []) {
         },
         ...stateOverrides,
     });
-    const exec = createMockExec(execCalls);
+    const exec = wrapExecWithAgentMail(createMockExec(execCalls));
     const ctx = {
         exec,
         cwd: '/fake/project',
@@ -329,7 +329,7 @@ describe('runAdvanceWave — attestation gate', () => {
                 complex: 'opus-4.6',
             },
         });
-        const exec = createMockExec(execCalls);
+        const exec = wrapExecWithAgentMail(createMockExec(execCalls));
         return {
             exec,
             cwd: tmpCwd,

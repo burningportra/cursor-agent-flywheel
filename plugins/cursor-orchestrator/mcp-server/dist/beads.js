@@ -356,6 +356,51 @@ export function extractArtifacts(bead) {
     }
     return paths;
 }
+/** Broader file-path regex — aligned with hotspot / plan-simulation extraction. */
+const BEAD_FILE_PATH_RE = /[a-zA-Z0-9_\-./]+(?:\.ts|\.tsx|\.js|\.jsx|\.json|\.md|\.py|\.rs|\.go|\.yaml|\.yml|\.toml)/g;
+function normalizeBeadFilePath(raw) {
+    const trimmed = raw.trim();
+    const stripped = trimmed.startsWith("./") ? trimmed.slice(2) : trimmed;
+    return stripped.replace(/\.[^.]+$/, (ext) => ext.toLowerCase());
+}
+/**
+ * Collect file paths from a bead using bullet/Files-section extraction plus
+ * prose path tokens (e.g. `mcp-server/src/tools/doctor.ts` in body text).
+ */
+export function collectBeadFilePaths(bead) {
+    const paths = new Set(extractArtifacts(bead).map(normalizeBeadFilePath));
+    const text = `${bead.title}\n${bead.description ?? ""}`;
+    for (const match of text.matchAll(BEAD_FILE_PATH_RE)) {
+        const normalized = normalizeBeadFilePath(match[0]);
+        if (normalized.includes("/")) {
+            paths.add(normalized);
+        }
+    }
+    return [...paths].sort();
+}
+/** Count markdown acceptance checkboxes (`- [ ]` / `- [x]`). */
+export function countAcceptanceCriteria(description) {
+    return (description.match(/^-\s*\[[ xX]\]/gm) ?? []).length;
+}
+const EFFORT_IN_DESC_RE = /(?:^|\n)(?:###\s*)?(?:effort|estimate|size)\s*:\s*(S|M|L|XL)\b/im;
+/** Parse effort tier from bead.estimate (minutes) or description Effort: L lines. */
+export function parseBeadEffort(bead) {
+    const desc = bead.description ?? "";
+    const fromDesc = desc.match(EFFORT_IN_DESC_RE);
+    if (fromDesc?.[1]) {
+        return fromDesc[1].toUpperCase();
+    }
+    if (typeof bead.estimate === "number" && bead.estimate > 0) {
+        if (bead.estimate <= 45)
+            return "S";
+        if (bead.estimate <= 120)
+            return "M";
+        if (bead.estimate <= 300)
+            return "L";
+        return "XL";
+    }
+    return undefined;
+}
 /**
  * Updates the status of a bead.
  */

@@ -65,7 +65,7 @@ vi.mock('node:child_process', async () => {
 const { runAdvanceWave } = await import('../../tools/advance-wave.js');
 const { writeCompletionReport } = await import('../../completion-report.js');
 type CompletionReportV1 = import('../../completion-report.js').CompletionReportV1;
-const { createMockExec, makeState } = await import('../helpers/mocks.js');
+const { createMockExec, makeState, wrapExecWithAgentMail } = await import('../helpers/mocks.js');
 
 // ─── Helpers ──────────────────────────────────────────────────
 
@@ -97,7 +97,7 @@ function makeCtx(
     },
     ...stateOverrides,
   });
-  const exec = createMockExec(execCalls);
+  const exec = wrapExecWithAgentMail(createMockExec(execCalls));
   const ctx = {
     exec,
     cwd: '/fake/project',
@@ -437,7 +437,7 @@ describe('runAdvanceWave — attestation gate', () => {
         complex: 'opus-4.6',
       },
     });
-    const exec = createMockExec(execCalls);
+    const exec = wrapExecWithAgentMail(createMockExec(execCalls));
     return {
       exec,
       cwd: tmpCwd,

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { isValidBeadId, findNonStandardIds, auditPlanToBeads, extractArtifacts, getBeadsSummary, } from '../beads.js';
+import { isValidBeadId, findNonStandardIds, auditPlanToBeads, extractArtifacts, collectBeadFilePaths, getBeadsSummary, } from '../beads.js';
 // ─── Helpers ────────────────────────────────────────────────────
 function makeBead(overrides = {}) {
     return {
@@ -154,6 +154,15 @@ describe('extractArtifacts', () => {
         const artifacts = extractArtifacts(bead);
         const fooCount = artifacts.filter(p => p === 'src/foo.ts').length;
         expect(fooCount).toBe(1);
+    });
+});
+describe('collectBeadFilePaths', () => {
+    it('includes prose path tokens not captured by extractArtifacts alone', () => {
+        const bead = makeBead({
+            description: 'Touch plugins/cursor-orchestrator/mcp-server/src/model-routing.ts for scoring.',
+        });
+        const paths = collectBeadFilePaths(bead);
+        expect(paths.some((p) => p.includes('model-routing.ts'))).toBe(true);
     });
 });
 // ─── getBeadsSummary ────────────────────────────────────────────

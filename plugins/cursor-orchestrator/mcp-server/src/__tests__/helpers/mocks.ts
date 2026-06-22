@@ -33,6 +33,22 @@ export function createMockExec(calls: ExecCall[] = []) {
   };
 }
 
+/** Agent Mail liveness probe used by Cursor swarm coordination gate. */
+export function wrapExecWithAgentMail<T extends (cmd: string, args: string[], opts?: unknown) => Promise<{ code: number; stdout: string; stderr: string }>>(
+  exec: T,
+): T {
+  const wrapped = async (cmd: string, args: string[], opts?: unknown) => {
+    if (
+      cmd === 'curl'
+      && args.some((a) => a.includes('127.0.0.1:8765/health/liveness'))
+    ) {
+      return { code: 0, stdout: '200', stderr: '' };
+    }
+    return exec(cmd, args, opts);
+  };
+  return wrapped as T;
+}
+
 export function makeState(overrides: Partial<FlywheelState> = {}): FlywheelState {
   return { ...createInitialState(), ...overrides };
 }

@@ -23,11 +23,6 @@
  * downstream bead `1qn` (codex-rescue handoff). DO NOT rename these
  * exports without coordinating — the contract is load-bearing.
  */
-/**
- * Common inputs the coordinator has already computed for the bead.
- * Kept minimal so all three model adapters can share the same input
- * shape (see gemini-prompt.ts).
- */
 export interface BeadDispatchContext {
     /** Full bead id (e.g. `my-project-k67`), never a short alias. */
     readonly beadId: string;

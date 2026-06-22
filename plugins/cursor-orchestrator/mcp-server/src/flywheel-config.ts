@@ -95,6 +95,19 @@ export interface FlywheelConfigReview {
   thermo_nuclear_model?: string;
 }
 
+/** Scoped vs full-suite test policy for implement swarms. */
+export interface FlywheelConfigVerify {
+  test_cwd?: string;
+  build_slot?: string;
+  max_workers?: number;
+  allow_full_suite_when_alone?: boolean;
+}
+
+/** Cursor swarm coordination — single-branch + Agent Mail (default). */
+export interface FlywheelConfigCoordination {
+  mode?: 'single-branch' | 'worktree';
+}
+
 export interface FlywheelConfig {
   convergence: FlywheelConfigConvergence;
   deep_plan?: FlywheelConfigDeepPlan;
@@ -105,6 +118,8 @@ export interface FlywheelConfig {
   coordinator?: FlywheelConfigCoordinator;
   profile?: FlywheelConfigProfile;
   review?: FlywheelConfigReview;
+  verify?: FlywheelConfigVerify;
+  coordination?: FlywheelConfigCoordination;
 }
 
 /**
@@ -133,7 +148,7 @@ export interface FlywheelConfigResult {
  * MUST update this map AND DEFAULT_CONFIG. Keep them lockstep.
  */
 const KNOWN_KEYS: Record<string, readonly string[]> = {
-  '': ['convergence', 'deep_plan', 'implement', 'duel', 'grader', 'impl_tick', 'coordinator', 'profile', 'review'],
+  '': ['convergence', 'deep_plan', 'implement', 'duel', 'grader', 'impl_tick', 'coordinator', 'profile', 'review', 'verify', 'coordination'],
   convergence: ['gate_advance_wave'],
   deep_plan: ['correctness', 'ergonomics', 'robustness', 'synthesis'],
   implement: ['simple', 'medium', 'complex'],
@@ -143,6 +158,8 @@ const KNOWN_KEYS: Record<string, readonly string[]> = {
   coordinator: ['epochGuards', 'nextActionHints'],
   profile: ['watchIntentFiles', 'staleAction', 'debounceSeconds'],
   review: ['thermo_nuclear_model'],
+  verify: ['test_cwd', 'build_slot', 'max_workers', 'allow_full_suite_when_alone'],
+  coordination: ['mode'],
 };
 
 export const DEFAULT_CONFIG: FlywheelConfig = {
@@ -471,6 +488,39 @@ export function loadFlywheelConfigWithWarnings(cwd: string): FlywheelConfigResul
     }
   }
 
+  let verify: FlywheelConfigVerify | undefined;
+  const verifyNode = parsed.verify;
+  if (typeof verifyNode === 'object' && verifyNode !== null) {
+    const v = verifyNode as Record<string, unknown>;
+    const test_cwd =
+      typeof v.test_cwd === 'string' && v.test_cwd.trim() ? v.test_cwd.trim() : undefined;
+    const build_slot =
+      typeof v.build_slot === 'string' && v.build_slot.trim() ? v.build_slot.trim() : undefined;
+    const max_workers =
+      typeof v.max_workers === 'number' && v.max_workers >= 1
+        ? Math.floor(v.max_workers)
+        : undefined;
+    const allow_full_suite_when_alone =
+      typeof v.allow_full_suite_when_alone === 'boolean'
+        ? v.allow_full_suite_when_alone
+        : undefined;
+    if (
+      test_cwd ||
+      build_slot ||
+      max_workers ||
+      allow_full_suite_when_alone !== undefined
+    ) {
+      verify = {
+        ...(test_cwd ? { test_cwd } : {}),
+        ...(build_slot ? { build_slot } : {}),
+        ...(max_workers ? { max_workers } : {}),
+        ...(allow_full_suite_when_alone !== undefined
+          ? { allow_full_suite_when_alone }
+          : {}),
+      };
+    }
+  }
+
   let profile: FlywheelConfigProfile | undefined;
   const profileNode = parsed.profile;
   if (typeof profileNode === 'object' && profileNode !== null) {
@@ -513,6 +563,19 @@ export function loadFlywheelConfigWithWarnings(cwd: string): FlywheelConfigResul
     }
   }
 
+  let coordination: FlywheelConfigCoordination | undefined;
+  const coordinationNode = parsed.coordination;
+  if (typeof coordinationNode === 'object' && coordinationNode !== null) {
+    const c = coordinationNode as Record<string, unknown>;
+    const modeRaw =
+      typeof c.mode === 'string' ? c.mode.trim().toLowerCase() : undefined;
+    const mode: FlywheelConfigCoordination['mode'] | undefined =
+      modeRaw === 'single-branch' || modeRaw === 'worktree' ? modeRaw : undefined;
+    if (mode) {
+      coordination = { mode };
+    }
+  }
+
   return {
     config: {
       convergence: { gate_advance_wave: gate },
@@ -524,6 +587,8 @@ export function loadFlywheelConfigWithWarnings(cwd: string): FlywheelConfigResul
       ...(coordinator ? { coordinator } : {}),
       ...(profile ? { profile } : {}),
       ...(review ? { review } : {}),
+      ...(verify ? { verify } : {}),
+      ...(coordination ? { coordination } : {}),
     },
     warnings,
     source: configPath,
@@ -558,4 +623,14 @@ export function areEpochGuardsEnabled(cwd: string): boolean {
 export function areNextActionHintsEnabled(cwd: string): boolean {
   const { config } = loadFlywheelConfigWithWarnings(cwd);
   return config.coordinator?.nextActionHints !== false;
+}
+
+/** Config/env coordination mode hint (Cursor swarm always uses single-branch when Agent Mail is up). */
+export function readCoordinationModeConfig(cwd: string): 'single-branch' | 'worktree' | undefined {
+  const envRaw = process.env.FW_COORDINATION_MODE?.trim().toLowerCase();
+  if (envRaw === 'single-branch' || envRaw === 'worktree') {
+    return envRaw;
+  }
+  const { config } = loadFlywheelConfigWithWarnings(cwd);
+  return config.coordination?.mode;
 }

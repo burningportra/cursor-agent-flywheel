@@ -7,6 +7,7 @@ import { VERSION } from '../version.js';
 import { errMsg, makeFlywheelErrorResult } from '../errors.js';
 import { loadFlywheelConfig } from '../flywheel-config.js';
 import { applyProfileStalenessToState, checkProfileStaleness, clearProfileStaleFlags, registerProfileWatch, resolveDefaultWatchPaths, shouldScheduleProfileAutoRefresh, } from '../profile-staleness.js';
+import { probeAgentMailReachable } from '../coordination-mode.js';
 const log = createLogger('profile');
 /**
  * Debounced background profile refresh when profile.staleAction is auto_refresh.
@@ -114,7 +115,10 @@ export async function runProfile(ctx, args) {
     state.repoProfile = profile;
     state.coordinationBackend = coordinationBackend;
     state.coordinationStrategy = coordinationStrategy;
-    state.coordinationMode ??= 'worktree';
+    if (state.coordinationMode === undefined) {
+        const amProbe = await probeAgentMailReachable(exec, cwd, signal);
+        state.coordinationMode = amProbe.reachable ? 'single-branch' : 'worktree';
+    }
     if (args.goal)
         state.selectedGoal = args.goal;
     state.phase = 'discovering';

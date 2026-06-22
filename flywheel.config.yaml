@@ -14,7 +14,7 @@ deep_plan:
 # Cursor implement swarm: Task model per bead complexity (simple/medium/complex).
 implement:
   simple: composer-2.5
-  medium: composer-2.5
+  medium: gpt-5.5-xhigh
   complex: opus-4.6
 
 # Impl supervision loop (flywheel_impl_tick): fresh-eyes batch review cadence.
@@ -28,3 +28,14 @@ duel:
   wizard_b: gpt-5.5-xhigh
   wizard_c: composer-2.5
   synthesis: opus-4.6
+
+# Scoped vs full-suite test policy during parallel implement waves.
+verify:
+  test_cwd: plugins/cursor-orchestrator/mcp-server
+  build_slot: npm-test
+  max_workers: 2
+  allow_full_suite_when_alone: true
+
+# Cursor swarm: single shared branch + Agent Mail file reservations (no worktrees).
+coordination:
+  mode: single-branch

@@ -102,6 +102,15 @@ export declare function beadDeps(exec: ExecFn, cwd: string, id: string): Promise
  */
 export declare function extractArtifacts(bead: Bead): string[];
 /**
+ * Collect file paths from a bead using bullet/Files-section extraction plus
+ * prose path tokens (e.g. `mcp-server/src/tools/doctor.ts` in body text).
+ */
+export declare function collectBeadFilePaths(bead: Bead): string[];
+/** Count markdown acceptance checkboxes (`- [ ]` / `- [x]`). */
+export declare function countAcceptanceCriteria(description: string): number;
+/** Parse effort tier from bead.estimate (minutes) or description Effort: L lines. */
+export declare function parseBeadEffort(bead: Bead): "S" | "M" | "L" | "XL" | undefined;
+/**
  * Updates the status of a bead.
  */
 export declare function updateBeadStatus(exec: ExecFn, cwd: string, beadId: string, status: "in_progress" | "closed" | "deferred"): Promise<void>;

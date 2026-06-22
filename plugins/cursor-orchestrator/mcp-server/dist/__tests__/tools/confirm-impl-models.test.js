@@ -3,6 +3,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { runConfirmImplModels } from '../../tools/confirm-impl-models.js';
+import { wrapExecWithAgentMail } from '../helpers/mocks.js';
 function baseState(overrides = {}) {
     return {
         phase: 'implementing',
@@ -19,9 +20,10 @@ function baseState(overrides = {}) {
     };
 }
 function makeCtx(cwd, state) {
+    const baseExec = vi.fn(async () => ({ code: 0, stdout: '[]', stderr: '' }));
     return {
         cwd,
-        exec: vi.fn(async () => ({ code: 0, stdout: '[]', stderr: '' })),
+        exec: wrapExecWithAgentMail(baseExec),
         signal: undefined,
         state,
         saveState: vi.fn(async (s) => {

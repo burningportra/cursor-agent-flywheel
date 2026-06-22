@@ -24,6 +24,17 @@ export function createMockExec(calls = []) {
         return { code: 1, stdout: '', stderr: 'not mocked' };
     };
 }
+/** Agent Mail liveness probe used by Cursor swarm coordination gate. */
+export function wrapExecWithAgentMail(exec) {
+    const wrapped = async (cmd, args, opts) => {
+        if (cmd === 'curl'
+            && args.some((a) => a.includes('127.0.0.1:8765/health/liveness'))) {
+            return { code: 0, stdout: '200', stderr: '' };
+        }
+        return exec(cmd, args, opts);
+    };
+    return wrapped;
+}
 export function makeState(overrides = {}) {
     return { ...createInitialState(), ...overrides };
 }

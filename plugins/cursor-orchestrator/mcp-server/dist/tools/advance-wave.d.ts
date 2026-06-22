@@ -30,6 +30,8 @@ export interface AdvanceWaveOutcome {
         };
         /** Spawn instructions for the coordinator (Cursor backend). */
         spawnInstructions?: string;
+        /** Cursor swarm coordination mode (single-branch + Agent Mail). */
+        executionMode?: 'single-branch';
     } | null;
     /**
      * One-time gate: operator must confirm implement models before the first

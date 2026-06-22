@@ -10,7 +10,7 @@ When coordinating from **Cursor** (`program: "cursor"` in Agent Mail):
 |---------|------------------|
 | User menus | **`AskQuestion`** + `data.askQuestion` from gate MCP tools — see [`rules/cursor-user-gates.mdc`](rules/cursor-user-gates.mdc) |
 | Models | Cursor tiers only — [`rules/orchestrator-cursor-models.mdc`](rules/orchestrator-cursor-models.mdc) (incl. outcome grader Task) |
-| Parallel implement | **Task** + git worktrees + Agent Mail — [`commands/flywheel-swarm.md`](commands/flywheel-swarm.md), [`rules/cursor-swarm.mdc`](rules/cursor-swarm.mdc) |
+| Parallel implement | **Task** + single branch + Agent Mail file reservations — [`commands/flywheel-swarm.md`](commands/flywheel-swarm.md), [`rules/cursor-swarm.mdc`](rules/cursor-swarm.mdc) |
 | Bead approval gates | **`flywheel_bead_approval_gate`** — after `br create`: review / score / polish / launch **AskQuestion** menus ([`_beads.cursor.md`](skills/start/_beads.cursor.md), slash: **`/flywheel-beads-review`**) |
 | Impl supervision | **`flywheel_impl_tick`** — ~4 min loop: commits → fresh-eyes Task → beads → next wave ([`_implement.cursor.md`](skills/start/_implement.cursor.md)) |
 | Resume in-flight beads | [`commands/flywheel-resume.md`](commands/flywheel-resume.md) — not `_inflight_prompt.md` |
@@ -317,7 +317,7 @@ Skip via `FW_COMPLIANCE_OVERRIDE=<bead-id-list>` or the in-menu override path.
 Before any swarm/NTM agent reports a bead complete (or sends its completion message), it MUST execute, in order:
 
 1. **UBS scan on changed files.** Invoke the `/ubs-workflow` skill in changed-files mode (not full-repo). Every finding must be fixed, filed as a new bead with rationale, or explicitly justified in the completion message. Silently dropping UBS findings is a review-bounce condition.
-2. **Repo verify commands.** Run the build/test/typecheck/lint commands relevant to the surfaces touched, per this file's specific rules. If a remote-execution helper (e.g. `rch`) is the canonical path, use it — do not skip with "looks fine locally".
+2. **Repo verify commands.** Run build/typecheck/lint for surfaces touched. For **tests during parallel implement waves**, run **scoped one-shot** tests only — `cd plugins/cursor-orchestrator/mcp-server && npm test -- <paths-for-touched-test-files>`. Do **not** run full-suite `npm test`, `vitest` watch mode, `test:watch`, or background test shells (`&` / `nohup`). The **coordinator** runs one full `npm test` per wave after acquiring exclusive Agent Mail build slot `npm-test`, then `release_build_slot`. If a remote-execution helper (e.g. `rch`) is the canonical path for build/typecheck, use it — do not skip with "looks fine locally".
 3. **Self-review with fresh eyes.** Re-read your own diff for regressions, unsafe assumptions, missing tests, and edge cases. Fix before sending the completion message.
 
 The completion message itself must include: (a) UBS result summary (`clean` / `fixed N` / `deferred to bead ids …`), (b) verify command outcome (or the helper handle), (c) one-line self-review summary. Coordinator and `flywheel_review` reject completions missing this evidence.
@@ -456,7 +456,8 @@ cd mcp-server && npm test
 After MCP `src/` changes, run **`npm test && npm run build`** and commit any resulting `dist/` updates in the same PR.
 
 - `npm test` — single run (`vitest run --passWithNoTests`)
-- `npm run test:watch` — watch mode during development
+- `npm run test:watch` — watch mode during development (never in parallel implement waves)
+- `VITEST_MAX_WORKERS=1` — cap fork workers during heavy swarm sessions (default max 2 in `vitest.config.ts`)
 
 Tests live under `mcp-server/src/__tests__/` (and other `src/**/*.test.ts` paths). Follow existing patterns — use `vi.mock` for external deps, `vi.spyOn(process.stderr, 'write')` to capture logger output, `vi.useFakeTimers()` for time-dependent tests. Always add a regression test when fixing a bug.
 

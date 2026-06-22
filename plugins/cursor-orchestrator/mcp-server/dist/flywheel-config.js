@@ -40,7 +40,7 @@ import * as path from 'node:path';
  * MUST update this map AND DEFAULT_CONFIG. Keep them lockstep.
  */
 const KNOWN_KEYS = {
-    '': ['convergence', 'deep_plan', 'implement', 'duel', 'grader', 'impl_tick', 'coordinator', 'profile', 'review'],
+    '': ['convergence', 'deep_plan', 'implement', 'duel', 'grader', 'impl_tick', 'coordinator', 'profile', 'review', 'verify', 'coordination'],
     convergence: ['gate_advance_wave'],
     deep_plan: ['correctness', 'ergonomics', 'robustness', 'synthesis'],
     implement: ['simple', 'medium', 'complex'],
@@ -50,6 +50,8 @@ const KNOWN_KEYS = {
     coordinator: ['epochGuards', 'nextActionHints'],
     profile: ['watchIntentFiles', 'staleAction', 'debounceSeconds'],
     review: ['thermo_nuclear_model'],
+    verify: ['test_cwd', 'build_slot', 'max_workers', 'allow_full_suite_when_alone'],
+    coordination: ['mode'],
 };
 export const DEFAULT_CONFIG = {
     convergence: {
@@ -368,6 +370,32 @@ export function loadFlywheelConfigWithWarnings(cwd) {
             };
         }
     }
+    let verify;
+    const verifyNode = parsed.verify;
+    if (typeof verifyNode === 'object' && verifyNode !== null) {
+        const v = verifyNode;
+        const test_cwd = typeof v.test_cwd === 'string' && v.test_cwd.trim() ? v.test_cwd.trim() : undefined;
+        const build_slot = typeof v.build_slot === 'string' && v.build_slot.trim() ? v.build_slot.trim() : undefined;
+        const max_workers = typeof v.max_workers === 'number' && v.max_workers >= 1
+            ? Math.floor(v.max_workers)
+            : undefined;
+        const allow_full_suite_when_alone = typeof v.allow_full_suite_when_alone === 'boolean'
+            ? v.allow_full_suite_when_alone
+            : undefined;
+        if (test_cwd ||
+            build_slot ||
+            max_workers ||
+            allow_full_suite_when_alone !== undefined) {
+            verify = {
+                ...(test_cwd ? { test_cwd } : {}),
+                ...(build_slot ? { build_slot } : {}),
+                ...(max_workers ? { max_workers } : {}),
+                ...(allow_full_suite_when_alone !== undefined
+                    ? { allow_full_suite_when_alone }
+                    : {}),
+            };
+        }
+    }
     let profile;
     const profileNode = parsed.profile;
     if (typeof profileNode === 'object' && profileNode !== null) {
@@ -401,6 +429,16 @@ export function loadFlywheelConfigWithWarnings(cwd) {
             review = { thermo_nuclear_model };
         }
     }
+    let coordination;
+    const coordinationNode = parsed.coordination;
+    if (typeof coordinationNode === 'object' && coordinationNode !== null) {
+        const c = coordinationNode;
+        const modeRaw = typeof c.mode === 'string' ? c.mode.trim().toLowerCase() : undefined;
+        const mode = modeRaw === 'single-branch' || modeRaw === 'worktree' ? modeRaw : undefined;
+        if (mode) {
+            coordination = { mode };
+        }
+    }
     return {
         config: {
             convergence: { gate_advance_wave: gate },
@@ -412,6 +450,8 @@ export function loadFlywheelConfigWithWarnings(cwd) {
             ...(coordinator ? { coordinator } : {}),
             ...(profile ? { profile } : {}),
             ...(review ? { review } : {}),
+            ...(verify ? { verify } : {}),
+            ...(coordination ? { coordination } : {}),
         },
         warnings,
         source: configPath,
@@ -444,5 +484,14 @@ export function areEpochGuardsEnabled(cwd) {
 export function areNextActionHintsEnabled(cwd) {
     const { config } = loadFlywheelConfigWithWarnings(cwd);
     return config.coordinator?.nextActionHints !== false;
+}
+/** Config/env coordination mode hint (Cursor swarm always uses single-branch when Agent Mail is up). */
+export function readCoordinationModeConfig(cwd) {
+    const envRaw = process.env.FW_COORDINATION_MODE?.trim().toLowerCase();
+    if (envRaw === 'single-branch' || envRaw === 'worktree') {
+        return envRaw;
+    }
+    const { config } = loadFlywheelConfigWithWarnings(cwd);
+    return config.coordination?.mode;
 }
 //# sourceMappingURL=flywheel-config.js.map

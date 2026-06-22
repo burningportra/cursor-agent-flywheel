@@ -4,9 +4,15 @@ import { resolveCommitBatchThreshold } from '../commit-batch.js';
 import {
   buildCursorImplSpawnInstructions,
   buildImplModelsGate,
+  formatBeadClassificationTable,
   formatCursorImplModelTable,
   resolveImplModelsConfirm,
+  useNtmImplBackend,
 } from '../cursor-implement-swarm.js';
+import {
+  AGENT_MAIL_SWARM_HINT,
+  resolveCursorCoordinationMode,
+} from '../coordination-mode.js';
 import { makeOkToolResult, makeToolError } from './shared.js';
 
 export interface ConfirmImplModelsOutcome {
@@ -16,6 +22,8 @@ export interface ConfirmImplModelsOutcome {
   confirmed: boolean;
   /** Resolved threshold for pre-flight display (gate) or persisted value (confirm). */
   commitBatchThreshold?: number;
+  executionMode?: 'single-branch';
+  agentMailRequired?: boolean;
 }
 
 function persistCommitBatchThreshold(
@@ -57,14 +65,26 @@ export async function runConfirmImplModels(
   if (args.confirmImplModels === undefined) {
     const gate = buildImplModelsGate(cwd, readyForRecommend);
     const batchThreshold = resolveCommitBatchThreshold(cwd, state);
+    let agentMailReachable = true;
+    if (!useNtmImplBackend()) {
+      const probe = await resolveCursorCoordinationMode(exec, cwd, state);
+      agentMailReachable = probe.ok;
+      if (probe.ok) {
+        saveState(state);
+      }
+    }
     const outcome: ConfirmImplModelsOutcome = {
       implModelsGate: gate,
       confirmed: Boolean(state.implModelsConfirmed),
       commitBatchThreshold: batchThreshold,
+      agentMailRequired: !useNtmImplBackend(),
       ...(state.implModelsConfirmed && state.implModels
         ? {
             implModels: state.implModels,
-            spawnInstructions: buildCursorImplSpawnInstructions(state.implModels),
+            executionMode: 'single-branch' as const,
+            spawnInstructions: buildCursorImplSpawnInstructions(state.implModels, cwd, {
+              executionMode: 'single-branch',
+            }),
           }
         : {}),
     };
@@ -77,9 +97,23 @@ export async function runConfirmImplModels(
         ? 'Implement models already confirmed for this run.'
         : 'Recommend implement models, explain why, then let the user choose.',
       '',
+      !useNtmImplBackend()
+        ? '**Coordination:** single shared branch + Agent Mail file reservations (no worktrees). Agent Mail must be running before spawning parallel Tasks.'
+        : '',
+      !useNtmImplBackend() && !agentMailReachable
+        ? `⚠️ Agent Mail is not reachable — parallel swarm will be blocked until it is up. ${AGENT_MAIL_SWARM_HINT}`
+        : '',
+      '',
       `**Recommendation:** ${gate.rationale}`,
       '',
       formatCursorImplModelTable(gate.recommended),
+      ...(gate.beadClassifications && gate.beadClassifications.length > 0
+        ? [
+            '',
+            '**Per-bead complexity (sanity-check before confirm):**',
+            formatBeadClassificationTable(gate.beadClassifications),
+          ]
+        : []),
       '',
       batchLine,
       '',
@@ -114,6 +148,23 @@ export async function runConfirmImplModels(
     );
   }
 
+  if (!useNtmImplBackend()) {
+    const coord = await resolveCursorCoordinationMode(exec, cwd, state);
+    if (!coord.ok) {
+      return makeToolError(
+        'flywheel_confirm_impl_models',
+        state.phase,
+        'agent_mail_unreachable',
+        coord.reason,
+        {
+          hint: AGENT_MAIL_SWARM_HINT,
+          details: { warning: coord.warning },
+          retryable: true,
+        },
+      );
+    }
+  }
+
   state.implModels = resolved;
   state.implModelsConfirmed = true;
   const batchThreshold = persistCommitBatchThreshold(cwd, state, args.commitBatchThreshold);
@@ -121,9 +172,13 @@ export async function runConfirmImplModels(
 
   const outcome: ConfirmImplModelsOutcome = {
     implModels: resolved,
-    spawnInstructions: buildCursorImplSpawnInstructions(resolved),
+    spawnInstructions: buildCursorImplSpawnInstructions(resolved, cwd, {
+      executionMode: 'single-branch',
+    }),
     confirmed: true,
     commitBatchThreshold: batchThreshold,
+    executionMode: 'single-branch',
+    agentMailRequired: !useNtmImplBackend(),
   };
 
   const batchConfirmLine =

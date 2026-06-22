@@ -24,11 +24,6 @@
  * exports without coordinating — the contract is load-bearing.
  */
 
-/**
- * Common inputs the coordinator has already computed for the bead.
- * Kept minimal so all three model adapters can share the same input
- * shape (see gemini-prompt.ts).
- */
 export interface BeadDispatchContext {
   /** Full bead id (e.g. `my-project-k67`), never a short alias. */
   readonly beadId: string;
@@ -155,7 +150,6 @@ export function adaptPromptForCodex(
     '',
     '### STEP 2 — VALIDATE (gates are non-negotiable)',
     '- TypeScript: `npx tsc --noEmit && npm run build`',
-    '- Tests: run the suite covering touched files.',
     '- UBS (if installed): `ubs <changed-files>`.',
     '',
     '### STEP 3 — COMMIT & CLOSE',

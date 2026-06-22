@@ -11,6 +11,13 @@
  */
 import type { Bead } from "./types.js";
 export type BeadComplexity = "simple" | "medium" | "complex";
+export interface BeadComplexityResult {
+    complexity: BeadComplexity;
+    reason: string;
+    score: number;
+    fileCount: number;
+    acceptanceCount: number;
+}
 export interface ModelRoute {
     /** Model for implementing the bead. */
     implementation: string;
@@ -30,10 +37,7 @@ export interface ModelTier {
  * Classify a bead's complexity based on heuristics.
  * No LLM needed - runs in <1ms.
  */
-export declare function classifyBeadComplexity(bead: Bead): {
-    complexity: BeadComplexity;
-    reason: string;
-};
+export declare function classifyBeadComplexity(bead: Bead): BeadComplexityResult;
 /**
  * Route a bead to the appropriate model tier.
  */

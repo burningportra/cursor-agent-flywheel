@@ -5,6 +5,7 @@ import * as path from 'node:path';
 
 import { runConfirmImplModels } from '../../tools/confirm-impl-models.js';
 import type { FlywheelState, ToolContext } from '../../types.js';
+import { wrapExecWithAgentMail } from '../helpers/mocks.js';
 
 function baseState(overrides: Partial<FlywheelState> = {}): FlywheelState {
   return {
@@ -23,9 +24,10 @@ function baseState(overrides: Partial<FlywheelState> = {}): FlywheelState {
 }
 
 function makeCtx(cwd: string, state: FlywheelState): ToolContext {
+  const baseExec = vi.fn(async () => ({ code: 0, stdout: '[]', stderr: '' }));
   return {
     cwd,
-    exec: vi.fn(async () => ({ code: 0, stdout: '[]', stderr: '' })),
+    exec: wrapExecWithAgentMail(baseExec),
     signal: undefined as never,
     state,
     saveState: vi.fn(async (s) => {

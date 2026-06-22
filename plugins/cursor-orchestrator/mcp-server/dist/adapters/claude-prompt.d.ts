@@ -8,5 +8,11 @@
  */
 import type { AdaptedPrompt, BeadDispatchContext } from './codex-prompt.js';
 export type { AdaptedPrompt, BeadDispatchContext };
-export declare function adaptPromptForClaude(bead: BeadDispatchContext): AdaptedPrompt;
+export type ClaudePromptMode = 'worktree' | 'single-branch';
+export interface ClaudePromptOptions {
+    mode?: ClaudePromptMode;
+    program?: string;
+    model?: string;
+}
+export declare function adaptPromptForClaude(bead: BeadDispatchContext, options?: ClaudePromptOptions): AdaptedPrompt;
 //# sourceMappingURL=claude-prompt.d.ts.map

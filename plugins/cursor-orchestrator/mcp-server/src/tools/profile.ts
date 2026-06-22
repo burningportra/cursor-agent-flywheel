@@ -15,6 +15,7 @@ import {
   resolveDefaultWatchPaths,
   shouldScheduleProfileAutoRefresh,
 } from '../profile-staleness.js';
+import { probeAgentMailReachable } from '../coordination-mode.js';
 
 const log = createLogger('profile');
 
@@ -147,7 +148,10 @@ export async function runProfile(ctx: ToolContext, args: ProfileArgs): Promise<M
   state.repoProfile = profile;
   state.coordinationBackend = coordinationBackend;
   state.coordinationStrategy = coordinationStrategy as FlywheelState['coordinationStrategy'];
-  state.coordinationMode ??= 'worktree';
+  if (state.coordinationMode === undefined) {
+    const amProbe = await probeAgentMailReachable(exec, cwd, signal);
+    state.coordinationMode = amProbe.reachable ? 'single-branch' : 'worktree';
+  }
   if (args.goal) state.selectedGoal = args.goal;
   state.phase = 'discovering';
   saveState(state);

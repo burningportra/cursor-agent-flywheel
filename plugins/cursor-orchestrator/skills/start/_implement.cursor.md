@@ -1,6 +1,6 @@
 ---
 name: start_implement
-description: "Cursor Step 7: Task subagents, worktrees, impl model gate, Agent Mail program cursor, impl_tick supervision loop."
+description: "Cursor Step 7: Task subagents, single branch + Agent Mail, impl model gate, impl_tick supervision loop."
 ---
 
 > **Cursor default.** Load this slice when `FW_IMPL_BACKEND` is unset. NTM path: `skills/legacy/ntm/implement-ntm.md` on disk.
@@ -54,9 +54,11 @@ flywheel_impl_tick({ cwd, closedBeadIds: ["br-1", "br-2"] })
 
 Do **not** use `codex exec` or `claude --print` for commit-batch review in Cursor.
 
-### Per bead (Task + worktree)
+### Per bead (Task + single branch)
 
 See [`mcp-server/src/cursor-implement-swarm.ts`](../../mcp-server/src/cursor-implement-swarm.ts) for model routing by complexity.
+
+**Preflight:** Agent Mail must be reachable — `flywheel_confirm_impl_models` and `flywheel_advance_wave` block parallel dispatch otherwise.
 
 ```
 Task({
@@ -68,9 +70,9 @@ Task({
 })
 ```
 
-- **Worktree:** one path per bead under `.pi-flywheel/worktrees/<bead-id>` (or project convention in AGENTS.md).
-- **Agent Mail:** `program: "cursor"` in `macro_start_session`; reserve paths before edits.
-- **Completion:** `.pi-flywheel/completion/<bead-id>.json` + inbox message to coordinator.
+- **Single branch:** all Tasks work in the repo root checkout on the same branch. Do **not** use `git worktree add`. Coordinator `git pull` before wave 1; agents `git pull --rebase` before edits.
+- **Agent Mail:** `program: "cursor"` in `macro_start_session`; exclusive `file_reservation_paths` before edits; release on completion.
+- **Completion:** `.pi-flywheel/completion/<bead-id>.json` + inbox message to coordinator + `git commit` + `git push`.
 
 ### Wave end (queue drained)
 

@@ -71,6 +71,34 @@ describe('classifyBeadComplexity', () => {
         const { complexity } = classifyBeadComplexity(bead);
         expect(complexity).toBe('simple');
     });
+    it('classifies prose file paths without a ### Files: section', () => {
+        const bead = makeBead({
+            title: 'Wire doctor check',
+            description: 'Update mcp-server/src/tools/doctor.ts and mcp-server/src/checks/agent-mail.ts with new probe.\n\n- [ ] probe passes\n- [ ] tests updated',
+            priority: 2,
+        });
+        const result = classifyBeadComplexity(bead);
+        expect(result.fileCount).toBeGreaterThanOrEqual(2);
+        expect(result.complexity).not.toBe('simple');
+    });
+    it('elevates beads with security labels', () => {
+        const bead = makeBead({
+            title: 'Harden session store',
+            description: 'Tighten cookie flags in src/auth/session.ts',
+            labels: ['security'],
+            priority: 2,
+        });
+        const { complexity } = classifyBeadComplexity(bead);
+        expect(['medium', 'complex']).toContain(complexity);
+    });
+    it('returns score and acceptance metadata', () => {
+        const bead = makeBead({
+            description: '### Files:\n- src/a.ts\n\n- [ ] one\n- [ ] two\n- [ ] three',
+        });
+        const result = classifyBeadComplexity(bead);
+        expect(result.score).toBeTypeOf('number');
+        expect(result.acceptanceCount).toBe(3);
+    });
 });
 // ─── routeModel ─────────────────────────────────────────────────
 describe('routeModel', () => {

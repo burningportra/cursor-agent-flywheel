@@ -10,12 +10,25 @@
  * and blind spots" principle.
  */
 
+import {
+  collectBeadFilePaths,
+  countAcceptanceCriteria,
+  parseBeadEffort,
+} from "./beads.js";
 import type { Bead } from "./types.js";
 import { MODEL_ROUTING_TIERS } from "./prompts.js";
 
 // ─── Types ──────────────────────────────────────────────────
 
 export type BeadComplexity = "simple" | "medium" | "complex";
+
+export interface BeadComplexityResult {
+  complexity: BeadComplexity;
+  reason: string;
+  score: number;
+  fileCount: number;
+  acceptanceCount: number;
+}
 
 export interface ModelRoute {
   /** Model for implementing the bead. */
@@ -73,11 +86,16 @@ const COMPLEXITY_SIGNALS = [
   /concurrent/i,
   /distribut/i,
   /cross-cutting/i,
-  /refactor.*major/i,
+  /refactor/i,
   /breaking.change/i,
   /state.machine/i,
   /protocol/i,
   /crypt/i,
+  /orchestrat/i,
+  /multi-?agent/i,
+  /race.condition/i,
+  /transaction/i,
+  /backward.compat/i,
 ] as const;
 
 /** Signals that indicate lower complexity. */
@@ -87,62 +105,126 @@ const SIMPLICITY_SIGNALS = [
   /doc(?:s|umentation)/i,
   /typo/i,
   /rename/i,
-  /config/i,
   /bump.version/i,
-  /update.dep/i,
-  /lint/i,
-  /format/i,
+  /update.dep(?:endency|encies)?/i,
+  /format(?:ting)?/i,
   /comment/i,
+  /copy(?:-|\s)?edit/i,
+  /whitespace/i,
 ] as const;
 
-/**
- * Extract the files listed in a bead's description.
- */
-function extractFileCount(bead: Bead): number {
-  const desc = bead.description ?? "";
-  const filesSection = desc.match(/###\s*Files:\s*([^\n#]+(?:\n(?!###)[^\n#]*)*)/);
-  if (!filesSection) return 0;
-  return filesSection[1]
-    .split(/[,\n]/)
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0 && /\.\w+$/.test(s))
-    .length;
+const RISKY_PATH_RE =
+  /(?:^|\/)(?:auth|security|payment|migration|schema|checkpoint|beads|mcp-server\/src\/)/i;
+
+const COMPLEX_LABEL_RE =
+  /^(?:p0|p1|security|critical|breaking|architecture|complex|risky)$/i;
+
+const SIMPLE_LABEL_RE = /^(?:docs|chore|typo|style|cleanup|copy)$/i;
+
+function complexityFromScore(score: number): BeadComplexity {
+  if (score >= 5) return "complex";
+  if (score >= 2) return "medium";
+  return "simple";
 }
 
 /**
  * Classify a bead's complexity based on heuristics.
  * No LLM needed - runs in <1ms.
  */
-export function classifyBeadComplexity(bead: Bead): { complexity: BeadComplexity; reason: string } {
+export function classifyBeadComplexity(bead: Bead): BeadComplexityResult {
   const desc = bead.description ?? "";
   const title = bead.title ?? "";
   const text = `${title} ${desc}`;
   const descLength = desc.length;
-  const fileCount = extractFileCount(bead);
+  const filePaths = collectBeadFilePaths(bead);
+  const fileCount = filePaths.length;
+  const acceptanceCount = countAcceptanceCriteria(desc);
 
   let score = 0;
   const reasons: string[] = [];
+
+  // File scope (uses bullet paths, Files sections, and prose path tokens)
+  if (fileCount > 8) {
+    score += 3;
+    reasons.push(`${fileCount} file paths`);
+  } else if (fileCount > 4) {
+    score += 2;
+    reasons.push(`${fileCount} file paths`);
+  } else if (fileCount > 1) {
+    score += 1;
+    reasons.push(`${fileCount} file paths`);
+  }
+
+  if (filePaths.some((p) => RISKY_PATH_RE.test(p))) {
+    score += 1;
+    reasons.push("core/risky paths");
+  }
+
+  if (
+    fileCount > 0
+    && filePaths.every((p) => p.startsWith("docs/") || /\.md$/i.test(p))
+  ) {
+    score -= 2;
+    reasons.push("docs-only scope");
+  }
+
+  // Acceptance criteria depth
+  if (acceptanceCount >= 6) {
+    score += 2;
+    reasons.push(`${acceptanceCount} acceptance criteria`);
+  } else if (acceptanceCount >= 3) {
+    score += 1;
+    reasons.push(`${acceptanceCount} acceptance criteria`);
+  }
 
   // Description length
   if (descLength > 2000) {
     score += 2;
     reasons.push("long description");
-  } else if (descLength > 500) {
+  } else if (descLength > 800) {
     score += 1;
-  }
-
-  // File count
-  if (fileCount > 5) {
-    score += 2;
-    reasons.push(`${fileCount} files`);
-  } else if (fileCount > 2) {
-    score += 1;
+    reasons.push("detailed description");
   }
 
   // Priority (P0/P1 = likely more complex)
   if (typeof bead.priority === "number" && !Number.isNaN(bead.priority) && bead.priority <= 1) {
     score += 1;
     reasons.push("high priority");
+  }
+
+  // Effort tier (template / estimate field)
+  const effort = parseBeadEffort(bead);
+  if (effort === "XL") {
+    score += 2;
+    reasons.push("effort XL");
+  } else if (effort === "L") {
+    score += 1;
+    reasons.push("effort L");
+  } else if (effort === "S") {
+    score -= 1;
+    reasons.push("effort S");
+  }
+
+  // Labels
+  for (const label of bead.labels ?? []) {
+    const norm = label.trim().toLowerCase();
+    if (COMPLEX_LABEL_RE.test(norm)) {
+      score += 1;
+      reasons.push(`label ${label}`);
+    } else if (SIMPLE_LABEL_RE.test(norm)) {
+      score -= 1;
+      reasons.push(`label ${label}`);
+    }
+  }
+
+  // Issue type
+  const issueType = `${bead.issue_type ?? bead.type ?? ""}`.toLowerCase();
+  if (/bug|incident|regression/.test(issueType)) {
+    score += 1;
+    reasons.push("bug-type bead");
+  } else if (/chore|docs|copy/.test(issueType)) {
+    score -= 1;
+    reasons.push("chore/docs bead");
   }
 
   // Complexity signals in text
@@ -159,14 +241,21 @@ export function classifyBeadComplexity(bead: Bead): { complexity: BeadComplexity
     reasons.push(`simplicity signals: ${simpleMatches.length}`);
   }
 
-  // Classify
-  if (score >= 4) {
-    return { complexity: "complex", reason: reasons.join(", ") || "high overall score" };
+  // Vague beads with no file scope stay medium-ish when description is substantial
+  if (fileCount === 0 && descLength > 400 && acceptanceCount >= 2) {
+    score += 1;
+    reasons.push("substantial scope without explicit paths");
   }
-  if (score >= 2) {
-    return { complexity: "medium", reason: reasons.join(", ") || "moderate overall score" };
-  }
-  return { complexity: "simple", reason: reasons.join(", ") || "low overall score" };
+
+  const complexity = complexityFromScore(score);
+
+  return {
+    complexity,
+    reason: reasons.join(", ") || "baseline score",
+    score,
+    fileCount,
+    acceptanceCount,
+  };
 }
 
 // ─── Routing ────────────────────────────────────────────────

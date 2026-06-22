@@ -6,6 +6,10 @@ import { tmpdir } from 'node:os';
 import type { Bead } from '../types.js';
 import {
   DEFAULT_CURSOR_IMPL_MODELS,
+  adaptPromptForCursor,
+  buildBeadDispatchContext,
+  buildCursorImplSpawnInstructions,
+  classifyBeadsForSwarm,
   buildImplModelsGate,
   getCursorImplModels,
   modelForComplexity,
@@ -43,6 +47,7 @@ describe('cursor-implement-swarm', () => {
 
   it('returns defaults when no config', () => {
     expect(getCursorImplModels(tmp)).toEqual(DEFAULT_CURSOR_IMPL_MODELS);
+    expect(getCursorImplModels(tmp).medium).not.toBe(getCursorImplModels(tmp).simple);
   });
 
   it('reads implement section from flywheel.config.yaml', () => {
@@ -118,6 +123,25 @@ describe('cursor-implement-swarm', () => {
     expect(gate.options[0].label).toContain('recommendation');
     expect(gate.rationale).toBeTruthy();
     expect(gate.recommended).toBeDefined();
+    expect(gate.beadClassifications).toEqual([]);
+  });
+
+  it('classifyBeadsForSwarm attaches model slug per tier', () => {
+    const beads = [
+      bead('Fix typo in README', 'documentation readme typo'),
+      {
+        ...bead('Auth migration', 'security authentication refactor'),
+        id: 'b-hard',
+        priority: 0,
+        description:
+          '### Files:\nmcp-server/src/auth.ts\n\n- [ ] tests\n- [ ] docs\n- [ ] rollout',
+      },
+    ];
+    const models = getCursorImplModels(tmp);
+    const rows = classifyBeadsForSwarm(beads, models);
+    expect(rows).toHaveLength(2);
+    expect(rows[0].complexity).not.toBe('simple');
+    expect(rows.find((r) => r.beadId === 'b-1')?.complexity).toBe('simple');
   });
 
   it('resolveImplModelsConfirm recommended matches recommendImplModels', () => {
@@ -131,5 +155,46 @@ describe('cursor-implement-swarm', () => {
     expect(useNtmImplBackend()).toBe(false);
     process.env.FW_IMPL_BACKEND = 'ntm';
     expect(useNtmImplBackend()).toBe(true);
+  });
+
+  it('buildCursorImplSpawnInstructions documents single-branch coordination', () => {
+    const text = buildCursorImplSpawnInstructions(DEFAULT_CURSOR_IMPL_MODELS, tmp, {
+      executionMode: 'single-branch',
+    });
+    expect(text).toContain('Single-branch coordination');
+    expect(text).toContain('Do **not** run `git worktree add`');
+    expect(text).toContain('file_reservation_paths');
+  });
+
+  it('adaptPromptForCursor includes single-branch git workflow and no worktrees', () => {
+    const ctx = buildBeadDispatchContext(
+      {
+        ...bead('Add feature', '### Files:\n- src/feature.ts'),
+        id: 'br-99',
+      },
+      'medium',
+      'AgentOne',
+      'Coordinator',
+      tmp,
+    );
+    const { prompt } = adaptPromptForCursor(ctx, 'composer-2.5', 'single-branch');
+    expect(prompt).toContain('git pull --rebase');
+    expect(prompt).toContain('git push');
+    expect(prompt).toContain('shared repo checkout');
+    expect(prompt).not.toMatch(/git worktree add/);
+    expect(prompt).toContain('src/feature.ts');
+    expect(prompt).toContain('conflicts[]');
+    expect(prompt).toContain("program='cursor'");
+  });
+
+  it('buildBeadDispatchContext extracts artifact paths from bead body', () => {
+    const ctx = buildBeadDispatchContext(
+      bead('Docs', '### Files:\n- docs/readme.md'),
+      'simple',
+      'Agent',
+      'Coordinator',
+      tmp,
+    );
+    expect(ctx.relevantFiles).toContain('docs/readme.md');
   });
 });

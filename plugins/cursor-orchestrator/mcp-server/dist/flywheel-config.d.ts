@@ -81,6 +81,17 @@ export interface FlywheelConfigProfile {
 export interface FlywheelConfigReview {
     thermo_nuclear_model?: string;
 }
+/** Scoped vs full-suite test policy for implement swarms. */
+export interface FlywheelConfigVerify {
+    test_cwd?: string;
+    build_slot?: string;
+    max_workers?: number;
+    allow_full_suite_when_alone?: boolean;
+}
+/** Cursor swarm coordination — single-branch + Agent Mail (default). */
+export interface FlywheelConfigCoordination {
+    mode?: 'single-branch' | 'worktree';
+}
 export interface FlywheelConfig {
     convergence: FlywheelConfigConvergence;
     deep_plan?: FlywheelConfigDeepPlan;
@@ -91,6 +102,8 @@ export interface FlywheelConfig {
     coordinator?: FlywheelConfigCoordinator;
     profile?: FlywheelConfigProfile;
     review?: FlywheelConfigReview;
+    verify?: FlywheelConfigVerify;
+    coordination?: FlywheelConfigCoordination;
 }
 /**
  * R-008 — single warning surfaced from the loader. Each reports a
@@ -130,4 +143,6 @@ export declare function resolveThermoNuclearModel(cwd: string): string;
 export declare function areEpochGuardsEnabled(cwd: string): boolean;
 /** True when coordinator.nextActionHints is absent or explicitly true (default on). */
 export declare function areNextActionHintsEnabled(cwd: string): boolean;
+/** Config/env coordination mode hint (Cursor swarm always uses single-branch when Agent Mail is up). */
+export declare function readCoordinationModeConfig(cwd: string): 'single-branch' | 'worktree' | undefined;
 //# sourceMappingURL=flywheel-config.d.ts.map

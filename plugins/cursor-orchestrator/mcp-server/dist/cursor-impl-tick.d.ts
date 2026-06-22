@@ -66,6 +66,8 @@ export interface ImplTickStructured {
         waveReviewBeadIds?: string[];
         /** Advisory one-line coordinator nudge (template v1). */
         nextActionHint?: CoordinatorNextActionHint;
+        /** Cursor swarm coordination mode when dispatching impl Tasks. */
+        executionMode?: 'single-branch';
     };
 }
 export declare function resolveImplTickConfig(cwd: string): ImplTickConfig;

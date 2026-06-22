@@ -22,10 +22,17 @@ import {
 } from './commit-batch.js';
 import {
   adaptPromptForCursor,
+  buildBeadDispatchContext,
   buildCursorImplSpawnInstructions,
   getCursorImplModels,
   modelForComplexity,
+  useNtmImplBackend,
 } from './cursor-implement-swarm.js';
+import {
+  AGENT_MAIL_SWARM_HINT,
+  formatWaveHotspotWarnings,
+  resolveCursorCoordinationMode,
+} from './coordination-mode.js';
 import {
   buildBatchReviewSynthesizedGate,
   buildImplSupervisionGate,
@@ -129,6 +136,8 @@ export interface ImplTickStructured {
     waveReviewBeadIds?: string[];
     /** Advisory one-line coordinator nudge (template v1). */
     nextActionHint?: CoordinatorNextActionHint;
+    /** Cursor swarm coordination mode when dispatching impl Tasks. */
+    executionMode?: 'single-branch';
   };
 }
 
@@ -632,7 +641,7 @@ export async function runImplTickCore(
         epochGuards,
         [
           waveResult.content[0]?.text ?? 'Next wave ready.',
-          buildCursorImplSpawnInstructions(models),
+          buildCursorImplSpawnInstructions(models, cwd),
         ].join('\n\n'),
         {
           kind: 'advance_wave',
@@ -669,6 +678,35 @@ export async function runImplTickCore(
 
   // ── Dispatch ready beads when idle capacity ──
   if (counts.inProgressCount === 0 && counts.readyCount > 0 && state.implModelsConfirmed) {
+    if (!useNtmImplBackend()) {
+      const coord = await resolveCursorCoordinationMode(ctx.exec, cwd, state, {
+        signal: ctx.signal,
+      });
+      if (!coord.ok) {
+        await saveState(state);
+        return buildTickResult(
+          epochAtTickStart,
+          state,
+          epochGuards,
+          [
+            coord.reason,
+            AGENT_MAIL_SWARM_HINT,
+            coord.warning ? `Probe: ${coord.warning}` : '',
+          ]
+            .filter(Boolean)
+            .join('\n'),
+          {
+            kind: 'monitor',
+            tickAt,
+            nextTickInSeconds: cfg.intervalSeconds,
+            snapshot: baseSnapshot,
+            coordinatorPlaybook: playbook,
+          },
+        );
+      }
+      await saveState(state);
+    }
+
     let ready: Awaited<ReturnType<typeof readyBeads>> = [];
     try {
       ready = await readyBeads(ctx.exec, cwd);
@@ -676,24 +714,19 @@ export async function runImplTickCore(
       ready = [];
     }
     const models = state.implModels ?? getCursorImplModels(cwd);
-    const implTasks = ready.slice(0, cfg.maxParallelImpl).map((bead) => {
+    const waveSlice = ready.slice(0, cfg.maxParallelImpl);
+    const hotspotWarnings = formatWaveHotspotWarnings(waveSlice);
+    const implTasks = waveSlice.map((bead) => {
       const complexity = classifyBeadComplexity(bead).complexity;
       const model = modelForComplexity(models, complexity);
-      const { prompt } = adaptPromptForCursor(
-        {
-          beadId: bead.id,
-          title: bead.title,
-          description: bead.description,
-          acceptance: ['Complete the bead as described.'],
-          complexity,
-          relevantFiles: [],
-          priorArtBeads: [],
-          agentName: bead.id,
-          coordinatorName: 'Coordinator',
-          projectKey: cwd,
-        },
-        model,
+      const dispatchCtx = buildBeadDispatchContext(
+        bead,
+        complexity,
+        bead.id,
+        'Coordinator',
+        cwd,
       );
+      const { prompt } = adaptPromptForCursor(dispatchCtx, model, 'single-branch');
       return {
         beadId: bead.id,
         model,
@@ -709,8 +742,14 @@ export async function runImplTickCore(
         state,
         epochGuards,
         [
-          `${implTasks.length} ready bead(s); no in_progress — dispatch impl Tasks.`,
-          buildCursorImplSpawnInstructions(models),
+          `${implTasks.length} ready bead(s); no in_progress — dispatch impl Tasks (shared branch).`,
+          buildCursorImplSpawnInstructions(models, cwd, {
+            executionMode: 'single-branch',
+            hotspotWarnings,
+          }),
+          ...(hotspotWarnings.length > 0
+            ? ['', '**Hotspot warnings:**', ...hotspotWarnings]
+            : []),
         ].join('\n\n'),
         {
           kind: 'dispatch_impl_tasks',
@@ -718,6 +757,7 @@ export async function runImplTickCore(
           nextTickInSeconds: cfg.intervalSeconds,
           snapshot: baseSnapshot,
           coordinatorPlaybook: playbook,
+          executionMode: 'single-branch',
           implTasks,
           nextActionHint: maybeAttachNextActionHint(
             cwd,

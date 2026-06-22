@@ -85,7 +85,6 @@ export function adaptPromptForGemini(
     '',
     '## STEP 2 — VALIDATE (every gate must pass before commit)',
     '- `npx tsc --noEmit` AND the project\'s `npm run build`.',
-    '- Test suite for the files you touched.',
     '- `ubs <changed-files>` if installed.',
     '',
     '## STEP 3 — COMMIT & CLOSE',

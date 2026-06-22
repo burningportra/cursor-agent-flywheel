@@ -20,5 +20,11 @@ export declare function createMockExec(calls?: ExecCall[]): (cmd: string, args: 
     stdout: string;
     stderr: string;
 }>;
+/** Agent Mail liveness probe used by Cursor swarm coordination gate. */
+export declare function wrapExecWithAgentMail<T extends (cmd: string, args: string[], opts?: unknown) => Promise<{
+    code: number;
+    stdout: string;
+    stderr: string;
+}>>(exec: T): T;
 export declare function makeState(overrides?: Partial<FlywheelState>): FlywheelState;
 //# sourceMappingURL=mocks.d.ts.map

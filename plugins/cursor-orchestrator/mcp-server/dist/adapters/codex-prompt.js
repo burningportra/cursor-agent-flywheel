@@ -98,7 +98,6 @@ export function adaptPromptForCodex(bead) {
         '',
         '### STEP 2 — VALIDATE (gates are non-negotiable)',
         '- TypeScript: `npx tsc --noEmit && npm run build`',
-        '- Tests: run the suite covering touched files.',
         '- UBS (if installed): `ubs <changed-files>`.',
         '',
         '### STEP 3 — COMMIT & CLOSE',

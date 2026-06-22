@@ -10,14 +10,14 @@ import { makeOkToolResult, makeToolError } from './shared.js';
 import { classifyExecError } from '../errors.js';
 import { persistCoordinatorEpochBump, getCoordinatorEpoch } from '../coordinator-epoch.js';
 import { createLogger } from '../logger.js';
-import * as path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { readCheckpoint } from '../checkpoint.js';
 import { readConvergenceFromDisk, planSlugFromIdentifier, } from './convergence-tool.js';
 import { loadFlywheelConfig } from '../flywheel-config.js';
 import { countCommitsSinceLastBatchReview, resolveCommitBatchThreshold, shouldTriggerBatchReview } from '../commit-batch.js';
-import { adaptPromptForCursor, buildCursorImplSpawnInstructions, buildImplModelsGate, formatCursorImplModelTable, recommendImplModels, modelForComplexity, resolveImplModelsConfirm, useNtmImplBackend, } from '../cursor-implement-swarm.js';
+import { adaptPromptForCursor, buildBeadDispatchContext, buildCursorImplSpawnInstructions, buildImplModelsGate, formatCursorImplModelTable, recommendImplModels, modelForComplexity, resolveImplModelsConfirm, useNtmImplBackend, } from '../cursor-implement-swarm.js';
+import { AGENT_MAIL_SWARM_HINT, formatWaveHotspotWarnings, resolveCursorCoordinationMode, } from '../coordination-mode.js';
 import { areNextActionHintsEnabled } from '../flywheel-config.js';
 import { buildWaveCompleteHint } from '../next-action-hint.js';
 const log = createLogger('advance-wave');
@@ -96,23 +96,7 @@ function okResult(phase, text, data) {
     return makeOkToolResult('flywheel_advance_wave', phase, text, data);
 }
 function beadToDispatchContext(bead, complexity, agentName, coordinatorName, projectKey) {
-    const descLines = bead.description.split('\n');
-    const acceptance = descLines
-        .filter((l) => /^\s*[-*]\s/.test(l))
-        .map((l) => l.replace(/^\s*[-*]\s*/, '').trim())
-        .filter(Boolean);
-    return {
-        beadId: bead.id,
-        title: bead.title,
-        description: bead.description,
-        acceptance: acceptance.length > 0 ? acceptance : ['Complete the bead as described.'],
-        complexity,
-        relevantFiles: [],
-        priorArtBeads: [],
-        agentName,
-        coordinatorName,
-        projectKey,
-    };
+    return buildBeadDispatchContext(bead, complexity, agentName, coordinatorName, projectKey);
 }
 export async function runAdvanceWave(ctx, args) {
     const { exec, cwd, state, saveState, signal } = ctx;
@@ -308,12 +292,26 @@ export async function runAdvanceWave(ctx, args) {
     }
     const implModels = state.implModels ??
         (cursorBackend ? recommendImplModels(cwd, ready).models : undefined);
+    if (cursorBackend) {
+        const coord = await resolveCursorCoordinationMode(exec, cwd, state, { signal });
+        if (!coord.ok) {
+            return makeToolError('flywheel_advance_wave', state.phase, 'agent_mail_unreachable', coord.reason, {
+                hint: AGENT_MAIL_SWARM_HINT,
+                details: { warning: coord.warning },
+                retryable: true,
+            });
+        }
+        saveState(state);
+    }
+    const hotspotWarnings = cursorBackend
+        ? formatWaveHotspotWarnings(waveCandidates)
+        : [];
     // Step 4: classify complexity + allocate names
     const complexityMap = {};
     for (const bead of waveCandidates) {
         complexityMap[bead.id] = classifyBeadComplexity(bead).complexity;
     }
-    const projectKey = path.basename(cwd);
+    const projectKey = cwd;
     const coordinatorName = 'Coordinator';
     const agentNames = allocateAgentNames(waveCandidates.length, projectKey);
     // Step 5: render prompts (Cursor Task per complexity, or legacy cc/cod/gem lanes)
@@ -325,7 +323,7 @@ export async function runAdvanceWave(ctx, args) {
         const dispatchCtx = beadToDispatchContext(bead, complexity, agentNames[i], coordinatorName, projectKey);
         if (cursorBackend && implModels) {
             const taskModel = modelForComplexity(implModels, complexity);
-            const adapted = adaptPromptForCursor(dispatchCtx, taskModel);
+            const adapted = adaptPromptForCursor(dispatchCtx, taskModel, 'single-branch');
             prompts.push({
                 beadId: bead.id,
                 lane,
@@ -350,7 +348,11 @@ export async function runAdvanceWave(ctx, args) {
                 ? {
                     spawnBackend: 'cursor-task',
                     implModels,
-                    spawnInstructions: buildCursorImplSpawnInstructions(implModels),
+                    executionMode: 'single-branch',
+                    spawnInstructions: buildCursorImplSpawnInstructions(implModels, cwd, {
+                        executionMode: 'single-branch',
+                        hotspotWarnings,
+                    }),
                 }
                 : { spawnBackend: 'ntm-lanes' }),
         },
@@ -379,8 +381,14 @@ export async function runAdvanceWave(ctx, args) {
         lines.push(`Convergence: score=${convergenceRec.score.toFixed(2)} (${convergenceRec.status}) — below auto-approve threshold; operator picks normally.`);
     }
     if (cursorBackend && implModels) {
-        lines.push(`Next wave: ${waveCandidates.length} bead(s) — Cursor Task spawn (models: simple=${implModels.simple}, medium=${implModels.medium}, complex=${implModels.complex}).`);
-        lines.push(...waveCandidates.map((b, i) => `  - ${b.id} → model ${prompts[i].model} (${complexityMap[b.id]})`));
+        lines.push(`Next wave: ${waveCandidates.length} bead(s) — Cursor Task spawn on shared branch (models: simple=${implModels.simple}, medium=${implModels.medium}, complex=${implModels.complex}).`);
+        if (hotspotWarnings.length > 0) {
+            lines.push('', '**Hotspot warnings (shared files in this wave):**', ...hotspotWarnings);
+        }
+        lines.push(...waveCandidates.map((b, i) => {
+            const cls = classifyBeadComplexity(b);
+            return `  - ${b.id} → model ${prompts[i].model} (${complexityMap[b.id]}; ${cls.reason})`;
+        }));
     }
     else {
         lines.push(`Next wave: ${waveCandidates.length} bead(s) dispatched across ${LANES.length} NTM lanes.`);
