@@ -11,6 +11,10 @@
 
 const fs = require('node:fs');
 const { spawnSync } = require('node:child_process');
+const {
+  classifyBlockedTestCommand,
+  formatTestGuardError,
+} = require('./test-command-guard.js');
 
 function releaseReservationsIfIdentified() {
   const agent = process.env.AGENT_MAIL_AGENT || process.env.AGENT_NAME;
@@ -84,6 +88,12 @@ if (mutatingDoctor.test(command) || deleteActivityLock.test(command)) {
     'Do not delete the lock files; release the owning service/process instead.',
     'If a human intentionally wants to bypass this hook, prefix the command with FLYWHEEL_ALLOW_AM_DOCTOR=1.',
   ].join('\n'));
+  process.exit(2);
+}
+
+const testBlock = classifyBlockedTestCommand(command);
+if (testBlock.blocked) {
+  console.error(formatTestGuardError(testBlock.reason));
   process.exit(2);
 }
 

@@ -9,6 +9,7 @@
  * `{ alive, terminated, error }` shape on every OS.
  */
 import { setTimeout as sleep } from 'node:timers/promises';
+import { spawnSync } from 'node:child_process';
 const DEFAULT_SIGKILL_GRACE_MS = 1_000;
 function defaultKill(pid, signal) {
     try {
@@ -78,5 +79,87 @@ export async function terminateMany(pids, opts = {}) {
         out.push(await terminate(pid, opts));
     }
     return out;
+}
+function defaultListChildPids(parentPid) {
+    if (process.platform === 'win32')
+        return [];
+    try {
+        const r = spawnSync('pgrep', ['-P', String(parentPid)], { encoding: 'utf8' });
+        if (r.status !== 0 || !r.stdout)
+            return [];
+        return r.stdout
+            .split('\n')
+            .map((line) => Number(line.trim()))
+            .filter((n) => Number.isFinite(n) && n > 0);
+    }
+    catch {
+        return [];
+    }
+}
+/** Collect root pid and all descendant pids (breadth-first). */
+export function collectProcessTreePids(rootPid, listChildPids = defaultListChildPids) {
+    const out = [];
+    const seen = new Set();
+    const queue = [rootPid];
+    while (queue.length > 0) {
+        const pid = queue.shift();
+        if (seen.has(pid))
+            continue;
+        seen.add(pid);
+        out.push(pid);
+        for (const child of listChildPids(pid)) {
+            if (!seen.has(child))
+                queue.push(child);
+        }
+    }
+    return out;
+}
+/**
+ * Terminate a process and its descendants. Children are killed before the
+ * root so fork pools cannot outlive the parent.
+ */
+export async function terminateProcessTree(rootPid, opts = {}) {
+    const listChildPids = opts.listChildPids ?? defaultListChildPids;
+    const pids = collectProcessTreePids(rootPid, listChildPids);
+    const ordered = [...pids].reverse();
+    return terminateMany(ordered, opts);
+}
+/**
+ * Best-effort kill of a detached process group (Unix). Falls back to
+ * terminateProcessTree when group kill is unavailable.
+ */
+export async function terminateProcessGroupOrTree(rootPid, opts = {}) {
+    const killFn = opts.killFn ?? defaultKill;
+    if (process.platform !== 'win32') {
+        const groupOk = killFn(-rootPid, 'SIGTERM');
+        if (groupOk) {
+            const sleepFn = opts.sleepFn ?? ((ms) => sleep(ms));
+            const graceMs = opts.graceMs ?? DEFAULT_SIGKILL_GRACE_MS;
+            await sleepFn(graceMs);
+            if (!isAlive(rootPid, killFn)) {
+                return [
+                    {
+                        pid: rootPid,
+                        signalled: true,
+                        terminated: true,
+                        escalated: false,
+                    },
+                ];
+            }
+            killFn(-rootPid, 'SIGKILL');
+            await sleepFn(graceMs);
+            if (!isAlive(rootPid, killFn)) {
+                return [
+                    {
+                        pid: rootPid,
+                        signalled: true,
+                        terminated: true,
+                        escalated: true,
+                    },
+                ];
+            }
+        }
+    }
+    return terminateProcessTree(rootPid, opts);
 }
 //# sourceMappingURL=platform.js.map

@@ -11,6 +11,7 @@ import { orphanedWorktreesHandler } from './remediations/orphaned_worktrees.js';
 import { checkpointValidityHandler } from './remediations/checkpoint_validity.js';
 import { projectsBaseMisconfigHandler } from './remediations/projects_base_misconfig.js';
 import { orphanTenderDaemonsHandler } from './remediations/orphan_tender_daemons.js';
+import { orphanVitestWorkersHandler } from './remediations/orphan_vitest_workers.js';
 import { codexConfigCompatHandler } from './remediations/codex_config_compat.js';
 import {
   brBinaryHandler,
@@ -103,6 +104,7 @@ export const REMEDIATION_REGISTRY: Record<DoctorCheckName, RemediationHandler | 
   // destructive (process state is lost), so the dispatcher requires
   // autoConfirm:true in execute mode. Skip route remains the SKILL.md hint.
   orphan_tender_daemons: orphanTenderDaemonsHandler,
+  orphan_vitest_workers: orphanVitestWorkersHandler,
   // B-AC2 — convergence state corruption is operator-driven recovery: regen the
   // ring buffer or delete the file. Auto-remediation could mask scoreVersion
   // drift across releases (the very thing the score_version_mismatch error

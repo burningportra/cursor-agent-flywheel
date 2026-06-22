@@ -6,6 +6,7 @@ export declare const RemediateInputSchema: z.ZodObject<{
     cwd: z.ZodString;
     checkName: z.ZodEnum<{
         orphan_tender_daemons: "orphan_tender_daemons";
+        orphan_vitest_workers: "orphan_vitest_workers";
         mcp_connectivity: "mcp_connectivity";
         agent_mail_liveness: "agent_mail_liveness";
         br_binary: "br_binary";

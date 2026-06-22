@@ -32,6 +32,7 @@ import { getAdapter } from '../adapters/platform/index.js';
 import type { HookAdapter, WorktreeScanRoot } from '../adapters/platform/index.js';
 import { resolveRealpathWithinRoot } from '../utils/path-safety.js';
 import { checkOrphanTenderDaemons } from '../checks/orphan-tender-daemons.js';
+import { checkOrphanVitestWorkers } from '../checks/orphan-vitest-workers.js';
 import {
   GEMINI_MODEL_ALLOWLIST,
   isGeminiModelAllowed,
@@ -107,6 +108,8 @@ export const DOCTOR_CHECK_NAMES = [
   // Orphan tender-daemons (bead n3a) — node tender-daemon.js processes whose
   // --session no longer exists in tmux. Yellow + suggests `kill -TERM`.
   'orphan_tender_daemons',
+  // Stray vitest/npm-test processes during parallel implement waves.
+  'orphan_vitest_workers',
   // Convergence-state validity (B-AC2). Green when no active plan or when
   // .pi-flywheel/plans/<slug>/convergence.json parses + matches scoreVersion.
   // Red on schema_invalid / score_version_mismatch / invalid_json.
@@ -303,6 +306,7 @@ export async function runDoctorChecks(
         marketplaceManifestPath: options.marketplaceManifestPath,
       }),
     () => checkOrphanTenderDaemons(exec, cwd, combined, perCheckTimeoutMs, now),
+    () => checkOrphanVitestWorkers(exec, cwd, combined, perCheckTimeoutMs, now),
     () => checkConvergenceStateValidity(cwd, combined, now),
     () => checkOutcomeRubricValidity(cwd, combined, now),
     () => checkProfileIntentStale(cwd, combined, now),

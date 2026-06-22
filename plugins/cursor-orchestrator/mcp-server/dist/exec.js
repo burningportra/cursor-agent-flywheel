@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { terminateProcessGroupOrTree } from './platform.js';
 export function makeExec(defaultCwd) {
     return (cmd, args, opts = {}) => new Promise((resolve, reject) => {
         if (opts.signal?.aborted) {
@@ -6,9 +7,11 @@ export function makeExec(defaultCwd) {
             return;
         }
         const useStdin = opts.input !== undefined;
+        const detached = process.platform !== 'win32';
         const child = spawn(cmd, args, {
             cwd: opts.cwd ?? defaultCwd,
             shell: false,
+            detached,
             stdio: useStdin ? ['pipe', 'pipe', 'pipe'] : ['ignore', 'pipe', 'pipe'],
             signal: opts.signal,
         });
@@ -20,13 +23,27 @@ export function makeExec(defaultCwd) {
         child.stdout?.on('data', (d) => { stdout += d.toString(); });
         child.stderr?.on('data', (d) => { stderr += d.toString(); });
         let timer;
+        let treeKillStarted = false;
+        const killProcessTree = () => {
+            if (treeKillStarted || !child.pid)
+                return;
+            treeKillStarted = true;
+            void terminateProcessGroupOrTree(child.pid).catch(() => {
+                try {
+                    child.kill('SIGTERM');
+                }
+                catch {
+                    /* ignore */
+                }
+            });
+        };
         if (opts.timeout) {
             timer = setTimeout(() => {
-                child.kill('SIGTERM');
+                killProcessTree();
                 reject(new Error(`Timed out after ${opts.timeout}ms: ${cmd} ${args.join(' ')}`));
             }, opts.timeout);
         }
-        const abortHandler = () => { child.kill('SIGTERM'); };
+        const abortHandler = () => { killProcessTree(); };
         if (opts.signal) {
             opts.signal.addEventListener('abort', abortHandler, { once: true });
         }

@@ -39,4 +39,20 @@ export declare function isAlive(pid: number, killFn?: KillOptions['killFn']): bo
  */
 export declare function terminate(pid: number, opts?: KillOptions): Promise<KillOutcome>;
 export declare function terminateMany(pids: number[], opts?: KillOptions): Promise<KillOutcome[]>;
+export type ListChildPidsFn = (parentPid: number) => number[];
+/** Collect root pid and all descendant pids (breadth-first). */
+export declare function collectProcessTreePids(rootPid: number, listChildPids?: ListChildPidsFn): number[];
+export interface TerminateProcessTreeOptions extends KillOptions {
+    listChildPids?: ListChildPidsFn;
+}
+/**
+ * Terminate a process and its descendants. Children are killed before the
+ * root so fork pools cannot outlive the parent.
+ */
+export declare function terminateProcessTree(rootPid: number, opts?: TerminateProcessTreeOptions): Promise<KillOutcome[]>;
+/**
+ * Best-effort kill of a detached process group (Unix). Falls back to
+ * terminateProcessTree when group kill is unavailable.
+ */
+export declare function terminateProcessGroupOrTree(rootPid: number, opts?: TerminateProcessTreeOptions): Promise<KillOutcome[]>;
 //# sourceMappingURL=platform.d.ts.map
