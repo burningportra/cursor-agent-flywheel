@@ -65,6 +65,12 @@ export interface FlywheelConfigImplTick {
     max_parallel_impl?: number;
     /** Commits since last batch-review baseline before fresh-eyes auto-trigger (0 = off). */
     commit_batch_threshold?: number;
+    /** When true (default), arm `/loop` on first impl dispatch to drive impl_tick. */
+    auto_loop?: boolean;
+    /** When true (default), auto-dispatch commit-batch fresh-eyes; skip wave review menu. */
+    auto_batch_review?: boolean;
+    /** When queue drains with commits below threshold, run one final batch review (default true). */
+    final_on_drain?: boolean;
 }
 export interface FlywheelConfigCoordinator {
     /** When false, skip server-side stale tick drop (default true). */
@@ -143,6 +149,12 @@ export declare function resolveThermoNuclearModel(cwd: string): string;
 export declare function areEpochGuardsEnabled(cwd: string): boolean;
 /** True when coordinator.nextActionHints is absent or explicitly true (default on). */
 export declare function areNextActionHintsEnabled(cwd: string): boolean;
+/** When true (default), commit-batch fresh-eyes runs automatically at wave boundaries. */
+export declare function areAutoBatchReviewEnabled(cwd: string): boolean;
+/** When true (default), coordinator arms `/loop` on first impl dispatch. */
+export declare function areAutoLoopEnabled(cwd: string): boolean;
+/** When queue drains with unpushed commits below threshold, run final batch review (default true). */
+export declare function isFinalBatchReviewOnDrain(cwd: string): boolean;
 /** Config/env coordination mode hint (Cursor swarm always uses single-branch when Agent Mail is up). */
 export declare function readCoordinationModeConfig(cwd: string): 'single-branch' | 'worktree' | undefined;
 //# sourceMappingURL=flywheel-config.d.ts.map

@@ -40,8 +40,8 @@ import {
   formatWaveHotspotWarnings,
   resolveCursorCoordinationMode,
 } from '../coordination-mode.js';
-import { areNextActionHintsEnabled } from '../flywheel-config.js';
-import { buildWaveCompleteHint } from '../next-action-hint.js';
+import { areNextActionHintsEnabled, areAutoBatchReviewEnabled, isFinalBatchReviewOnDrain } from '../flywheel-config.js';
+import { buildQueueDrainedHint, buildWaveCompleteHint } from '../next-action-hint.js';
 
 const log = createLogger('advance-wave');
 const execFileAsync = promisify(execFile);
@@ -139,6 +139,9 @@ export interface AdvanceWaveOutcome {
         kind: 'wave_review_gate';
         /** Beads that just closed in the wave being advanced. */
         beadIds: string[];
+      }
+    | {
+        kind: 'wrap_up_gate';
       };
   /** Advisory one-line coordinator nudge when queue drains (template v1). */
   nextActionHint?: CoordinatorNextActionHint;
@@ -395,6 +398,83 @@ export async function runAdvanceWave(
 
   if (ready.length === 0) {
     const generationEpoch = getCoordinatorEpoch(state);
+    const autoBatch = areAutoBatchReviewEnabled(cwd);
+
+    if (autoBatch) {
+      if (batchThreshold > 0) {
+        const needsBatchReview =
+          shouldTriggerBatchReview(batchThreshold, commitsSinceBaseline) ||
+          (isFinalBatchReviewOnDrain(cwd) && commitsSinceBaseline > 0);
+
+        if (needsBatchReview) {
+          let reviewSha = '';
+          try {
+            const r = await execFileAsync('git', ['rev-parse', 'HEAD'], {
+              cwd,
+              timeout: GIT_TIMEOUT_MS,
+            });
+            reviewSha = r.stdout.trim();
+          } catch (err: unknown) {
+            log.warn('batch-review drain: git rev-parse HEAD failed; skipping gate', {
+              err: err instanceof Error ? err.message : String(err),
+            });
+          }
+          if (reviewSha) {
+            const rangeLabel = state.lastBatchReviewSha
+              ? `${state.lastBatchReviewSha.slice(0, 7)}..${reviewSha.slice(0, 7)}`
+              : `(initial)..${reviewSha.slice(0, 7)}`;
+            const outcome: AdvanceWaveOutcome = {
+              verification,
+              nextWave: null,
+              waveComplete: false,
+              needsEvidence,
+              convergence: convergenceRec,
+              nextStep: {
+                kind: 'batch_review_due',
+                reviewSha,
+                lastBaselineSha: state.lastBatchReviewSha,
+              },
+            };
+            const text = [
+              `Wave verified (${verification.verified.length}/${args.closedBeadIds.length} closed). Queue drained.`,
+              commitsSinceBaseline >= batchThreshold
+                ? `Batch-review threshold crossed: ${commitsSinceBaseline} ≥ ${batchThreshold} commits since last baseline.`
+                : `Final batch review (${commitsSinceBaseline} commit(s) since baseline).`,
+              `Dispatch fresh-eyes review over ${rangeLabel}, then flywheel_wrap_up_gate.`,
+            ].join('\n');
+            return okResult(state.phase, text, outcome);
+          }
+        }
+      }
+
+      const outcome: AdvanceWaveOutcome = {
+        verification,
+        nextWave: null,
+        waveComplete: true,
+        needsEvidence,
+        convergence: convergenceRec,
+        nextStep: { kind: 'wrap_up_gate' },
+        ...(areNextActionHintsEnabled(cwd)
+          ? {
+              nextActionHint: buildQueueDrainedHint(
+                generationEpoch,
+                commitsSinceBaseline,
+                batchThreshold,
+              ),
+            }
+          : {}),
+      };
+      return okResult(
+        state.phase,
+        [
+          `Wave verified (${verification.verified.length}/${args.closedBeadIds.length} closed). Queue drained — no pending commits for batch review.`,
+          '',
+          '**NEXT (MANDATORY):** `flywheel_wrap_up_gate({ cwd })` — present wrap-up menu.',
+        ].join('\n'),
+        outcome,
+      );
+    }
+
     const outcome: AdvanceWaveOutcome = {
       verification,
       nextWave: null,
@@ -410,6 +490,7 @@ export async function runAdvanceWave(
             nextActionHint: buildWaveCompleteHint(
               generationEpoch,
               args.closedBeadIds,
+              { autoBatchReview: false },
             ),
           }
         : {}),

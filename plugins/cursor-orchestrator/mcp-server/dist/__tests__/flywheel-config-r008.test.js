@@ -91,4 +91,47 @@ describe('R-008 — loadFlywheelConfigWithWarnings', () => {
         expect(config.convergence.gate_advance_wave).toBe(false);
     });
 });
+describe('impl_tick auto flags', () => {
+    let tmp;
+    const origAutoBatch = process.env.FW_AUTO_BATCH_REVIEW;
+    const origAutoLoop = process.env.FW_IMPL_TICK_AUTO_LOOP;
+    beforeEach(() => {
+        tmp = mkdtempSync(join(tmpdir(), 'flywheel-auto-flags-'));
+        delete process.env.FW_AUTO_BATCH_REVIEW;
+        delete process.env.FW_IMPL_TICK_AUTO_LOOP;
+    });
+    afterEach(() => {
+        rmSync(tmp, { recursive: true, force: true });
+        if (origAutoBatch !== undefined)
+            process.env.FW_AUTO_BATCH_REVIEW = origAutoBatch;
+        else
+            delete process.env.FW_AUTO_BATCH_REVIEW;
+        if (origAutoLoop !== undefined)
+            process.env.FW_IMPL_TICK_AUTO_LOOP = origAutoLoop;
+        else
+            delete process.env.FW_IMPL_TICK_AUTO_LOOP;
+    });
+    it('defaults auto_batch_review and auto_loop to true when unset', async () => {
+        const { areAutoBatchReviewEnabled, areAutoLoopEnabled } = await import('../flywheel-config.js');
+        expect(areAutoBatchReviewEnabled(tmp)).toBe(true);
+        expect(areAutoLoopEnabled(tmp)).toBe(true);
+    });
+    it('respects config auto_batch_review: false', async () => {
+        writeFileSync(join(tmp, 'flywheel.config.yaml'), 'impl_tick:\n  auto_batch_review: false\n');
+        const { areAutoBatchReviewEnabled } = await import('../flywheel-config.js');
+        expect(areAutoBatchReviewEnabled(tmp)).toBe(false);
+    });
+    it('FW_AUTO_BATCH_REVIEW env overrides config', async () => {
+        writeFileSync(join(tmp, 'flywheel.config.yaml'), 'impl_tick:\n  auto_batch_review: true\n');
+        process.env.FW_AUTO_BATCH_REVIEW = 'false';
+        const { areAutoBatchReviewEnabled } = await import('../flywheel-config.js');
+        expect(areAutoBatchReviewEnabled(tmp)).toBe(false);
+    });
+    it('final_on_drain defaults true and respects config false', async () => {
+        const { isFinalBatchReviewOnDrain } = await import('../flywheel-config.js');
+        expect(isFinalBatchReviewOnDrain(tmp)).toBe(true);
+        writeFileSync(join(tmp, 'flywheel.config.yaml'), 'impl_tick:\n  final_on_drain: false\n');
+        expect(isFinalBatchReviewOnDrain(tmp)).toBe(false);
+    });
+});
 //# sourceMappingURL=flywheel-config-r008.test.js.map

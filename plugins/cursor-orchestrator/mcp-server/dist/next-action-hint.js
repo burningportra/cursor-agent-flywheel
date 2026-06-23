@@ -38,13 +38,25 @@ function finalizeHint(text, primaryTool, generationEpoch, beadIds) {
 }
 /** Re-export config gate for hint consumers. */
 export { areNextActionHintsEnabled } from './flywheel-config.js';
-export function buildWaveCompleteHint(generationEpoch, beadIds) {
+export function buildWaveCompleteHint(generationEpoch, beadIds, opts) {
     const { count, beadIds: ids } = normalizeBeadIds(beadIds);
     const n = count || beadIds.length;
-    const text = n > 0
-        ? `Wave done (${n} beads). Run wave review gate, then spawn next wave or wrap up.`
-        : 'Wave done. Run wave review gate, then spawn next wave or wrap up.';
-    return finalizeHint(text, 'flywheel_wave_review_gate', generationEpoch, ids ?? beadIds);
+    const auto = opts?.autoBatchReview !== false;
+    const text = auto
+        ? n > 0
+            ? `Wave done (${n} beads). Batch fresh-eyes or wrap-up per commit count.`
+            : 'Wave done. Batch fresh-eyes or wrap-up per commit count.'
+        : n > 0
+            ? `Wave done (${n} beads). Run wave review gate, then spawn next wave or wrap up.`
+            : 'Wave done. Run wave review gate, then spawn next wave or wrap up.';
+    const primaryTool = auto ? 'flywheel_impl_tick' : 'flywheel_wave_review_gate';
+    return finalizeHint(text, primaryTool, generationEpoch, ids ?? beadIds);
+}
+export function buildQueueDrainedHint(generationEpoch, commitsSinceBaseline, batchThreshold) {
+    const text = commitsSinceBaseline > 0
+        ? `Queue drained (${commitsSinceBaseline} commits). Batch review or wrap-up next.`
+        : 'Queue drained. Call flywheel_wrap_up_gate.';
+    return finalizeHint(text, 'flywheel_wrap_up_gate', generationEpoch);
 }
 export function buildAdvanceWaveHint(generationEpoch, beadCount, beadIds) {
     const text = `Next wave ready (${beadCount} beads). Spawn impl Tasks from tick, stagger ~30s.`;
@@ -63,7 +75,9 @@ export function buildNextActionHint(kind, generationEpoch, opts) {
     const count = opts.beadCount ?? opts.beadIds?.length ?? 0;
     switch (kind) {
         case 'wave_complete':
-            return buildWaveCompleteHint(generationEpoch, opts.beadIds ?? []);
+            return buildWaveCompleteHint(generationEpoch, opts.beadIds ?? [], {
+                autoBatchReview: opts.autoBatchReview,
+            });
         case 'advance_wave':
             if (count <= 0)
                 return undefined;

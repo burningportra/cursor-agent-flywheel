@@ -15,7 +15,7 @@ When a flywheel command or `skills/start/SKILL.md` asks for a user decision:
 
 **After beads created:** `flywheel_bead_approval_gate` (`step: review` → `step: launch`) → **AskQuestion** → only then `flywheel_approve_beads` `action: start`. See `skills/start/_beads.cursor.md`.
 
-**After implement:** `flywheel_wave_review_gate` → **AskQuestion** → `flywheel_review`. **When queue empty:** `flywheel_wrap_up_gate` → **AskQuestion** → `_wrapup.md`.
+**After implement:** With default `auto_batch_review: true`, commit-batch fresh-eyes runs automatically every N commits — **no wave review AskQuestion** between waves. When queue empty: `flywheel_wrap_up_gate` → **AskQuestion** → `_wrapup.md`. Legacy (`auto_batch_review: false`) or `/recover-gates`: `flywheel_wave_review_gate` → **AskQuestion** → `flywheel_review`.
 
 **After `confirmAction` / `confirmWrapUp`:** check the response `kind`. If `wave_review_confirmed` (or the expected wrap-up kind) is absent, surface the error — do **not** retry the same payload blindly.
 

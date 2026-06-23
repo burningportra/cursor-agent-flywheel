@@ -36,7 +36,7 @@ describe('flywheel_confirm_impl_models commitBatchThreshold', () => {
     let dir;
     beforeEach(async () => {
         dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'confirm-impl-'));
-        await fs.promises.writeFile(path.join(dir, 'flywheel.config.yaml'), 'impl_tick:\n  commit_batch_threshold: 8\n');
+        await fs.promises.writeFile(path.join(dir, 'flywheel.config.yaml'), 'impl_tick:\n  commit_batch_threshold: 5\n  auto_batch_review: true\n  auto_loop: true\n');
     });
     afterEach(async () => {
         await fs.promises.rm(dir, { recursive: true, force: true });
@@ -46,8 +46,10 @@ describe('flywheel_confirm_impl_models commitBatchThreshold', () => {
         const ctx = makeCtx(dir, state);
         const result = await runConfirmImplModels(ctx, { cwd: dir });
         const data = result.structuredContent.data;
-        expect(data.commitBatchThreshold).toBe(8);
-        expect(result.content[0]?.text).toContain('every 8 commits');
+        expect(data.commitBatchThreshold).toBe(5);
+        expect(result.content[0]?.text).toContain('every 5 commits');
+        expect(result.content[0]?.text).toContain('automatic');
+        expect(result.content[0]?.text).toContain('/loop');
     });
     it('confirm persists explicit commitBatchThreshold', async () => {
         const state = baseState();
@@ -55,13 +57,14 @@ describe('flywheel_confirm_impl_models commitBatchThreshold', () => {
         const result = await runConfirmImplModels(ctx, {
             cwd: dir,
             confirmImplModels: 'defaults',
-            commitBatchThreshold: 5,
+            commitBatchThreshold: 8,
         });
         const data = result.structuredContent.data;
-        expect(state.commitBatchThreshold).toBe(5);
-        expect(data.commitBatchThreshold).toBe(5);
+        expect(state.commitBatchThreshold).toBe(8);
+        expect(data.commitBatchThreshold).toBe(8);
         expect(data.confirmed).toBe(true);
-        expect(result.content[0]?.text).toContain('threshold persisted: 5');
+        expect(result.content[0]?.text).toContain('threshold persisted: 8');
+        expect(result.content[0]?.text).toContain('/loop');
     });
     it('confirm auto-persists config default when commitBatchThreshold omitted', async () => {
         const state = baseState();
@@ -70,7 +73,7 @@ describe('flywheel_confirm_impl_models commitBatchThreshold', () => {
             cwd: dir,
             confirmImplModels: 'defaults',
         });
-        expect(state.commitBatchThreshold).toBe(8);
+        expect(state.commitBatchThreshold).toBe(5);
     });
 });
 //# sourceMappingURL=confirm-impl-models.test.js.map

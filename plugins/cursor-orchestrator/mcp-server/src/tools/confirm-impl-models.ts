@@ -14,6 +14,7 @@ import {
   resolveCursorCoordinationMode,
 } from '../coordination-mode.js';
 import { makeOkToolResult, makeToolError } from './shared.js';
+import { areAutoBatchReviewEnabled, areAutoLoopEnabled } from '../flywheel-config.js';
 
 export interface ConfirmImplModelsOutcome {
   implModels?: { simple: string; medium: string; complex: string };
@@ -65,6 +66,8 @@ export async function runConfirmImplModels(
   if (args.confirmImplModels === undefined) {
     const gate = buildImplModelsGate(cwd, readyForRecommend);
     const batchThreshold = resolveCommitBatchThreshold(cwd, state);
+    const autoBatchReview = areAutoBatchReviewEnabled(cwd);
+    const autoLoop = areAutoLoopEnabled(cwd);
     let agentMailReachable = true;
     if (!useNtmImplBackend()) {
       const probe = await resolveCursorCoordinationMode(exec, cwd, state);
@@ -88,10 +91,16 @@ export async function runConfirmImplModels(
           }
         : {}),
     };
-    const batchLine =
-      batchThreshold > 0
+    const batchLine = autoBatchReview
+      ? batchThreshold > 0
+        ? `Commit-batch fresh-eyes: **automatic** every ${batchThreshold} commits (sha-range thermo Task; no wave review menu).`
+        : 'Commit-batch fresh-eyes: OFF — set impl_tick.commit_batch_threshold in flywheel.config.yaml (recommended: 5).'
+      : batchThreshold > 0
         ? `Commit-batch fresh-eyes: every ${batchThreshold} commits (from config/env/checkpoint). Pass commitBatchThreshold on confirm to override.`
-        : 'Commit-batch fresh-eyes: OFF — pass commitBatchThreshold on confirm (e.g. 5 or 8) or set impl_tick.commit_batch_threshold in flywheel.config.yaml.';
+        : 'Commit-batch fresh-eyes: OFF — pass commitBatchThreshold on confirm (e.g. 5) or set impl_tick.commit_batch_threshold in flywheel.config.yaml.';
+    const loopLine = autoLoop
+      ? 'After first impl dispatch, **mandatory `/loop`** dynamic wake will re-call `flywheel_impl_tick` (~4 min default).'
+      : 'Optional: arm `/loop` via impl supervision menu after first dispatch.';
     const lines = [
       state.implModelsConfirmed
         ? 'Implement models already confirmed for this run.'
@@ -116,9 +125,12 @@ export async function runConfirmImplModels(
         : []),
       '',
       batchLine,
+      loopLine,
       '',
       'Present implModelsGate.options as numbered choices; wait for the user reply.',
-      'Then call flywheel_confirm_impl_models with confirmImplModels set ("recommended" if they accept option 1) and commitBatchThreshold when the user picks a batch-review cadence.',
+      autoBatchReview
+        ? 'Then call flywheel_confirm_impl_models with confirmImplModels set ("recommended" if they accept option 1). Threshold is persisted from config automatically.'
+        : 'Then call flywheel_confirm_impl_models with confirmImplModels set ("recommended" if they accept option 1) and commitBatchThreshold when the user picks a batch-review cadence.',
     ];
     return makeOkToolResult('flywheel_confirm_impl_models', state.phase, lines.join('\n'), outcome);
   }
@@ -183,8 +195,9 @@ export async function runConfirmImplModels(
 
   const batchConfirmLine =
     batchThreshold > 0
-      ? `Commit-batch fresh-eyes threshold persisted: ${batchThreshold} commits per review.`
+      ? `Commit-batch fresh-eyes threshold persisted: ${batchThreshold} commits per review (automatic dispatch).`
       : 'Commit-batch fresh-eyes: disabled (threshold 0).';
+  const autoLoop = areAutoLoopEnabled(cwd);
 
   return makeOkToolResult(
     'flywheel_confirm_impl_models',
@@ -195,10 +208,15 @@ export async function runConfirmImplModels(
       formatCursorImplModelTable(resolved),
       '',
       batchConfirmLine,
+      autoLoop
+        ? 'Arm `/loop` dynamic wake after first impl dispatch (~impl_tick.interval_seconds).'
+        : '',
       '',
       'Spawn parallel Cursor Task agents using spawnInstructions; each Task must set `model` per bead complexity.',
       'Re-call flywheel_impl_tick on ~interval_seconds cadence during implementation.',
-    ].join('\n'),
+    ]
+      .filter(Boolean)
+      .join('\n'),
     outcome,
   );
 }

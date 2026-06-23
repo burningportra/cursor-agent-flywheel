@@ -44,7 +44,7 @@ describe('flywheel_confirm_impl_models commitBatchThreshold', () => {
     dir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'confirm-impl-'));
     await fs.promises.writeFile(
       path.join(dir, 'flywheel.config.yaml'),
-      'impl_tick:\n  commit_batch_threshold: 8\n',
+      'impl_tick:\n  commit_batch_threshold: 5\n  auto_batch_review: true\n  auto_loop: true\n',
     );
   });
 
@@ -57,8 +57,10 @@ describe('flywheel_confirm_impl_models commitBatchThreshold', () => {
     const ctx = makeCtx(dir, state);
     const result = await runConfirmImplModels(ctx, { cwd: dir });
     const data = (result.structuredContent as { data: Record<string, unknown> }).data;
-    expect(data.commitBatchThreshold).toBe(8);
-    expect(result.content[0]?.text).toContain('every 8 commits');
+    expect(data.commitBatchThreshold).toBe(5);
+    expect(result.content[0]?.text).toContain('every 5 commits');
+    expect(result.content[0]?.text).toContain('automatic');
+    expect(result.content[0]?.text).toContain('/loop');
   });
 
   it('confirm persists explicit commitBatchThreshold', async () => {
@@ -67,13 +69,14 @@ describe('flywheel_confirm_impl_models commitBatchThreshold', () => {
     const result = await runConfirmImplModels(ctx, {
       cwd: dir,
       confirmImplModels: 'defaults',
-      commitBatchThreshold: 5,
+      commitBatchThreshold: 8,
     });
     const data = (result.structuredContent as { data: Record<string, unknown> }).data;
-    expect(state.commitBatchThreshold).toBe(5);
-    expect(data.commitBatchThreshold).toBe(5);
+    expect(state.commitBatchThreshold).toBe(8);
+    expect(data.commitBatchThreshold).toBe(8);
     expect(data.confirmed).toBe(true);
-    expect(result.content[0]?.text).toContain('threshold persisted: 5');
+    expect(result.content[0]?.text).toContain('threshold persisted: 8');
+    expect(result.content[0]?.text).toContain('/loop');
   });
 
   it('confirm auto-persists config default when commitBatchThreshold omitted', async () => {
@@ -83,6 +86,6 @@ describe('flywheel_confirm_impl_models commitBatchThreshold', () => {
       cwd: dir,
       confirmImplModels: 'defaults',
     });
-    expect(state.commitBatchThreshold).toBe(8);
+    expect(state.commitBatchThreshold).toBe(5);
   });
 });

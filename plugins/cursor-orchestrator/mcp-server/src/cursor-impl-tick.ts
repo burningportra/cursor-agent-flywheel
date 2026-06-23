@@ -43,8 +43,8 @@ import {
 import { classifyBeadComplexity } from './model-routing.js';
 import { getCoordinatorEpoch, persistCoordinatorEpochBump } from './coordinator-epoch.js';
 import { THERMO_SUBAGENT_TYPE } from './combined-review-prompt.js';
-import { areEpochGuardsEnabled, areNextActionHintsEnabled, loadFlywheelConfigWithWarnings, resolveThermoNuclearModel } from './flywheel-config.js';
-import { buildNextActionHint } from './next-action-hint.js';
+import { areEpochGuardsEnabled, areNextActionHintsEnabled, areAutoBatchReviewEnabled, areAutoLoopEnabled, loadFlywheelConfigWithWarnings, resolveThermoNuclearModel } from './flywheel-config.js';
+import { buildNextActionHint, buildQueueDrainedHint } from './next-action-hint.js';
 import { probeProfileStale } from './profile-staleness.js';
 import { scheduleProfileAutoRefresh } from './tools/profile.js';
 import type { AdvanceWaveOutcome, AdvanceWavePrompt } from './tools/advance-wave.js';
@@ -90,6 +90,7 @@ export type ImplTickKind =
   | 'advance_wave'
   | 'dispatch_impl_tasks'
   | 'wave_complete'
+  | 'wrap_up_ready'
   | 'stale';
 
 export interface ImplTickStructured {
@@ -172,28 +173,61 @@ export function resolveImplTickConfig(cwd: string): ImplTickConfig {
   return { intervalSeconds, reviewModel, maxParallelImpl };
 }
 
-export function buildImplTickCoordinatorPlaybook(cfg: ImplTickConfig): string {
+export function buildImplTickCoordinatorPlaybook(
+  cfg: ImplTickConfig,
+  opts?: { autoBatchReview?: boolean; autoLoop?: boolean },
+): string {
+  const autoBatch = opts?.autoBatchReview ?? true;
+  const autoLoop = opts?.autoLoop ?? true;
+  const loopMins = Math.max(1, Math.round(cfg.intervalSeconds / 60));
+
+  const batchDispatchRule = autoBatch
+    ? '   - `batch_review_dispatch` → epoch check → spawn **one** combined fresh-eyes + thermo-nuclear Task with `data.batchReviewTask` immediately (no menu), then re-call `flywheel_impl_tick`.'
+    : '   - `batch_review_dispatch` → epoch check → spawn **one** combined fresh-eyes + thermo-nuclear Task with `data.batchReviewTask` (`subagent_type: thermo-nuclear-code-quality-review`), then tick again (verdict file).';
+
+  const waveEndRule = autoBatch
+    ? '   - `wrap_up_ready` → `flywheel_wrap_up_gate({ cwd })` → **AskQuestion** → wrap-up skill.'
+    : '   - `wave_complete` → read `nextActionHint` if present → `flywheel_wave_review_gate` → **AskQuestion** → `flywheel_review`.';
+
+  const monitorRule = autoBatch
+    ? '   - `monitor` | `batch_review_in_progress` → **AskQuestion** with `data.askQuestion` (impl supervision menu); map via `data.actions`.'
+    : '   - `monitor` | `batch_review_in_progress` | `batch_review_dispatch` → **AskQuestion** with `data.askQuestion` (impl supervision menu); map via `data.actions`.';
+
+  const loopRule = autoLoop
+    ? [
+        '',
+        `**Mandatory /loop:** After the first \`dispatch_impl_tasks\` or \`advance_wave\` spawn, arm dynamic wake (~${loopMins}m) with prompt \`flywheel_impl_tick({ cwd, closedBeadIds? })\` per the loop skill. Re-arm after each wake until implement phase ends.`,
+      ]
+    : [
+        '',
+        'Arm `/loop` dynamic wake when the user picks impl-supervision-loop.',
+      ];
+
   return [
     '## Cursor impl supervision loop (flywheel_impl_tick)',
     '',
-    `1. After dispatching a wave, end the turn with: "Re-call \`flywheel_impl_tick({ cwd })\` in ~${cfg.intervalSeconds}s (~${Math.round(cfg.intervalSeconds / 60)} min)."`,
+    `1. After dispatching a wave, end the turn with: "Re-call \`flywheel_impl_tick({ cwd })\` in ~${cfg.intervalSeconds}s (~${loopMins} min)."`,
     '2. Each tick: pass `closedBeadIds` for beads that finished since the last tick.',
     '2b. **Epoch check (before any Task spawn):** Read `data.epoch` from the tick response. Confirm it matches checkpoint `coordinatorEpoch` (`flywheel_observe` or same-session state). If `kind: stale` or epochs differ, discard `implTasks` / `batchReviewTask` and re-call `flywheel_impl_tick` — do not spawn.',
     '3. **Scan:** Prefer one line from `data.nextActionHint.text` in chat when present. Hints are **advisory** — follow `data.kind`, gate MCP tools, and `nextStep` for control flow; never skip mandatory gates because a hint exists. When both hint and structured fields exist, verify `nextActionHint.generationEpoch === data.epoch` before acting on the hint.',
     '4. Branch on `data.kind`:',
-    '   - `batch_review_dispatch` → epoch check → spawn **one** combined fresh-eyes + thermo-nuclear Task with `data.batchReviewTask` (`subagent_type: thermo-nuclear-code-quality-review`), then tick again (verdict file).',
+    batchDispatchRule,
     '   - `batch_review_in_progress` → wait; do not start another review.',
     '   - `batch_review_collect_verdict` → verdict on disk; tick again (auto-reads via review).',
     '   - `batch_review_verdict` → present `data.askQuestion`; merge synthesized beads into the wave.',
     '   - `advance_wave` → epoch check → spawn `data.implTasks` (stagger ~30s).',
     '   - `dispatch_impl_tasks` → epoch check → first wave or idle capacity; spawn tasks.',
-    '   - `wave_complete` → read `nextActionHint` if present → `flywheel_wave_review_gate` → **AskQuestion** → `flywheel_review`.',
+    waveEndRule,
     '   - `stale` → epoch mismatch or user steered mid-tick; re-call `flywheel_impl_tick` immediately (do not spawn).',
-    '   - `monitor` | `batch_review_in_progress` | `batch_review_dispatch` → **AskQuestion** with `data.askQuestion` (impl supervision menu); map via `data.actions`.',
-    '   - `wave_complete` → **AskQuestion** is inlined wave review gate (`data.gateMeta.kind === wave_review`); confirm via `flywheel_wave_review_gate`.',
+    monitorRule,
+    ...(autoBatch
+      ? []
+      : [
+          '   - `wave_complete` → **AskQuestion** is inlined wave review gate (`data.gateMeta.kind === wave_review`); confirm via `flywheel_wave_review_gate`.',
+        ]),
     '',
     '**Hard rule:** While impl agents run, every tick ends with AskQuestion — never free-text "waiting" or ad-hoc commit prompts.',
-    'Arm `/loop` dynamic wake when the user picks impl-supervision-loop.',
+    ...loopRule,
     '',
     'Do not echo full `coordinatorPlaybook`, `implTasks[].prompt`, or gate JSON into chat.',
     'Do not use codex/claude CLI for batch review in the Cursor port.',
@@ -234,7 +268,7 @@ function maybeAttachNextActionHint(
   kind: ImplTickKind,
   generationEpoch: number,
   state: FlywheelState,
-  opts: { beadIds?: string[]; beadCount?: number },
+  opts: { beadIds?: string[]; beadCount?: number; autoBatchReview?: boolean },
 ): CoordinatorNextActionHint | undefined {
   if (!areNextActionHintsEnabled(cwd)) return undefined;
   if (
@@ -370,6 +404,8 @@ export async function runImplTickCore(
   const epochGuards = areEpochGuardsEnabled(cwd);
   const cfg = resolveImplTickConfig(cwd);
   const thermoReviewModel = resolveThermoNuclearModel(cwd);
+  const autoBatchReview = areAutoBatchReviewEnabled(cwd);
+  const autoLoop = areAutoLoopEnabled(cwd);
   const { config } = loadFlywheelConfigWithWarnings(cwd);
   scheduleProfileAutoRefresh(ctx, config.profile);
   const tickAt = new Date().toISOString();
@@ -428,7 +464,7 @@ export async function runImplTickCore(
     profileStale,
   };
 
-  const playbook = buildImplTickCoordinatorPlaybook(cfg);
+  const playbook = buildImplTickCoordinatorPlaybook(cfg, { autoBatchReview, autoLoop });
 
   // ── In-flight batch review ──
   const pendingRange = state.pendingBatchReviewRange;
@@ -510,24 +546,29 @@ export async function runImplTickCore(
     const nextState = markBatchReviewDispatched(state, headSha, shaRange);
     await saveState(nextState);
 
-    const dispatchGate = attachGateFields(
-      supervisionSnapshot(
-        { ...baseSnapshot, pendingBatchReviewRange: shaRange },
-        cfg,
-        'batch_review_dispatch',
-      ),
-    );
     const dispatchReason = batchReviewForced
       ? `Batch review forced (${commitsSinceBaseline} commit(s) since baseline).`
       : `Commit-batch threshold crossed (${commitsSinceBaseline} ≥ ${threshold}).`;
+    const dispatchLines = [
+      dispatchReason,
+      autoBatchReview
+        ? 'Spawn combined fresh-eyes + thermo-nuclear Task immediately, then re-call flywheel_impl_tick.'
+        : `Dispatch combined fresh-eyes + thermo-nuclear Task over ${shaRange}, then call flywheel_impl_tick again.`,
+    ];
+    const dispatchGate = autoBatchReview
+      ? {}
+      : attachGateFields(
+          supervisionSnapshot(
+            { ...baseSnapshot, pendingBatchReviewRange: shaRange },
+            cfg,
+            'batch_review_dispatch',
+          ),
+        );
     return buildTickResult(
       epochAtTickStart,
       state,
       epochGuards,
-      [
-        dispatchReason,
-        `Dispatch combined fresh-eyes + thermo-nuclear Task over ${shaRange}, then call flywheel_impl_tick again.`,
-      ].join('\n'),
+      dispatchLines.join('\n'),
       {
         kind: 'batch_review_dispatch',
         tickAt,
@@ -569,18 +610,26 @@ export async function runImplTickCore(
       const dispatch = await prepareBatchReviewDispatch(ctx, shaRange, reviewSha);
       const nextState = markBatchReviewDispatched(state, reviewSha, shaRange);
       await saveState(nextState);
-      const verifyDispatchGate = attachGateFields(
-        supervisionSnapshot(
-          { ...baseSnapshot, pendingBatchReviewRange: shaRange },
-          cfg,
-          'batch_review_dispatch',
-        ),
-      );
+      const verifyDispatchGate = autoBatchReview
+        ? {}
+        : attachGateFields(
+            supervisionSnapshot(
+              { ...baseSnapshot, pendingBatchReviewRange: shaRange },
+              cfg,
+              'batch_review_dispatch',
+            ),
+          );
+      const verifyText = autoBatchReview
+        ? [
+            waveResult.content[0]?.text ?? 'Batch review due after wave verify.',
+            'Spawn combined fresh-eyes + thermo-nuclear Task immediately, then re-call flywheel_impl_tick.',
+          ].join('\n')
+        : waveResult.content[0]?.text ?? 'Batch review due after wave verify.';
       return buildTickResult(
         epochAtTickStart,
         state,
         epochGuards,
-        waveResult.content[0]?.text ?? 'Batch review due after wave verify.',
+        verifyText,
         {
           kind: 'batch_review_dispatch',
           tickAt,
@@ -601,7 +650,35 @@ export async function runImplTickCore(
       );
     }
 
-    if (outcome?.waveComplete && outcome.nextStep?.kind === 'wave_review_gate') {
+    if (outcome?.waveComplete && outcome.nextStep?.kind === 'wrap_up_gate') {
+      return buildTickResult(
+        epochAtTickStart,
+        state,
+        epochGuards,
+        waveResult.content[0]?.text ?? 'Queue drained — call flywheel_wrap_up_gate.',
+        {
+          kind: 'wrap_up_ready',
+          tickAt,
+          nextTickInSeconds: cfg.intervalSeconds,
+          snapshot: baseSnapshot,
+          coordinatorPlaybook: playbook,
+          advanceWave: outcome,
+          nextActionHint: areNextActionHintsEnabled(cwd)
+            ? buildQueueDrainedHint(
+                epochAtTickStart,
+                baseSnapshot.commitsSinceBaseline,
+                threshold,
+              )
+            : undefined,
+        },
+      );
+    }
+
+    if (
+      !autoBatchReview
+      && outcome?.waveComplete
+      && outcome.nextStep?.kind === 'wave_review_gate'
+    ) {
       const waveBeadIds = outcome.nextStep.beadIds;
       const waveBeads = beadsForWaveReview(beads, waveBeadIds);
       const waveGate = toCompactGatePayload(buildWaveReviewGate(waveBeads, state));
@@ -623,6 +700,7 @@ export async function runImplTickCore(
           actions: waveGate.actions,
           nextActionHint: maybeAttachNextActionHint(cwd, 'wave_complete', epochAtTickStart, state, {
             beadIds: waveBeadIds,
+            autoBatchReview: false,
           }),
         },
       );

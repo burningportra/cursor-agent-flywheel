@@ -46,7 +46,15 @@ const KNOWN_KEYS = {
     implement: ['simple', 'medium', 'complex'],
     duel: ['wizard_a', 'wizard_b', 'wizard_c', 'synthesis'],
     grader: ['model'],
-    impl_tick: ['interval_seconds', 'review_model', 'max_parallel_impl', 'commit_batch_threshold'],
+    impl_tick: [
+        'interval_seconds',
+        'review_model',
+        'max_parallel_impl',
+        'commit_batch_threshold',
+        'auto_loop',
+        'auto_batch_review',
+        'final_on_drain',
+    ],
     coordinator: ['epochGuards', 'nextActionHints'],
     profile: ['watchIntentFiles', 'staleAction', 'debounceSeconds'],
     review: ['thermo_nuclear_model'],
@@ -348,12 +356,24 @@ export function loadFlywheelConfigWithWarnings(cwd) {
             && t.commit_batch_threshold >= 0
             ? t.commit_batch_threshold
             : undefined;
-        if (interval_seconds || review_model || max_parallel_impl || commit_batch_threshold !== undefined) {
+        const auto_loop = typeof t.auto_loop === 'boolean' ? t.auto_loop : undefined;
+        const auto_batch_review = typeof t.auto_batch_review === 'boolean' ? t.auto_batch_review : undefined;
+        const final_on_drain = typeof t.final_on_drain === 'boolean' ? t.final_on_drain : undefined;
+        if (interval_seconds
+            || review_model
+            || max_parallel_impl
+            || commit_batch_threshold !== undefined
+            || auto_loop !== undefined
+            || auto_batch_review !== undefined
+            || final_on_drain !== undefined) {
             impl_tick = {
                 ...(interval_seconds ? { interval_seconds } : {}),
                 ...(review_model ? { review_model } : {}),
                 ...(max_parallel_impl ? { max_parallel_impl } : {}),
                 ...(commit_batch_threshold !== undefined ? { commit_batch_threshold } : {}),
+                ...(auto_loop !== undefined ? { auto_loop } : {}),
+                ...(auto_batch_review !== undefined ? { auto_batch_review } : {}),
+                ...(final_on_drain !== undefined ? { final_on_drain } : {}),
             };
         }
     }
@@ -484,6 +504,33 @@ export function areEpochGuardsEnabled(cwd) {
 export function areNextActionHintsEnabled(cwd) {
     const { config } = loadFlywheelConfigWithWarnings(cwd);
     return config.coordinator?.nextActionHints !== false;
+}
+function parseEnvBool(raw, defaultValue) {
+    if (raw === undefined || raw === '')
+        return defaultValue;
+    const lc = raw.trim().toLowerCase();
+    if (lc === 'false' || lc === '0' || lc === 'off')
+        return false;
+    if (lc === 'true' || lc === '1' || lc === 'on')
+        return true;
+    return defaultValue;
+}
+/** When true (default), commit-batch fresh-eyes runs automatically at wave boundaries. */
+export function areAutoBatchReviewEnabled(cwd) {
+    return parseEnvBool(process.env.FW_AUTO_BATCH_REVIEW, readImplTickBool(cwd, 'auto_batch_review', true));
+}
+/** When true (default), coordinator arms `/loop` on first impl dispatch. */
+export function areAutoLoopEnabled(cwd) {
+    return parseEnvBool(process.env.FW_IMPL_TICK_AUTO_LOOP, readImplTickBool(cwd, 'auto_loop', true));
+}
+/** When queue drains with unpushed commits below threshold, run final batch review (default true). */
+export function isFinalBatchReviewOnDrain(cwd) {
+    return readImplTickBool(cwd, 'final_on_drain', true);
+}
+function readImplTickBool(cwd, key, defaultValue) {
+    const { config } = loadFlywheelConfigWithWarnings(cwd);
+    const value = config.impl_tick?.[key];
+    return typeof value === 'boolean' ? value : defaultValue;
 }
 /** Config/env coordination mode hint (Cursor swarm always uses single-branch when Agent Mail is up). */
 export function readCoordinationModeConfig(cwd) {

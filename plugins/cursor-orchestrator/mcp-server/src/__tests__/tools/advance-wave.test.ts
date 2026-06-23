@@ -207,7 +207,7 @@ describe('runAdvanceWave', () => {
     expect(result.content[0].text).toContain('Wave incomplete');
   });
 
-  it('returns nextWave=null when queue is drained', async () => {
+  it('returns nextWave=null when queue is drained (auto batch → wrap_up_gate)', async () => {
     const { ctx } = makeCtx({}, [
       brShowClosed('done-1'),
       brShowClosed('done-2'),
@@ -221,17 +221,47 @@ describe('runAdvanceWave', () => {
     expect(data.waveComplete).toBe(true);
     expect(data.nextWave).toBeNull();
     expect(data.verification.verified).toEqual(['done-1', 'done-2']);
-    expect(data.nextStep).toEqual({
-      kind: 'wave_review_gate',
-      beadIds: ['done-1', 'done-2'],
-    });
+    expect(data.nextStep).toEqual({ kind: 'wrap_up_gate' });
     expect(result.content[0].text).toContain('Queue drained');
-    expect(result.content[0].text).toContain('flywheel_wave_review_gate');
+    expect(result.content[0].text).toContain('flywheel_wrap_up_gate');
     expect(data.nextActionHint).toBeDefined();
-    expect(data.nextActionHint.primaryTool).toBe('flywheel_wave_review_gate');
-    expect(data.nextActionHint.beadIds).toEqual(['done-1', 'done-2']);
+    expect(data.nextActionHint.primaryTool).toBe('flywheel_wrap_up_gate');
     expect(data.nextActionHint.generationEpoch).toBe(ctx.state.coordinatorEpoch);
     expect(data.nextActionHint.text.length).toBeLessThanOrEqual(160);
+  });
+
+  it('returns wave_review_gate when queue drained and auto_batch_review disabled', async () => {
+    const tmp = await mkdtemp(path.join(tmpdir(), 'advance-wave-legacy-'));
+    try {
+      await import('node:fs/promises').then((fs) =>
+        fs.writeFile(
+          path.join(tmp, 'flywheel.config.yaml'),
+          'impl_tick:\n  auto_batch_review: false\n',
+        ),
+      );
+      const { ctx } = makeCtx({}, [
+        brShowClosed('done-1'),
+        brShowClosed('done-2'),
+        brReadyCall([]),
+      ]);
+      ctx.cwd = tmp;
+
+      const result = await runAdvanceWave(ctx, {
+        cwd: tmp,
+        closedBeadIds: ['done-1', 'done-2'],
+      });
+
+      const data = (result.structuredContent as any).data;
+      expect(data.waveComplete).toBe(true);
+      expect(data.nextStep).toEqual({
+        kind: 'wave_review_gate',
+        beadIds: ['done-1', 'done-2'],
+      });
+      expect(result.content[0].text).toContain('flywheel_wave_review_gate');
+      expect(data.nextActionHint.primaryTool).toBe('flywheel_wave_review_gate');
+    } finally {
+      await rm(tmp, { recursive: true, force: true });
+    }
   });
 
   it('returns implModelsGate before first dispatch when models not confirmed', async () => {

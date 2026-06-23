@@ -2,16 +2,26 @@ import { describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { HINT_MAX_CHARS, buildAdvanceWaveHint, buildDispatchImplTasksHint, buildNextActionHint, buildWaveCompleteHint, } from '../next-action-hint.js';
+import { HINT_MAX_CHARS, buildAdvanceWaveHint, buildDispatchImplTasksHint, buildNextActionHint, buildQueueDrainedHint, buildWaveCompleteHint, } from '../next-action-hint.js';
 import { areNextActionHintsEnabled } from '../flywheel-config.js';
 describe('next-action-hint', () => {
-    it('buildWaveCompleteHint includes bead count and gate tool', () => {
+    it('buildWaveCompleteHint includes bead count and gate tool (auto batch default)', () => {
         const hint = buildWaveCompleteHint(3, ['a-1', 'a-2', 'a-3']);
-        expect(hint.primaryTool).toBe('flywheel_wave_review_gate');
+        expect(hint.primaryTool).toBe('flywheel_impl_tick');
         expect(hint.generationEpoch).toBe(3);
         expect(hint.beadIds).toEqual(['a-1', 'a-2', 'a-3']);
         expect(hint.text).toContain('3 beads');
         expect(hint.text.length).toBeLessThanOrEqual(HINT_MAX_CHARS);
+    });
+    it('buildWaveCompleteHint uses wave review gate when legacy auto batch off', () => {
+        const hint = buildWaveCompleteHint(2, ['b-1'], { autoBatchReview: false });
+        expect(hint.primaryTool).toBe('flywheel_wave_review_gate');
+        expect(hint.text).toContain('wave review');
+    });
+    it('buildQueueDrainedHint points to wrap_up_gate', () => {
+        const hint = buildQueueDrainedHint(4, 0, 5);
+        expect(hint.primaryTool).toBe('flywheel_wrap_up_gate');
+        expect(hint.generationEpoch).toBe(4);
     });
     it('generationEpoch matches passed epoch', () => {
         const hint = buildAdvanceWaveHint(7, 2, ['b-1', 'b-2']);

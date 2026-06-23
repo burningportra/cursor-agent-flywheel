@@ -8,6 +8,8 @@ argument-hint: "[bead-id ...] [--wrap-up-only] [--review-only] [--gates-only]"
 
 **Use when** implement finished but the session skipped Step 8 review, jumped to ad-hoc commit prompts, or you need to re-open the wrap-up menu.
 
+**Note:** With default `impl_tick.auto_batch_review: true`, inter-wave review is commit-batch fresh-eyes (every N commits) — not the per-wave `flywheel_wave_review_gate` menu. Use `--review-only` for manual wave review when legacy mode is on or to recover a skipped review.
+
 **First action:** Parse `$ARGUMENTS`:
 - Positional tokens matching bead ids (e.g. `tb-12`, `agent-flywheel-plugin-abc`) → use as the wave's `beadIds`.
 - `--wrap-up-only` → skip wave review; call `flywheel_wrap_up_gate` only.

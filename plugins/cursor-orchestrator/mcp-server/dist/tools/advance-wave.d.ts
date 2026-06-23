@@ -82,6 +82,8 @@ export interface AdvanceWaveOutcome {
         kind: 'wave_review_gate';
         /** Beads that just closed in the wave being advanced. */
         beadIds: string[];
+    } | {
+        kind: 'wrap_up_gate';
     };
     /** Advisory one-line coordinator nudge when queue drains (template v1). */
     nextActionHint?: CoordinatorNextActionHint;

@@ -290,7 +290,12 @@ describe('runImplTickCore epoch guards', () => {
     expect(structured.data.implTasks?.length).toBe(1);
   });
 
-  it('wave_complete includes nextActionHint with beadIds and matching epoch', async () => {
+  it('wave_complete includes nextActionHint with beadIds and matching epoch (legacy auto batch off)', async () => {
+    await fs.promises.writeFile(
+      path.join(dir, 'flywheel.config.yaml'),
+      'impl_tick:\n  auto_batch_review: false\n',
+    );
+
     vi.spyOn(await import('../tools/advance-wave.js'), 'runAdvanceWave').mockResolvedValue({
       content: [{ type: 'text', text: 'Queue drained — wave review gate.' }],
       structuredContent: {
@@ -324,6 +329,79 @@ describe('runImplTickCore epoch guards', () => {
     expect(structured.data.nextActionHint!.generationEpoch).toBe(5);
     expect(structured.data.nextActionHint!.beadIds).toEqual(['bead-a', 'bead-b']);
     expect(structured.data.nextActionHint!.primaryTool).toBe('flywheel_wave_review_gate');
+  });
+
+  it('wrap_up_ready when queue drained with auto batch review', async () => {
+    vi.spyOn(await import('../tools/advance-wave.js'), 'runAdvanceWave').mockResolvedValue({
+      content: [{ type: 'text', text: 'Queue drained — wrap up.' }],
+      structuredContent: {
+        data: {
+          waveComplete: true,
+          nextStep: { kind: 'wrap_up_gate' },
+        },
+      },
+    } as Awaited<ReturnType<typeof import('../tools/advance-wave.js').runAdvanceWave>>);
+
+    const ctx = makeCtx(
+      dir,
+      baseState({
+        coordinatorEpoch: 3,
+        implModelsConfirmed: true,
+        commitBatchThreshold: 0,
+      }),
+    );
+
+    const { structured } = await runImplTickCore(ctx, {
+      cwd: dir,
+      closedBeadIds: ['bead-done'],
+    });
+
+    expect(structured.data.kind).toBe('wrap_up_ready');
+    expect(structured.data.askQuestion).toBeUndefined();
+    expect(structured.data.gateMeta).toBeUndefined();
+  });
+
+  it('batch_review_dispatch omits supervision AskQuestion when auto batch review on', async () => {
+    vi.spyOn(
+      await import('../commit-batch.js'),
+      'countCommitsSinceLastBatchReview',
+    ).mockResolvedValue(5);
+
+    const ctx = makeCtx(
+      dir,
+      baseState({
+        coordinatorEpoch: 2,
+        implModelsConfirmed: true,
+        commitBatchThreshold: 5,
+      }),
+    );
+
+    const { structured } = await runImplTickCore(ctx, { cwd: dir });
+
+    expect(structured.data.kind).toBe('batch_review_dispatch');
+    expect(structured.data.batchReviewTask).toBeDefined();
+    expect(structured.data.askQuestion).toBeUndefined();
+    expect(structured.data.gateMeta).toBeUndefined();
+  });
+
+  it('playbook mentions mandatory /loop when auto_loop enabled', async () => {
+    await fs.promises.writeFile(
+      path.join(dir, 'flywheel.config.yaml'),
+      'impl_tick:\n  auto_loop: true\n  auto_batch_review: true\n',
+    );
+
+    const ctx = makeCtx(
+      dir,
+      baseState({
+        coordinatorEpoch: 1,
+        implModelsConfirmed: true,
+        commitBatchThreshold: 0,
+      }),
+    );
+
+    const { structured } = await runImplTickCore(ctx, { cwd: dir });
+    expect(structured.data.coordinatorPlaybook).toContain('/loop');
+    expect(structured.data.coordinatorPlaybook).toContain('mandatory');
   });
 
   it('stale tick omits nextActionHint even when payload had one', () => {

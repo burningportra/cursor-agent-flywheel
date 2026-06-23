@@ -21,7 +21,7 @@ export interface ImplTickArgs {
     /** Trigger commit-batch fresh-eyes review even when below threshold (requires commits since baseline > 0). */
     forceBatchReview?: boolean;
 }
-export type ImplTickKind = 'monitor' | 'batch_review_in_progress' | 'batch_review_dispatch' | 'batch_review_collect_verdict' | 'batch_review_verdict' | 'advance_wave' | 'dispatch_impl_tasks' | 'wave_complete' | 'stale';
+export type ImplTickKind = 'monitor' | 'batch_review_in_progress' | 'batch_review_dispatch' | 'batch_review_collect_verdict' | 'batch_review_verdict' | 'advance_wave' | 'dispatch_impl_tasks' | 'wave_complete' | 'wrap_up_ready' | 'stale';
 export interface ImplTickStructured {
     tool: 'flywheel_impl_tick';
     version: 1;
@@ -71,7 +71,10 @@ export interface ImplTickStructured {
     };
 }
 export declare function resolveImplTickConfig(cwd: string): ImplTickConfig;
-export declare function buildImplTickCoordinatorPlaybook(cfg: ImplTickConfig): string;
+export declare function buildImplTickCoordinatorPlaybook(cfg: ImplTickConfig, opts?: {
+    autoBatchReview?: boolean;
+    autoLoop?: boolean;
+}): string;
 type ImplTickData = ImplTickStructured['data'];
 type ImplTickDataInput = Omit<ImplTickData, 'epoch'>;
 /**

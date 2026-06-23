@@ -21,6 +21,9 @@ implement:
 impl_tick:
   interval_seconds: 240
   commit_batch_threshold: 5
+  auto_loop: true
+  auto_batch_review: true
+  final_on_drain: true
 
 # Cursor dueling idea wizards: one model per wizard + synthesis Task.
 duel:
