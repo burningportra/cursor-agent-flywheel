@@ -1,7 +1,8 @@
 {
   "schemaVersion": 1,
-  "generated": "2026-04-22T02:06:17.761Z",
+  "generated": "2026-07-16T13:57:04.000Z",
   "skills": [
+    "_template",
     "brainstorming",
     "caam",
     "cass",
@@ -11,10 +12,14 @@
     "dsr",
     "flywheel-audit",
     "flywheel-cleanup",
+    "flywheel-compound-refresh",
     "flywheel-doctor",
     "flywheel-drift-check",
+    "flywheel-duel",
     "flywheel-fix",
     "flywheel-healthcheck",
+    "flywheel-mine-patterns",
+    "flywheel-reality-check",
     "flywheel-refine-skill",
     "flywheel-refine-skills",
     "flywheel-research",
@@ -29,13 +34,16 @@
     "flywheel-tool-feedback",
     "frontend-design",
     "gdb-for-debugging",
+    "grill-with-docs",
     "idea-wizard",
     "memory",
     "multi-model-triangulation",
     "slb",
     "start",
+    "thermo-nuclear-code-quality-review",
     "ubs-workflow",
     "ui-polish",
-    "ui-ux-polish"
+    "ui-ux-polish",
+    "visual-prototype"
   ]
 }

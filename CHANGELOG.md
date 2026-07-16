@@ -34,6 +34,12 @@ There are **no git tags** and **no GitHub Releases** in this repository yet.
 
 ---
 
+## [3.22.1] - 2026-07-16
+
+### Added
+
+- Port **grill-with-docs** goal framing from agent-flywheel-plugin into cursor-orchestrator.
+
 ## [Unreleased]
 
 _No pending release items._

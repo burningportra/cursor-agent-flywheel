@@ -34,6 +34,8 @@ Call `flywheel_convergence({ planSlug })` when available; append score to questi
 | set-goal | Set a goal |
 | rescan | Re-scan (force: true) |
 
+**set-goal:** capture goal (Other if needed) → **Goal framing mode** from `_ceremony.md` (skip only when concrete ≤300 chars) → same turn `flywheel_select` → planning.
+
 ## Step 3: Discover
 
 CASS search for past goals (advisory). **AskQuestion** depth:
@@ -48,10 +50,10 @@ Triangulated (Codex/Gemini/Grok): optional disk skill `/multi-model-triangulatio
 
 `flywheel_discover` or Explore fallback → top ideas → **AskQuestion** goal pick (≤4 ideas + custom in Other).
 
-Custom goal in Other → `/brainstorming` → **AskQuestion** scope (Full flywheel / Plan only / Quick fix).
+Custom goal in Other → **Goal framing mode** (Grill recommended when ambiguous/architectural; Light/Skip when concrete) → **AskQuestion** scope (Full flywheel / Plan only / Quick fix).
 
 ## Step 4: Select goal
 
-`flywheel_select({ cwd, goal })`.
+`flywheel_select({ cwd, goal })` with enriched goal when framing ran.
 
-**Stay-in-turn:** after brainstorming, same turn: select → load `_planning.cursor.md` (or `_planning.md` if NTM) → Step 5 gates — do not end turn on "Ready to plan?" prose.
+**Stay-in-turn:** after Goal framing / brainstorming / grill-with-docs returns approved, same turn: select → load `_planning.cursor.md` (or `_planning.md` if NTM) → Step 4.5 (or skip per §4.5a) → Step 5 gates — do not end turn on "Ready to plan?" prose.

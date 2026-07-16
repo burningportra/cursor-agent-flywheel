@@ -7,7 +7,7 @@ description: "Cursor Steps 4.5–5.6: deep plan Task trinity, duel gate, standar
 
 ## Step 4.5 — Brainstorm pressure-test
 
-Skip when discover confidence ≥ 0.8 or detailed `USER_INPUT` (>100 chars). Else three **AskQuestion** rounds (smallest / 10x / adjacents) → write `docs/brainstorms/<slug>-<date>.md`.
+Skip when **any** of: discover confidence ≥ 0.8; detailed `USER_INPUT` (>100 chars); **grill-complete brainstorm** on disk with `## Framing synthesis` + floor (`## Scope floor` or `## Smallest version`) + ceiling (`## Ambition ceiling` or `## 10x version`); or `FRAMING_MODE=grill` + `GRILL_STATUS=approved`. Emit a one-line skip reason. Else three **AskQuestion** rounds (smallest / 10x / adjacents) → write `docs/brainstorms/<slug>-<date>.md`. Do **not** skip for Light framing alone.
 
 ## Step 4.55 — Visual prototype server (optional)
 

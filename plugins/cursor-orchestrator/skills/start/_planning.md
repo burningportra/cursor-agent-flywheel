@@ -8,14 +8,18 @@
 
 ### 4.5a — Skip heuristic (fast-path)
 
-Skip Phase 0.5 entirely and jump to Step 5 when **either** of the following holds:
+Skip Phase 0.5 entirely and jump to Step 5 when **any** of the following holds:
 
 1. `flywheel_discover` returned a top-ranked idea with `confidence >= 0.8` (the agent is highly certain about framing — no pressure-test needed).
 2. The user's initial prompt captured in Step 0.preflight (`USER_INPUT`) is **>100 characters** AND reads as a detailed goal statement (multiple clauses specifying scope, users, or constraints — not just a one-word topic).
+3. **Grill-complete brainstorm already on disk** — `docs/brainstorms/<goal-slug>-*.md` (prefer `GRILL_BRAINSTORM_PATH`) contains **all three**: `## Framing synthesis`, plus either (`## Scope floor` **or** `## Smallest version`) **and** either (`## Ambition ceiling` **or** `## 10x version`). Normal exit from `skills/grill-with-docs` — re-asking floor/ceiling would double-interview.
+4. `FRAMING_MODE === "grill"` **and** `GRILL_STATUS === "approved"` even if the path check is racy — trust the skill completion marker and skip; still prefer reading the brainstorm for planner context.
 
-If EITHER condition holds, emit a single line to the transcript noting the skip reason (e.g. `"Phase 0.5 skipped: discover confidence 0.87 >= 0.8"` or `"Phase 0.5 skipped: initial prompt is 247 chars with detailed framing"`) and proceed directly to Step 5.
+If ANY condition holds, emit a single line to the transcript noting the skip reason (e.g. `"Phase 0.5 skipped: grill brainstorm docs/brainstorms/foo-2026-07-16.md has floor+ceiling+framing"`) and proceed directly to Step 5.
 
 Otherwise, run the dialogue below. **Do not skip silently** — an explicit skip notice is part of the audit trail.
+
+> **Do not skip** when `FRAMING_MODE === "light"` or `"skip"` or `"brainstorm"` unless condition 1/2 also holds — Light wants the three Qs; Full brainstorm is a design spec, not necessarily floor/ceiling.
 
 ### 4.5b — Three-question pressure-test dialogue
 

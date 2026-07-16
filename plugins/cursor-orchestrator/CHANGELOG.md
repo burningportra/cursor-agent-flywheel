@@ -1,5 +1,13 @@
 # Changelog
 
+## [3.22.1] - 2026-07-16
+
+### Added
+
+- **`skills/grill-with-docs`** — Cursor-native goal framing (AskQuestion interview, brainstorm + optional ADRs/glossary, `GRILL_*` handoff). Command: `/grill-with-docs`.
+- **Goal framing mode** in `_ceremony.md` / `_discover.md` — Light / Grill / Full brainstorm / Skip.
+- **Phase 0.5 skip** after grill brainstorms (`_planning.cursor.md`, `_planning.md` §4.5a).
+
 ## [Unreleased]
 
 _No plugin-only changes beyond monorepo root._

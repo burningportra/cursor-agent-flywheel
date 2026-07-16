@@ -23,9 +23,22 @@ If the prompt contains more than `/start` (goal, plan path, directive), capture 
 |-------|-----------|------------------|
 | Plan | `##` headers, `docs/plans/*.md` path | AskQuestion: Use as plan / Treat as goal / Discard |
 | Goal | ≤300 chars, no headers | AskQuestion: Yes full flywheel / Refine first / Plan only / Discard |
-| Ambiguous | long prose | `/brainstorming` then goal-shaped |
+| Ambiguous | long prose | **Goal framing mode** (Grill recommended) then goal-shaped |
 
 Hard rule: banner + explicit choice before acting on `USER_INPUT`.
+
+#### Goal framing mode (shared by Set a goal / Refine first / Ambiguous)
+
+When a goal needs refinement **before** `flywheel_select`, present **AskQuestion**:
+
+| id | label | path |
+|----|-------|------|
+| light | Light (Phase 0.5 only) | `enrichedGoal = RAW_GOAL` → select → run Step 4.5 |
+| grill | Grill with docs (Recommended) | `flywheel_get_skill({ name: "agent-flywheel:grill-with-docs" })` → on `GRILL_STATUS=approved` use `GRILL_ENRICHED_GOAL`; abort returns to menu |
+| brainstorm | Full brainstorm | `/brainstorming` design dialogue → select |
+| skip | Skip framing | concrete goals only → select with raw text |
+
+**Defaults:** Ambiguous / Refine first → grill Recommended. Concrete ≤300 chars → skip this menu. **Anti-double-interview:** after grill approves, do not re-enter framing; Phase 0.5 auto-skips when brainstorm has floor+ceiling+framing (`_planning*.md` §4.5a).
 
 ### 0a. Detect version
 
@@ -172,7 +185,7 @@ Glossary: see `rules/context-budget.mdc` (bead, plan, flywheel, MCP).
 | **Work on beads** | Sub-menu below — bootstrap `selectedGoal` first. |
 | **New goal** | Delete checkpoint → `start_discover` Step 2. |
 | **Scan & discover** | `start_discover` Step 2. |
-| **Set a goal** | `/brainstorming` if needed → `flywheel_select` → `_planning.cursor.md` or `_planning.md` → Step 5 gates. |
+| **Set a goal** | If concrete ≤300 chars, `flywheel_select` directly; else **Goal framing mode** (Light / Grill / Full brainstorm / Skip). On grill abort, stay on menu. Else `flywheel_select` with enriched goal → `_planning.cursor.md` or `_planning.md` (Phase 0.5 may skip after grill) → Step 5 gates. |
 | **Pick up existing plan** | Valid `.md` path → `flywheel_select` + `flywheel_plan({ planFile, source: "picked-up-existing-plan" })` → **Step 5.45** (not 5.5). Skip profile/discover. |
 | **Research repo** | AskQuestion URL + mode → `/flywheel-research`. |
 | **Quick fix** | `/flywheel-fix` |

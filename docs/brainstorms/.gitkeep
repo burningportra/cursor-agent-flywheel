@@ -1,0 +1,8 @@
+# Brainstorms
+
+Pre-plan framing artifacts:
+
+1. **Phase 0.5** — three-question pressure-test (`skills/start/_planning*.md`).
+2. **`skills/grill-with-docs`** — deeper interview + optional ADRs/glossary (`**Source:** grill-with-docs`).
+
+Named `<goal-slug>-<YYYY-MM-DD>.md`. Phase 0.5 skips when a grill brainstorm already has framing + floor + ceiling.
