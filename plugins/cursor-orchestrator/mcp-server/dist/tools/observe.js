@@ -259,7 +259,7 @@ async function probeBeads(ctx) {
     };
     let listResult;
     try {
-        listResult = await ctx.exec('br', ['list', '--json', '--deferred'], { timeout: PROBE_TIMEOUT_MS, cwd: ctx.cwd, signal: ctx.signal });
+        listResult = await ctx.exec('br', ['list', '--json', '--all', '--limit', '0', '--deferred'], { timeout: PROBE_TIMEOUT_MS, cwd: ctx.cwd, signal: ctx.signal });
     }
     catch (err) {
         return {
@@ -298,6 +298,24 @@ async function probeBeads(ctx) {
         if (status === 'open' || status === 'in_progress' || status === 'closed' || status === 'deferred') {
             counts[status] += 1;
         }
+    }
+    // br list defaults to limit 50 on older orchestrator builds; br stats is authoritative.
+    try {
+        const statsResult = await ctx.exec('br', ['stats', '--json'], { timeout: PROBE_TIMEOUT_MS, cwd: ctx.cwd, signal: ctx.signal });
+        if (statsResult.code === 0 && statsResult.stdout.trim()) {
+            const statsJson = JSON.parse(statsResult.stdout);
+            const s = statsJson.summary;
+            if (s && typeof s.total_issues === 'number' && s.total_issues > counts.total) {
+                counts.total = s.total_issues;
+                counts.open = s.open_issues ?? counts.open;
+                counts.in_progress = s.in_progress_issues ?? counts.in_progress;
+                counts.closed = s.closed_issues ?? counts.closed;
+                counts.deferred = s.deferred_issues ?? counts.deferred;
+            }
+        }
+    }
+    catch {
+        // stats fallback is optional — list-derived counts remain.
     }
     // "ready" beads: open + no unmet dependencies. We approximate via `br ready`
     // — falling back to "all open" if the subcommand is unavailable so we never

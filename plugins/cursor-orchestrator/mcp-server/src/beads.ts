@@ -317,6 +317,8 @@ export async function readBeads(
     "list",
     "--json",
     "--all", // default list excludes closed; orchestrator needs full graph for review/recovery
+    "--limit",
+    "0", // br default is 50; epic graphs exceed that and break wave review lookup
     "--fields", "id,title,description,status,priority,issue_type,labels,estimate,parent,created_at,updated_at,closed_at",
     "--deferred", // include deferred beads
   ], { timeout: 10000, cwd });

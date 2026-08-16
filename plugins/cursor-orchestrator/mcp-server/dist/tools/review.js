@@ -10,7 +10,7 @@ import { markBatchReviewDispatched } from '../commit-batch.js';
 import { prepareBatchReviewDispatch } from '../batch-review-dispatch.js';
 import { resolveThermoNuclearModel } from '../flywheel-config.js';
 import { collectReviewVerdict } from '../review-verdict-collect.js';
-import { readBeads } from '../beads.js';
+import { getBeadById, readBeads } from '../beads.js';
 import { persistCoordinatorEpochBump } from '../coordinator-epoch.js';
 const log = createLogger('review');
 // ─── Review-mode matrix (bead agent-flywheel-plugin-f0j) ──────────────
@@ -180,8 +180,14 @@ export async function acceptWaveBeadsAtReview(ctx, beadIds) {
     const allBeads = await readBeads(exec, cwd);
     const beadMap = new Map(allBeads.map((b) => [b.id, b]));
     const missing = beadIds.filter((id) => !beadMap.has(id));
-    if (missing.length > 0) {
-        return errorResult(state.phase, 'not_found', `Bead(s) not found while accepting wave review: ${missing.join(', ')}.`, { missing, beadIds });
+    for (const id of missing) {
+        const bead = await getBeadById(exec, cwd, id);
+        if (bead)
+            beadMap.set(id, bead);
+    }
+    const stillMissing = beadIds.filter((id) => !beadMap.has(id));
+    if (stillMissing.length > 0) {
+        return errorResult(state.phase, 'not_found', `Bead(s) not found while accepting wave review: ${stillMissing.join(', ')}.`, { missing: stillMissing, beadIds });
     }
     await persistCoordinatorEpochBump({ state, saveState });
     let lastBeadId = beadIds[beadIds.length - 1];

@@ -2,7 +2,14 @@
   "mcpServers": {
     "agent-mail": {
       "type": "http",
+<<<<<<< Updated upstream
       "url": "http://127.0.0.1:8765/mcp"
+=======
+      "url": "http://127.0.0.1:8765/mcp",
+      "headers": {
+        "Authorization": "Bearer d9be281674c606362855d8fa51b18b69ae3f9881730fc8bad056e9b9d6ce9a9a"
+      }
+>>>>>>> Stashed changes
     },
     "orchestrator": {
       "type": "stdio",

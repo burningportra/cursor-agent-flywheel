@@ -20,7 +20,7 @@ import { prepareBatchReviewDispatch } from '../batch-review-dispatch.js';
 import { resolveThermoNuclearModel } from '../flywheel-config.js';
 import { collectReviewVerdict } from '../review-verdict-collect.js';
 import { readMemory } from '../memory.js';
-import { readBeads } from '../beads.js';
+import { getBeadById, readBeads } from '../beads.js';
 import { persistCoordinatorEpochBump } from '../coordinator-epoch.js';
 
 const log = createLogger('review');
@@ -223,12 +223,17 @@ export async function acceptWaveBeadsAtReview(
   const allBeads = await readBeads(exec, cwd);
   const beadMap = new Map(allBeads.map((b) => [b.id, b]));
   const missing = beadIds.filter((id) => !beadMap.has(id));
-  if (missing.length > 0) {
+  for (const id of missing) {
+    const bead = await getBeadById(exec, cwd, id);
+    if (bead) beadMap.set(id, bead);
+  }
+  const stillMissing = beadIds.filter((id) => !beadMap.has(id));
+  if (stillMissing.length > 0) {
     return errorResult(
       state.phase,
       'not_found',
-      `Bead(s) not found while accepting wave review: ${missing.join(', ')}.`,
-      { missing, beadIds },
+      `Bead(s) not found while accepting wave review: ${stillMissing.join(', ')}.`,
+      { missing: stillMissing, beadIds },
     );
   }
 
